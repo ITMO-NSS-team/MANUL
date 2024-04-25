@@ -1,27 +1,14 @@
-import ast
 import numpy as np
-import time
-
+from SALib import ProblemSpec
 import torch
-from progress.bar import Bar
-from numba.typed import Dict
-import numba.types as tp
-from numba import njit, float64, int64, int32
-from datetime import datetime
-from copy import deepcopy
-from functools import singledispatchmethod
+from matplotlib import pyplot as plt
 
-import topo as tp
-from sklearn.metrics.pairwise import euclidean_distances
 from sklearn.metrics import roc_curve
-import plotly.graph_objects as go
 import torch.nn as nn
-from torch import randperm, tensor, mean, sqrt
+from torch import randperm, tensor
 from torch.optim import Adam
 from torch import float64 as fl64
-from sklearn.metrics import f1_score, roc_auc_score, mean_squared_error
-from scipy.optimize import minimize
-from sklearn.decomposition import PCA
+from sklearn.metrics import roc_auc_score, mean_squared_error
 
 from evolution.IndividStructures import DataStructureGraph
 
@@ -112,23 +99,87 @@ class ModelNN:
             last_loss = current_loss
         return last_loss, no_changes_counter
 
-    def train(self, graph: DataStructureGraph = None):
+    def _get_scaled_loss(self, loss_list):
         """
+        Function for dynamical scaling loss on previous values of loss
+        :param loss_list: list with raw values to scale
+        :return scaled last loss value
+        """
+        if loss_list.shape[0] == 1:
+            return 1
+        loss_scaled = (loss_list - loss_list.min()) / (loss_list.max() - loss_list.min())
+        return loss_scaled[-1]
+
+    def _get_adaptive_lambda(self, combines_loss, nn_loss, graph_loss):
+        """
+        :param combines_loss:  matrix m x n where m - epochs number, n - batch size with sum of nn and graph losses
+        :param nn_loss: matrix m x n where m - epochs number, n - batch size with graph losses
+        :param graph_loss: matrix m x n where m - epochs number, n - batch size with nn losses
+        :return: list [float, float] - list with coefficients to multiply with nn loss and graph loss
+        """
+        n_samples = 1  # can be changed to use more elements of lists
+        sampling_D = 2  # as combine 2 features
+
+        if n_samples * (sampling_D * 2 + 2) > len(combines_loss):
+            print('Epochs number is too small to calculate adaptive lambda')
+            return [1, 1]
+
+        combines_loss = np.array(combines_loss)
+        nn_loss = np.expand_dims(np.array(nn_loss), axis=1)
+        graph_loss = np.expand_dims(np.array(graph_loss), axis=1)
+
+        X_array = np.hstack((nn_loss, graph_loss))
+
+        bounds = [[-100, 100] for i in range(sampling_D)]
+        names = ['x{}'.format(i) for i in range(sampling_D)]
+
+        X_array = X_array[:n_samples * (X_array.shape[1] * 2 + 2)]
+        combines_loss = combines_loss[:n_samples * (X_array.shape[1] * 2 + 2)]
+
+        sp = ProblemSpec({'names': names, 'bounds': bounds})
+        sp.set_samples(X_array)
+        sp.set_results(combines_loss)
+        sp.analyze_sobol(calc_second_order=True)
+
+        ST = sp.analysis['ST']
+        total_disp = sum(ST)
+
+        nn_disp = sum(ST[:nn_loss.shape[1]])
+        graph_disp = sum(ST[nn_loss.shape[1]:])
+
+        lam_nn = total_disp / nn_disp
+        lam_graph = total_disp / graph_disp
+
+        return [lam_nn / (np.max([lam_nn, lam_graph])), lam_graph / (np.max([lam_nn, lam_graph]))]
+
+    def train(self, graph: DataStructureGraph = None, plot_convergence=False, lmds: list[float, float] = None,
+              weight_loss: bool = False, adaptive_lambda: bool = True):
+        """
+        :param adaptive_lambda: flag to calculate adaptive weights for combined loss on part of epochs
+        :param weight_loss: flag to use dynamical weighting (by scaling) of two parts of combined loss
+        :param lmds: lambdas value - weight coefficients for combined loss - [nn lmd, graph lmd]
         :param graph: graph for additional loss calculation
+        :param plot_convergence: flag for plotting of mean epoch loss value
         """
-        if graph is not None:
-            lmd = 1 / (self.batch_size ** 2)  # lambda as weight coefficient for custom graph loss
+        if lmds is None:
+            lmds = [1, 1]
 
         self.model.train()
 
         epoch = 0
+        lmds_epochs = None
         last_loss = None
         no_changes_epoch = 0
-        best_model = None
-        best_loss = np.inf
+        losses = []
+        graph_losses = []
+        nn_losses = []
+
         while epoch < self.num_epochs and no_changes_epoch <= self.stop_criteria_count:
             permutation = randperm(self.features.shape[0])
-            loss_list = []
+            loss_list = np.array([])
+            graph_loss_list = np.array([])
+            nn_loss_list = np.array([])
+
             for i in range(0, len(self.target), self.batch_size):
                 indices = permutation[i:i + self.batch_size]
                 batch_x, target_y = self.features[indices], self.target[indices]
@@ -137,33 +188,149 @@ class ModelNN:
                 self.optimizer.zero_grad()
                 output = self.model(batch_x)
                 loss = self.criterion(output, target_y.reshape_as(output))
+                nn_loss_list = np.append(nn_loss_list, loss.item())
 
                 if graph is not None:
                     add_loss = graph.loss_function(output.cpu().detach().numpy(), indices)
-                    loss += lmd * tensor(add_loss)
+                    graph_loss_list = np.append(graph_loss_list, add_loss)
+
+                    if adaptive_lambda:
+                        lmds_epochs = int(self.num_epochs * 0.1)
+                        if epoch < lmds_epochs:  # 10% of epochs used to find lambdas
+                            loss = lmds[0] * loss + lmds[1] * tensor(add_loss)
+                        if epoch > lmds_epochs:  # then lambdas are used as new constants
+                            lmds = self._get_adaptive_lambda(losses, graph_losses, nn_losses)
+                            print(f'Set lambdas nn_lmd = {lmds[0]}, graph_lmd = {lmds[1]}')
+                            adaptive_lambda = False
+
+                    if weight_loss and not adaptive_lambda:
+                        nn_loss = self._get_scaled_loss(nn_loss_list)
+                        add_loss = self._get_scaled_loss(graph_loss_list)
+                        loss = loss - (tensor(loss.item())) + tensor(nn_loss) + tensor(add_loss)
+                    if not weight_loss and not adaptive_lambda:
+                        loss = lmds[0] * loss + lmds[1] * tensor(add_loss)
+
+                loss_list = np.append(loss_list, loss.item())
+
                 if self.problem == 'class':
                     self._calc_threshold_classification_problem(target_y, output)
 
                 loss.backward()
                 self.optimizer.step()
-                loss_list.append(loss.item())
 
             loss_epoch_mean = np.mean(loss_list)
-            if loss_epoch_mean < best_loss:
-                best_model = self.model
-                best_loss = loss_epoch_mean
-                print('Upd best model')
-            print(f'Epoch: {epoch} / Loss = {np.round(loss_epoch_mean, 5)}')
+
+            print(f'Epoch: {epoch} / {self.num_epochs} - Loss = {np.round(loss_epoch_mean, 5)}')
+            losses.append(np.round(loss_epoch_mean, 5))
+            graph_losses.append(np.round(np.mean(graph_loss_list), 5))
+            nn_losses.append(np.round(np.mean(nn_loss_list), 5))
+
             if graph is not None:
-                last_loss, no_changes_epoch = self._check_stop_criteria_on_graph(last_loss, loss_epoch_mean, no_changes_epoch)
+                last_loss, no_changes_epoch = self._check_stop_criteria_on_graph(last_loss, loss_epoch_mean,
+                                                                                 no_changes_epoch)
 
             epoch += 1
-        self.model = best_model
         self.model.eval()
+        if plot_convergence:
+            if graph is None:
+                graph_losses = None
+                nn_losses = None
+            self._plot_convergence(losses, lmds_epochs, nn_losses, graph_losses)
+
+    def _plot_convergence(self, losses, lmds_epoch, nn_losses=None, graph_losses=None):
+        """
+        Function to plot model convergence on losses lists
+        :param losses: list of combined loss values
+        :param nn_losses: list of NN outputs loss values
+        :param graph_losses: list of graph loss values
+        :param lmds_epoch: number of epochs to mark them as lambda search
+        """
+        if graph_losses is None or nn_losses is None:
+            fig, axs = plt.subplots(1, 1, figsize=(5, 4))
+            axs = [axs]
+        else:
+            fig, axs = plt.subplots(1, 3, figsize=(12, 4))
+
+        # plot combines losses
+        axs[0].plot(np.arange(len(losses)), losses)
+        if lmds_epoch is not None:
+            z = np.polyfit(np.arange(len(losses[lmds_epoch:])), losses[lmds_epoch:], 1)
+            axs[0].axvline(lmds_epoch, c='green', linewidth=0.5)
+        else:
+            z = np.polyfit(np.arange(len(losses)), losses, 1)
+        p = np.poly1d(z)
+        axs[0].plot(np.arange(len(losses)), p(np.arange(len(losses))), "r--")
+        axs[0].set_title('Combined loss')
+
+        # plot graph losses
+        if graph_losses is not None:
+            axs[1].plot(np.arange(len(graph_losses)), graph_losses)
+            if lmds_epoch is not None:
+                z = np.polyfit(np.arange(len(graph_losses[lmds_epoch:])), graph_losses[lmds_epoch:], 1)
+                axs[1].axvline(lmds_epoch, c='green', linewidth=0.5)
+            else:
+                z = np.polyfit(np.arange(len(graph_losses)), graph_losses, 1)
+            p = np.poly1d(z)
+            axs[1].plot(np.arange(len(graph_losses)), p(np.arange(len(graph_losses))), "r--")
+            axs[1].set_title('Graph loss')
+
+        # plot nn losses
+        if nn_losses is not None:
+            axs[2].plot(np.arange(len(nn_losses)), nn_losses)
+            if lmds_epoch is not None:
+                z = np.polyfit(np.arange(len(nn_losses[lmds_epoch:])), nn_losses[lmds_epoch:], 1)
+                axs[2].axvline(lmds_epoch, c='green', linewidth=0.5)
+            else:
+                z = np.polyfit(np.arange(len(nn_losses)), nn_losses, 1)
+            p = np.poly1d(z)
+            axs[2].plot(np.arange(len(nn_losses)), p(np.arange(len(nn_losses))), "r--")
+            axs[2].set_title('NN loss')
+
+        for ax in axs:
+            ax.set(xlabel='Epoch', ylabel='Loss value')
+
+        fig.suptitle(f'Convergence plot\ntrain loss = {np.round(self.get_loss_on_train(), 5)}')
+        plt.tight_layout()
+        plt.show()
+
+
+    def _plot_convergence_(self, losses, lmds_epoch, name: str = None):
+        """
+        Function to plot model convergence on losses list
+        :param losses: list of values to plot
+        :param lmds_epoch: number of epochs to mark them as lambda search
+        :param name: string to add into title
+        """
+        plt.plot(np.arange(len(losses)), losses)
+        if lmds_epoch is not None:
+            z = np.polyfit(np.arange(len(losses[lmds_epoch:])), losses[lmds_epoch:], 1)
+            plt.axvline(lmds_epoch, c='green', linewidth=0.5)
+        else:
+            z = np.polyfit(np.arange(len(losses)), losses, 1)
+        p = np.poly1d(z)
+        plt.plot(np.arange(len(losses)), p(np.arange(len(losses))), "r--")
+        plt.title(f'Convergence plot\ntrain loss = {np.round(self.get_loss_on_train(), 5)}\n{name}')
+        plt.xlabel('Epoch')
+        plt.ylabel('Loss value')
+        plt.tight_layout()
+        plt.show()
 
     def get_loss_on_train(self):
         output = self.model(torch.tensor(self.features).to(self.device)).cpu().detach().numpy()[:, 0]
         target_y = self.target.astype(float)
+        if self.problem == 'class':
+            return_loss = roc_auc_score(target_y, output)
+            return return_loss
+        return_loss = mean_squared_error(target_y, output)
+        return return_loss
+
+    def predict(self, test_features):
+        output = self.model(torch.tensor(test_features).to(self.device)).cpu().detach().numpy()[:, 0]
+        return output
+
+    def get_loss_on_test(self, test_features, test_target):
+        output = self.model(torch.tensor(test_features).to(self.device)).cpu().detach().numpy()[:, 0]
+        target_y = test_target.astype(float)
         if self.problem == 'class':
             return_loss = roc_auc_score(target_y, output)
             return return_loss

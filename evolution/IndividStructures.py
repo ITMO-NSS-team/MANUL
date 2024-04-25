@@ -1,7 +1,6 @@
 import ast
 import os
-from typing import Callable
-
+import pickle
 import numpy as np
 import numba.types as tp
 from numba import njit
@@ -11,16 +10,11 @@ import topo as tp
 from sklearn.metrics.pairwise import euclidean_distances
 
 
-def get_basis(graph, source_data):
+def get_basis(graph, source_data: np.ndarray):
     """
     Method for reducing nodes
-         :param source_data: numpy.array - matrix n * m, where n - number of nodes, m - number of features.
-        Keeping values of nodes by fields.
-
-    Returns:
-    --------
-    basis : list
-        indexes of the nodes that we save in the graph
+    :param source_data: matrix n * m, where n - number of nodes, m - number of features. Keeping values of nodes by fields.
+    :return basis : list -  indexes of the nodes that we save in the graph
     """
     named_graph = [{'index': i, 'neighbours': [], 'stamp': False} for i in graph]
     for i in graph:
@@ -47,20 +41,19 @@ def get_basis(graph, source_data):
 
 class DataStructureGraph:
     def __init__(self, data: np.ndarray, n_neighbors: int = None, eps: float = None, graph_file: str = None,
-                 cash_folder: str = None, loss_function: Callable = None):
+                 cash_folder: str = None):
         """
         Class for initialization individ  for evolution as complex graph structure with graph properties
         :param data: features table for graph structure creation
         :param n_neighbors:  number of neighbors to save for node
         :param eps: epsilon distance between neighbors to decrease the closest
-        :param graph_file: str - path to file .txt with graph structure as list
+        :param graph_file: str - path to file .pkl with DataStructureGraph object
         :param cash_folder: str - path to save cash
-        :param loss_function: - function for calculating graph loss - takes f(x) and optional indices of batch
         """
         self.elitism = False  # TODO вынести в класс предок - индивида (исп-ся только в эволюции)
         self.selected = False  # TODO вынести в класс предок - индивида (исп-ся только в эволюции)
         self.fitness = None
-        self.source_data = data
+        self.source_data = data.astype(float)
         if cash_folder is None:
             self.cash_folder = f"info_log/{datetime.now().strftime('%Y_%m_%d-%I_%M_%S_%p')}"
         else:
@@ -80,18 +73,38 @@ class DataStructureGraph:
             self.n_neighbors = n_neighbors
 
         if graph_file is not None:
-            self._load_graph(graph_file)
+            self.load_cash_object(graph_file)
         else:
             self.find_edges(data, use_kernel=True)
+            #  индексы для разреживания графа
+            self.basis = get_basis(self.graph, data)
+            self.number_of_nodes = len(self.basis)
+            # обновление ребер для разреженного графа
+            self.find_edges(data[self.basis], use_kernel=False)
+            self.filter_graph(data[self.basis])
+            self.calc_fullness()
+            # сохраняем в кэш
+            self.save_cash_object('base_graph')
 
-        #  индексы для разреживания графа
-        self.basis = get_basis(self.graph, data)
-        self.number_of_nodes = len(self.basis)
-        # обновление ребер для разреженного графа
-        self.find_edges(data[self.basis], use_kernel=False)
-        self.filter_graph(data[self.basis])
-        self.save_end_graph("base")
-        self.calc_fullness()
+    def save_cash_object(self, name: str = None):
+        """
+        Function to save  self object as pickle file
+        :param name: string with name without .pkl to save in cash folder
+        """
+        if name is None:
+            name = 'graph_obj'
+        with open(f'{self.cash_folder}/{name}.pkl', 'wb') as outp:
+            pickle.dump(self.__dict__, outp, pickle.HIGHEST_PROTOCOL)
+            print(f'Graph object saved to {self.cash_folder}/{name}.pkl')
+
+    def load_cash_object(self, name):
+        """
+        Function to load self object from pickle file
+        :param name: name of file with graph object .pkl to load in cash folder
+        """
+        with open(f'{self.cash_folder}/{name}', 'rb') as inp:
+            tmp_dict = pickle.load(inp)
+            self.__dict__.update(tmp_dict)
 
     def loss_function(self, f_x: np.ndarray, indices=None):
         """
@@ -184,30 +197,20 @@ class DataStructureGraph:
         with open(f"{self.cash_folder}/graph_{name}.txt", "w") as fl:
             fl.write(str(res))
 
-    def add_edge(self, from_node, to_node):
+    def add_edge(self, from_node: int, to_node: int):
         """
         Method for adding new edges.
-
-        Args:
-        -----
-        from_node : int
-            start node of the edge
-        to_node : int
-            end node of the edge
+        :param from_node:  start node of the edge
+        :param to_node: end node of the edge
         """
         self.graph[from_node].append(to_node)
         self.number_of_edges += 1
 
-    def remove_edge(self, from_node, to_node):
+    def remove_edge(self, from_node: int, to_node: int):
         """
         Method for removing edges.
-
-        Args:
-        -----
-        from_node : int
-            start node of the edge
-        end_node : int
-            end node of the edge
+        :param from_node:  start node of the edge
+        :param to_node: end node of the edge
         """
         try:
             self.graph[from_node].remove(to_node)
@@ -215,15 +218,25 @@ class DataStructureGraph:
             self.graph[to_node].remove(from_node)
         self.number_of_edges -= 1
 
+    def twist_node(self, current_node: int):
+        """
+        Method for changing current node to another one from whole search space (source_data)
+        :param current_node:  index of node to replace
+        """
+        all_nodes_indeces = np.arange(self.source_data.shape[0])
+        available_nodes = np.delete(all_nodes_indeces, self.basis)
+        new_node = available_nodes[np.random.choice(np.arange(available_nodes.shape[0]), size=1)[0]]
+        self.basis[current_node] = new_node
+        # recalculate distance between nodes
+        euclid_dists = euclidean_distances(self.source_data[self.basis], self.source_data[self.basis])
+        matrix_connect = euclid_dists / np.max(euclid_dists)
+        self.matrix_connect = matrix_connect
+
     def get_start_node(self):
         """
         Method for searching node with maximum number of neighbours.
         The found node will be used as the starting point when filtering neighbors.
-
-        Returns:
-        -------
-        choose_node : int
-            index of the found node
+        :return  choose_index: int - index of the found node
         """
         choose_index = None
         for i, node in self.graph.items():
@@ -234,23 +247,18 @@ class DataStructureGraph:
                 choose_index = i
         return choose_index
 
-    def remove_edges(self, edges_list):
+    def remove_edges(self, edges_list: list):
         """
         Method for removing multiple edges from the list.
-
-        Args:
-        -----
-        edges_list : list
-            tuples with start and end nodes of edges.
+        :param edges_list : list - tuples with start and end nodes of edges.
         """
-        new_graph = self.graph
         for edge in edges_list:
-            if edge[0] not in new_graph[edge[1]] and edge[1] not in new_graph[edge[0]]:
+            if edge[0] not in self.graph[edge[1]] and edge[1] not in self.graph[edge[0]]:
                 continue
             try:
-                new_graph[edge[0]].remove(edge[1])
-            except Exception:
-                new_graph[edge[1]].remove(edge[0])
+                self.graph[edge[0]].remove(edge[1])
+            except Exception as e:
+                self.graph[edge[1]].remove(edge[0])
             self.number_of_edges -= 1
 
             if edge[0] in self.graph[edge[1]] or edge[1] in self.graph[edge[0]]:
@@ -258,37 +266,24 @@ class DataStructureGraph:
 
             if edge[0] in self.graph[edge[1]] or edge[1] in self.graph[edge[0]]:
                 print("ux")
-        self.graph = new_graph
 
     def replace_subgraph(self, node: int, new_edges: list):
         """
         Method for replace some part of graph.
-
-        Args:
-        -----
-        node : int
-            index of the node whose connections with neighbours will be changed
-        new_edges : list
-            index of new neighbours for the node
+        :param node: int - index of the node whose connections with neighbours will be changed
+        :param new_edges : list -  index of new neighbours for the node
         """
         self.number_of_edges -= len(self.graph[node])
         self.graph[node] = []
         for elem in new_edges:
             self.add_edge(node, elem)
 
-    def check_vn_part(self, source_data, node1, node2):
+    def check_vn_part(self, source_data: np.ndarray, node1: int, node2:int):
         """
-        Method for check visible neighbours in new edge in graph (added using crossover/evolution)
-
-        Args:
-        -----
-        source_data : numpy.array
-            matrix n * m, where n - number of nodes, m - number of features.
-            Keeping values of nodes by fields.
-        node1 : int
-            one of nodes in the new edge
-        node2 : int
-            one of nodes in the new edge
+        Method for check visible neighbours in new edge in graph added using crossover/evolution
+        :param source_data : matrix n * m, where n - number of nodes, m - number of features. Keeping values of nodes by fields.
+        :param node1 : one of nodes in the new edge
+        :param node2 : one of nodes in the new edge
         """
         general_neighbours = []
         del_list = []
@@ -330,15 +325,10 @@ class DataStructureGraph:
         self.fullness = (len(list(filter(lambda elem: elem == 0, self.laplassian.reshape(-1)))) / 2 * 100) // len(
             self.laplassian.reshape(-1))
 
-    def filter_graph(self, data):
+    def filter_graph(self, data: np.ndarray):
         """
         Method for filter the graph from unvisible neighbours.
-
-        Args:
-        -----
-        data : numpy.array
-            matrix n * m, where n - number of nodes, m - number of features.
-            Keeping values of nodes by fields.
+        :param data: matrix n * m, where n - number of nodes, m - number of features. Keeping values of nodes by fields.
         """
         start_node_index = self.get_start_node()
         delete_edges = get_indices_to_del(data, self.adjacency_matrix, self.matrix_connect, start_node_index)

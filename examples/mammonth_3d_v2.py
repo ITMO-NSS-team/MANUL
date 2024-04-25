@@ -65,48 +65,37 @@ def run_example():
     train_target = torch.from_numpy(train_target)
     test_target = torch.from_numpy(test_target)'''
 
-    base_individ = DataStructureGraph(train_features, n_neighbors=10,
-                                      eps=0.15)  # , graph_file='info_log/2024_04_09-01_50_09_PM/graph_base.txt')
+    base_individ = DataStructureGraph(data=train_features,
+                                      n_neighbors=10,
+                                      eps=0.15,
+                                      cash_folder='C:/Users/Julia/Documents/NSS_lab/fastnet/examples/info_log/2024_04_21-04_10_19_PM',
+                                      graph_file='base_graph')
 
     # считаем для простой нейронки без графа
     base_model = ModelNN(train_features[base_individ.basis], train_target[base_individ.basis],
                          num_epochs=50,
                          batch_size=300, problem='regres')
     base_model.train()
-    base_loss = base_model.get_loss_on_train()
+    base_train_loss = base_model.get_loss_on_train()
 
     # считаем для простой нейронки с базовым графом
     with_graph_model = ModelNN(train_features[base_individ.basis], train_target[base_individ.basis],
                          num_epochs=50,
                          batch_size=300, problem='regres')
     with_graph_model.train(base_individ)
-    with_graph_loss = with_graph_model.get_loss_on_train()
+    with_graph_train_loss = with_graph_model.get_loss_on_train()
 
     # считаем для кучи нейронок для каждого индивида в популяции с выбором лучшей модели
-    evo_operators_settings = {
-        'mutation': {
-            'type': 'simple',
-            'intensive': 30,
-            'increase_prob': 1
-        },
-        'crossover': {
-            'type': 'simple',
-            'intensive': 1,
-            'increase_prob': 0.3
-        },
-        'population': {
-            'size': 10
-        }
-    }
 
     with_evolution_model = ModelNN(train_features[base_individ.basis], train_target[base_individ.basis],
                          num_epochs=50,
                          batch_size=300, problem='regres')
 
     evolution = Evolution(base_individ=base_individ,
-                          iterations=3,
+                          iterations=50,
                           population_size=10,
                           model_to_optimize=with_evolution_model)
+    evolution.run()
 
 
 
