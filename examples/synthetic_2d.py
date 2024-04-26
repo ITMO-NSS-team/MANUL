@@ -49,6 +49,8 @@ base_individ = DataStructureGraph(data=train_features,
                                   cash_folder='C:/Users/Julia/Documents/NSS_lab/fastnet/examples/info_log/2d_sinthetic',
                                   graph_file='base_graph.pkl')
 
+base_individ.show_2d(train_colors, cmap_name='Blues', euclidean=False)
+
 positions = base_individ.source_data[base_individ.basis]
 
 g = nx.Graph()
@@ -96,7 +98,7 @@ operators_params = {
                               }
 
 evolution = Evolution(base_individ=base_individ,
-                      iterations=10,
+                      iterations=5,
                       population_size=10,
                       model_to_optimize=with_evolution_model,
                       evo_operators_params=operators_params
@@ -119,6 +121,7 @@ ev_hist = evolution.evolution_history
 
 # отрисовка лучшего графа
 graph = evolution.base_individ
+evolution.base_individ.show_2d(train_colors, cmap_name='Blues')
 positions = base_individ.source_data[graph.basis]
 g = nx.Graph()
 for n in list(graph.graph.keys()):

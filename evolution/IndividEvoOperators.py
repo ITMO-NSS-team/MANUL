@@ -1,4 +1,5 @@
 import math
+from copy import deepcopy
 
 import numpy as np
 
@@ -19,7 +20,9 @@ class IndividEvoOperators:
         if nodes_mutation_prob >= 1:
             raise Exception(
                 f'IndividEvoOperators.mutate nodes_mutation_prob={nodes_mutation_prob} should be from 0 to 1')
+        mutated_individs = []
         for individ in self.individs:
+            individ = deepcopy(individ)
             individ.elitism = False
             fullness_individ = individ.fullness
             num_nodes = individ.number_of_nodes
@@ -78,6 +81,8 @@ class IndividEvoOperators:
                                                   p=probability.astype(np.float64))[0]
                     edge = edges[edge_index]
                     individ.remove_edge(edge[0], edge[1])
+                mutated_individs.append(individ)
+            self.individs = mutated_individs
         return self.individs
 
     def crossover_individs(self):

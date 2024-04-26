@@ -71,20 +71,50 @@ class Evolution:
         evolution_history[0] = individ_parameters_dict
 
         for i in range(self.iterations):
+            print(f'Evolution run, iteration - {i}')
             pop_operators = PopulationEvoOperators(population=self.population)
             pop_operators.elitism(elits_num=self.evo_operators_params["elitism"].
                                   get('elits_num', None))
+
+            print([ind.fitness for ind in self.population.individs_pool])
+            print([ind.elitism for ind in self.population.individs_pool])
+            print([ind.selected for ind in self.population.individs_pool])
+
             pop_operators.roulette_wheel_selection(
                 tournament_size=self.evo_operators_params["roulette_wheel_selection"].
                 get('tournament_size', None),
                 winners_size=self.evo_operators_params["roulette_wheel_selection"].
                 get('winners_size', None))
+
+            print([ind.fitness for ind in self.population.individs_pool])
+            print([ind.elitism for ind in self.population.individs_pool])
+            print([ind.selected for ind in self.population.individs_pool])
+
             pop_operators.crossover_population(crossover_size_percent=self.evo_operators_params["crossover"].
                                                get('crossover_size_percent', None))
+
+            print([ind.fitness for ind in self.population.individs_pool])
+            print([ind.elitism for ind in self.population.individs_pool])
+            print([ind.selected for ind in self.population.individs_pool])
+
             pop_operators.mutate_population(mutation_prob=self.evo_operators_params["mutation"].
                                             get('mutation_prob', None))
+
+            print([ind.fitness for ind in self.population.individs_pool])
+            print([ind.elitism for ind in self.population.individs_pool])
+            print([ind.selected for ind in self.population.individs_pool])
+
             self.evaluate_fitness()
+
+            print([ind.fitness for ind in self.population.individs_pool])
+            print([ind.elitism for ind in self.population.individs_pool])
+            print([ind.selected for ind in self.population.individs_pool])
+
             pop_operators.fiter_population()
+
+            print([ind.fitness for ind in self.population.individs_pool])
+            print([ind.elitism for ind in self.population.individs_pool])
+            print([ind.selected for ind in self.population.individs_pool])
 
             individ_parameters_dict = {}
             for k, individ in enumerate(self.population.individs_pool):

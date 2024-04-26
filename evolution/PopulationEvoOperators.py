@@ -85,7 +85,6 @@ class PopulationEvoOperators:
             new_individ.fitness = None
         self.population.individs_pool.extend(mutated_individs)
 
-
     def fiter_population(self):
         elite = list(filter(lambda ind: ind.elitism, self.population.individs_pool))
         for individ in elite:

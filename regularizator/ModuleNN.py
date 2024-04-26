@@ -86,7 +86,10 @@ class ModelNN:
         else:
             self.threshold = np.mean([thresholds[ix], self.threshold])
 
-    def _check_stop_criteria_on_graph(self, last_loss: float, current_loss: float, no_changes_counter, tolerance=0.01):
+    def _check_stop_criteria_on_graph(self, last_loss: float,
+                                      current_loss: float,
+                                      no_changes_counter: int,
+                                      tolerance: float = 0.0001):
         """
         Function to check if loss function changes are significant
         """
@@ -94,8 +97,8 @@ class ModelNN:
             last_loss = current_loss
         else:
             if abs(current_loss - last_loss) <= tolerance:
-                print(f'Stop criteria {no_changes_counter} / {self.stop_criteria_count}')
                 no_changes_counter += 1
+                print(f'Stop criteria {no_changes_counter} / {self.stop_criteria_count}')
             last_loss = current_loss
         return last_loss, no_changes_counter
 
