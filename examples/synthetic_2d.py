@@ -117,6 +117,26 @@ plt.show()
 evolution.plot_evolution_fitnesses()
 ev_hist = evolution.evolution_history
 
+# отрисовка лучшего графа
+graph = evolution.base_individ
+positions = base_individ.source_data[graph.basis]
+g = nx.Graph()
+for n in list(graph.graph.keys()):
+    g.add_node(n)
+for n in list(graph.graph.keys()):
+    for e in graph.graph[n]:
+        g.add_edge(n, e)
+labels = {}
+for k in range(g.number_of_nodes()):
+    labels[k] = graph.basis[k]
+
+plt.imshow(colors_image)
+plt.colorbar()
+plt.scatter(train_features[:, 0], train_features[:, 1], c='blue')
+plt.title(f'Final topology\nFitness = {graph.fitness}')
+nx.draw(g, pos=positions, labels=labels, node_color='green')
+plt.show()
+
 # специфичное для двумерных данных
 for generation_num in ev_hist.keys():
     for graph_num in list(ev_hist[generation_num].keys()):
