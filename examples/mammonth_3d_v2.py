@@ -48,10 +48,16 @@ def run_example():
     feature, target = form_dataset()
     train_features, test_features = split_dataset(feature)
     train_target, test_target = split_dataset(target)
+    '''train_features = torch.from_numpy(train_features)
+    test_features = torch.from_numpy(test_features)
+    train_target = torch.from_numpy(train_target)
+    test_target = torch.from_numpy(test_target)'''
 
     base_individ = DataStructureGraph(data=train_features,
-                                      cash_folder='C:/Users/Julia/Documents/NSS_lab/fastnet/examples/info_log/mammonth_test',
-                                      )
+                                      n_neighbors=10,
+                                      eps=0.15,
+                                      cash_folder='C:/Users/Julia/Documents/NSS_lab/fastnet/examples/info_log/2024_04_26-09_16_29_AM',
+                                      graph_file='base_graph.pkl')
 
 
     base_individ.show_3d(labels=train_target, title='Before evolution')
@@ -79,8 +85,8 @@ def run_example():
                                    batch_size=300, problem='regres')
 
     evolution = Evolution(base_individ=base_individ,
-                          iterations=20,
-                          population_size=7,
+                          iterations=10,
+                          population_size=5,
                           model_to_optimize=with_evolution_model)
     evolution.run()
     evolution.plot_evolution_fitnesses()
