@@ -1,3 +1,4 @@
+import os
 from datetime import datetime
 from typing import Callable
 from tqdm import tqdm
@@ -7,24 +8,28 @@ from SALib import ProblemSpec
 import torch
 from matplotlib import pyplot as plt
 
-from sklearn.metrics import roc_curve, f1_score
 import torch.nn as nn
 from torch import randperm, tensor
 from torch.optim import Adam
 from torch import float64 as fl64
-from sklearn.metrics import roc_auc_score, mean_squared_error
 
 from evolution.IndividStructures import DataStructureGraph
 
 import warnings
+
+from regularizator.models_presets import nn_presets, criterion_presets, metrics_presets
+
 warnings.filterwarnings('ignore', module='SALib')  # pandas deprecation warning
 warnings.filterwarnings('ignore', module='numpy')  # empty slice mean
+
 
 class ModelNN:
     def __init__(self, train_feature: np.ndarray,
                  train_target: np.ndarray,
-                 num_epochs: int,
-                 problem: str,
+                 problem: str = None,
+                 model_structure: nn.Sequential = None,
+                 model_weights: str = None,
+                 num_epochs: int = 100,
                  batch_size: int = 300,
                  stop_criteria_count: int = 10,
                  criterion=None,
@@ -46,19 +51,31 @@ class ModelNN:
         :param cash_folder: string with cash folder to save convergence plots (if empty plots doesn't save)
         :param model_name: string with model name to save on plot
         """
+        self.model_name = model_name
+        if self.model_name is None:
+            self.model_name = f"{datetime.now().strftime('%Y_%m_%d-%I_%M_%S_%p')}_model"
+
+        self.trained_loss_values = {'model_loss': None,
+                                    'graph_loss': None,
+                                    'combined_loss': None}
+
         self.device = self.init_device()
         self.features = train_feature.astype(float)
         self.target = train_target
+        self.batch_size = batch_size
         self.num_epochs = num_epochs
         self.batch_size = batch_size
         self.problem = problem
 
-        self.model = self._init_baseline_model(problem).to(self.device)
-        self.optimizer, self.criterion = self._init_training_settings(criterion, optimizer)
-        self.target_metric = self._init_target_metric(target_metric)
+        self.init_model(model_structure, model_weights)
 
-        self.threshold = None  # parameter for classification problem
+        self._init_training_settings(criterion, optimizer)
+        self._init_target_metric(target_metric)
+
         self.stop_criteria_count = stop_criteria_count
+        if cash_folder is not None:
+            if not os.path.exists(cash_folder):
+                os.mkdir(cash_folder)
         self.cash_folder = cash_folder
         self.model_name = model_name
 
@@ -74,84 +91,73 @@ class ModelNN:
         return device
 
     def _init_target_metric(self, target_metric: [Callable, None]):
-        if target_metric is None:
-            if self.problem == 'regres':
-                return 'mean_squared_error'
-            if self.problem == 'binary_class':
-                return 'roc_auc_score'
-            if self.problem == 'multiclass':
-                return 'f1_score'
-        else:
-            return target_metric
+        self.target_metric = target_metric
+        if self.target_metric is None:
+            if self.problem is None:
+                raise Exception('Use callable as metric function in "target_metric" or specify "problem" to use model '
+                                'preset')
+            else:
+                self.target_metric = metrics_presets(self.problem)
 
-    def _init_baseline_model(self, problem):
+    def init_model(self, model_structure: [nn.Sequential, None], model_weights: [str, None]):
+        """
+        Function to load custom model and its weights if exist
+        :param model_structure: sequence with model structure
+        :param model_weights: path to .pt file with model weights
+        """
+        if model_structure is not None:
+            self.model = model_structure
+            if model_weights is not None:
+                self.model.load_state_dict(torch.load(model_weights))
+                self.model.eval()
+                print('Model weights loaded')
+        else:
+            if self.problem is None:
+                raise Exception('Use custom model structure in "model_structure" or specify "problem" to use model '
+                                'preset')
+            else:
+                self._init_baseline_model()
+        self.model = self.model.to(self.device)
+
+    def _init_baseline_model(self):
         """
         Function for initialization network model structure based on problem
         """
-        if problem not in ['regres', 'binary_class', 'multiclass']:
-            raise Exception(f'No base model for problem - {problem} implemented, '
+        if self.problem not in ['regres', 'binary_class', 'multiclass']:
+            raise Exception(f'No base model for problem - {self.problem} implemented, '
                             f'available problems: "regres", "binary_class", "multiclass" ')
         input_dim = self.features.shape[-1]
-        if problem == 'regres':
-            sequence = [nn.Linear(input_dim, 512, dtype=fl64),
-                        nn.ReLU(),
-                        nn.Linear(512, 256, dtype=fl64),
-                        nn.ReLU(),
-                        nn.Linear(256, 256, dtype=fl64),
-                        nn.ReLU(),
-                        nn.Linear(256, 64, dtype=fl64),
-                        nn.ReLU(),
-                        nn.Linear(64, 1, dtype=fl64)]
-        if problem == 'binary_class':
-            sequence = [nn.Linear(input_dim, 512, dtype=fl64),
-                        nn.ReLU(),
-                        nn.Linear(512, 256, dtype=fl64),
-                        nn.ReLU(),
-                        nn.Linear(256, 256, dtype=fl64),
-                        nn.ReLU(),
-                        nn.Linear(256, 64, dtype=fl64),
-                        nn.ReLU(),
-                        nn.Linear(64, 1, dtype=fl64),
-                        nn.Sigmoid()]
-        if problem == 'multiclass':
-            sequence = [nn.Linear(input_dim, 512, dtype=fl64),
-                        nn.ReLU(),
-                        nn.Linear(512, 128, dtype=fl64),
-                        nn.ReLU(),
-                        nn.Dropout(p=0.25),
-                        nn.Linear(128, 10, dtype=fl64),
-                        nn.Softmax(dim=1)]
+        self.model = nn_presets(self.problem, input_dim).to(self.device)
 
-        model = nn.Sequential(*sequence)
-        return model
+    def save_weights(self, path: str = None):
+        """
+        Function for saving model weights
+        """
+        if path is not None:
+            torch.save(self.model.state_dict(), path)
+        elif self.cash_folder is not None:
+            torch.save(self.model.state_dict(), f'{self.cash_folder}/{self.model_name}.pt')
+        else:
+            torch.save(self.model.state_dict(), f'{self.model_name}.pt')
 
     def _init_training_settings(self, criterion, optimizer):
         """
         Function for setting optimizer and criterion for optimization network based on problem
         """
-        if self.problem == 'binary_class' and criterion is None:
-            criterion = nn.BCELoss()
-        if self.problem == 'multiclass' and criterion is None:
-            criterion = nn.CrossEntropyLoss()
-        if self.problem == 'regres' and criterion is None:
-            criterion = nn.L1Loss()
-        if optimizer is None:
-            optimizer = Adam(self.model.parameters(), lr=1e-3, eps=1e-4)
-        return optimizer, criterion
+        self.criterion = criterion
+        if self.criterion is None:
+            if self.problem is None:
+                raise Exception('Use criterion for NN model in "criterion" or specify "problem" to use model preset')
+            else:
+                self.criterion = criterion_presets(self.problem)
+        self.optimizer = optimizer
+        if self.optimizer is None:
+            self.optimizer = Adam(self.model.parameters(), lr=1e-3, eps=1e-4)
 
-    def _calc_threshold_classification_problem(self, target, predicted):
-        fpr, tpr, thresholds = roc_curve(target.detach().cpu().numpy(), predicted.detach().cpu().numpy().reshape(-1))
-        gmeans = np.sqrt(tpr * (1 - fpr))
-        ix = np.argmax(gmeans)
-        if not self.threshold:
-            self.threshold = thresholds[ix]
-        else:
-            self.threshold = np.mean([thresholds[ix], self.threshold])
-
-    def _check_stop_criteria_on_graph(self, last_loss: float,
-                                      current_loss: float,
-                                      no_changes_counter: int,
-                                      tolerance: float = 0.0001):
+    def _check_stop_criteria(self, last_loss: float,
+                             current_loss: float,
+                             no_changes_counter: int,
+                             tolerance: float = 0.0001):
         """
         Function to check if loss function changes are significant
         """
@@ -240,14 +246,19 @@ class ModelNN:
               plot_convergence=False,
               lmds: list[float, float] = None,
               weight_loss: bool = False,
-              adaptive_lambda: bool = True):
+              adaptive_lambda: bool = True,
+              num_epochs: int = None):
         """
+        :param num_epochs: number of epochs for model training
         :param adaptive_lambda: flag to calculate adaptive weights for combined loss on part of epochs
         :param weight_loss: flag to use dynamical weighting (by scaling) of two parts of combined loss
         :param lmds: lambdas value - weight coefficients for combined loss - [nn lmd, graph lmd]
         :param graph: graph for additional loss calculation
         :param plot_convergence: flag for plotting of mean epoch loss value
         """
+        if num_epochs is not None:
+            self.num_epochs = num_epochs
+
         if lmds is None:
             lmds = [1, 1]
 
@@ -304,9 +315,6 @@ class ModelNN:
 
                 loss_list = np.append(loss_list, loss.item())
 
-                if self.problem == 'binary_class':
-                    self._calc_threshold_classification_problem(target_y, output)
-
                 loss.backward()
                 self.optimizer.step()
 
@@ -319,12 +327,15 @@ class ModelNN:
             graph_losses.append(np.round(np.mean(graph_loss_list), 5))
             nn_losses.append(np.round(np.mean(nn_loss_list), 5))
 
-            if graph is not None:
-                last_loss, no_changes_epoch = self._check_stop_criteria_on_graph(last_loss,
-                                                                                 loss_epoch_mean,
-                                                                                 no_changes_epoch)
+            last_loss, no_changes_epoch = self._check_stop_criteria(last_loss,
+                                                                    loss_epoch_mean,
+                                                                    no_changes_epoch)
             epoch += 1
         self.model.eval()
+        self.trained_loss_values['combined_loss'] = losses[-1]
+        if graph is not None:
+            self.trained_loss_values['graph_loss'] = graph_losses[-1]
+            self.trained_loss_values['model_loss'] = nn_losses[-1]
         if plot_convergence:
             if graph is None:
                 graph_losses = None
@@ -354,7 +365,7 @@ class ModelNN:
             z = np.polyfit(np.arange(len(losses)), losses, 1)
         p = np.poly1d(z)
         axs[0].plot(np.arange(len(losses)), p(np.arange(len(losses))), "r--")
-        axs[0].set_title('Combined loss')
+        axs[0].set_title(f'Combined loss = {np.round(self.trained_loss_values["combined_loss"], 5)}')
 
         # plot graph losses
         if graph_losses is not None:
@@ -366,7 +377,7 @@ class ModelNN:
                 z = np.polyfit(np.arange(len(graph_losses)), graph_losses, 1)
             p = np.poly1d(z)
             axs[1].plot(np.arange(len(graph_losses)), p(np.arange(len(graph_losses))), "r--")
-            axs[1].set_title('Graph loss')
+            axs[1].set_title(f'Graph loss = {np.round(self.trained_loss_values["graph_loss"], 5)}')
 
         # plot nn losses
         if nn_losses is not None:
@@ -378,68 +389,75 @@ class ModelNN:
                 z = np.polyfit(np.arange(len(nn_losses)), nn_losses, 1)
             p = np.poly1d(z)
             axs[2].plot(np.arange(len(nn_losses)), p(np.arange(len(nn_losses))), "r--")
-            axs[2].set_title('NN loss')
+            axs[2].set_title(f'NN loss = {np.round(self.trained_loss_values["model_loss"], 5)}')
 
         for ax in axs:
             ax.set(xlabel='Epoch', ylabel='Loss value')
 
-        fig.suptitle(f'Convergence plot\ntrain loss = {np.round(self.get_loss_on_train(), 5)}')
+        fig.suptitle(f'Convergence plot')
         plt.tight_layout()
         if self.cash_folder is not None:
-            if self.model_name is None:
-                self.model_name = f"{datetime.now().strftime('%Y_%m_%d-%I_%M_%S_%p')}_model"
             plt.savefig(f'{self.cash_folder}/{self.model_name}_conv_plot.png')
             plt.close()
         plt.show()
 
-    def get_metric(self, true: np.ndarray, predicted: np.ndarray):
+    def _get_metric(self, true: np.ndarray, predicted: np.ndarray):
         """
         Function to calculate metric value for target and prediction
         """
-        if self.target_metric == 'mean_squared_error':
-            return mean_squared_error(true, predicted)
-        if self.target_metric == 'roc_auc_score':
-            return roc_auc_score(true, predicted)
-        if self.target_metric == 'f1_score':
-            return f1_score(true, predicted, average='weighted')
+        if isinstance(self.target_metric, dict):
+            # if metric from preset
+            metric_function = self.target_metric['def']
+            params = self.target_metric['params']
+            value = metric_function(true, predicted, **params)
         else:
-            return self.target_metric(true, predicted)
+            # if metric is custom callable
+            value = self.target_metric(true, predicted)
+        return value
 
-    def get_loss_on_train(self):
+    def get_metric_on_train(self):
         output = self.model(torch.tensor(self.features).to(self.device))
+        target_y = self.target
         if self.problem == 'multiclass':
             output = output.cpu().detach().numpy()
-            max_possible_labels = np.argmax(output, axis=1)
-            output = max_possible_labels
+            output = np.argmax(output, axis=1)
             target_y = self.target.astype(int)
         if self.problem == 'binary_class':
             output = output.cpu().detach().numpy()[:, 0]
+            output[output > 0.5] = 1
+            output[output <= 0.5] = 0
             target_y = self.target.astype(int)
-            output = np.where(output > self.threshold, 1, 0)
         if self.problem == 'regres':
             output = output.cpu().detach().numpy()[:, 0]
             target_y = self.target.astype(float)
-        return_loss = self.get_metric(target_y, output)
+        return_loss = self._get_metric(target_y, output)
         return return_loss
 
-    def predict(self, test_features):
-        output = self.model(torch.tensor(test_features).to(self.device)).cpu().detach().numpy()[:, 0]
-        return output
-
-    def get_loss_on_test(self, test_features, test_target):
+    def get_metric_on_test(self, test_features, test_target):
         test_features = test_features.astype(float)
+        target_y = test_target
         output = self.model(torch.tensor(test_features).to(self.device))
         if self.problem == 'multiclass':
             output = output.cpu().detach().numpy()
-            max_possible_labels = np.argmax(output, axis=1)
-            output = max_possible_labels
+            output = np.argmax(output, axis=1)
             target_y = test_target.astype(int)
         if self.problem == 'binary_class':
             output = output.cpu().detach().numpy()[:, 0]
-            target_y = test_target.astype(int)
-            output = np.where(output > self.threshold, 1, 0)
+            output[output > 0.5] = 1
+            output[output <= 0.5] = 0
+            target_y = self.target.astype(int)
         if self.problem == 'regres':
             output = output.cpu().detach().numpy()[:, 0]
             target_y = test_target.astype(float)
-        return_loss = self.get_metric(target_y, output)
+        return_loss = self._get_metric(target_y, output)
         return return_loss
+
+    def predict(self, test_features):
+        output = self.model(torch.tensor(test_features).to(self.device)).cpu().detach().numpy()
+        if self.problem == 'multiclass':
+            output = np.argmax(output, axis=1)
+        if self.problem == 'binary_class':
+            output = output[:, 0]
+            output[output > 0.5] = 1
+            output[output <= 0.5] = 0
+        return output

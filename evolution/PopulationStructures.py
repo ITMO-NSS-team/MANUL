@@ -48,11 +48,14 @@ class Population:
         for individ in self.individs_pool:
             if individ.fitness is None:
                 individ_model = deepcopy(base_model)
-                individ_model.train(individ, plot_convergence=False)
-                fitness = individ_model.get_loss_on_train()
-                if individ_model.problem == 'regres':
-                    # better fitness function for individ with less model loss function value on train
-                    fitness = 1/fitness
+                #individ_model.train(individ, plot_convergence=False)
+                individ_model.train(individ)
+                #fitness = individ_model.get_metric_on_train()
+                # if individ_model.problem == 'regres':
+                # better fitness function for individ with less model loss function value on train
+                # fitness = 1/fitness
+                fitness = individ_model.trained_loss_values['combined_loss']
+                fitness = 1 / fitness
                 individ.fitness = fitness
         return self
 

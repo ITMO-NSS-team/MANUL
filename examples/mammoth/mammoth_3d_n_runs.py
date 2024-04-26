@@ -70,8 +70,8 @@ def plot_mammoth(with_weights_path, no_weights_path, save_path):
     weight_df.boxplot(showfliers=False, ax=ax[1])
     no_weight_test_df.boxplot(showfliers=False, ax=ax[0])
 
-    ax[0].set_ylim(0, 0.025)
-    ax[1].set_ylim(0, 0.025)
+    ax[0].set_ylim(0, 0.008)
+    ax[1].set_ylim(0, 0.008)
     ax[0].set_title('With geometry mutation')
     ax[1].set_title('Without geometry mutation')
     ax[0].set_ylabel('Mean absolute error')
@@ -81,15 +81,14 @@ def plot_mammoth(with_weights_path, no_weights_path, save_path):
     plt.show()
 
 
-def run_example(n_runs):
-    mut = False
-    pop_size = 10
-    iterations = 30
+def run_example(n_runs, mut):
+    pop_size = 5
+    iterations = 50
     if mut:
         nam = ''
     else:
         nam = 'noweightmut'
-    f_folder = f'cash_mammoth_n_runs/{nam}_{iterations}_{pop_size}'
+    f_folder = f'mammoth_n_runs_results/{nam}_{iterations}_{pop_size}'
 
     feature, target = form_dataset()
     train_features, test_features = split_dataset(feature)
@@ -116,16 +115,16 @@ def run_example(n_runs):
                              batch_size=300,
                              problem='regres')
         base_model.train()
-        base_train_loss = base_model.get_loss_on_train()
-        base_test_loss = base_model.get_loss_on_test(test_features, test_target)
+        base_train_loss = base_model.get_metric_on_train()
+        base_test_loss = base_model.get_metric_on_test(test_features, test_target)
 
         with_graph_model = ModelNN(train_features[base_individ.basis], train_target[base_individ.basis],
                                    num_epochs=50,
                                    batch_size=300,
                                    problem='regres')
         with_graph_model.train(base_individ)
-        with_graph_train_loss = with_graph_model.get_loss_on_train()
-        with_graph_test_loss = with_graph_model.get_loss_on_test(test_features, test_target)
+        with_graph_train_loss = with_graph_model.get_metric_on_train()
+        with_graph_test_loss = with_graph_model.get_metric_on_test(test_features, test_target)
 
         with_evolution_model = ModelNN(train_features[base_individ.basis], train_target[base_individ.basis],
                                        num_epochs=50,
@@ -138,11 +137,12 @@ def run_example(n_runs):
                               model_to_optimize=with_evolution_model,
                               edges_weight_mutation=mut)
         evolution.run()
+        evolution.plot_evolution_fitnesses()
         evolution.base_individ.show_2d(train_target, save_path=f'{cash_folder}/final_graph.png')
         evolution.plot_evolution_fitnesses(save_path=f'{cash_folder}/evolution_conv.png')
 
-        with_evolution_train_loss = with_evolution_model.get_loss_on_train()
-        with_evolution_test_loss = with_evolution_model.get_loss_on_test(test_features, test_target)
+        with_evolution_train_loss = with_evolution_model.get_metric_on_train()
+        with_evolution_test_loss = with_evolution_model.get_metric_on_test(test_features, test_target)
 
         b1 = plt.bar(['base', 'with graph', 'with evolution'],
                      [base_train_loss, with_graph_train_loss, with_evolution_train_loss])
@@ -177,4 +177,9 @@ def run_example(n_runs):
         df.to_csv(
             f'{f_folder}/{n_runs}_mammoth.csv')
 
-run_example(10)
+
+run_example(10, True)
+run_example(10, False)
+plot_mammoth('mammoth_n_runs_results/_50_5/10_mammoth.csv',
+             'mammoth_n_runs_results/noweightmut_50_5/10_mammoth.csv',
+             'mammoth_n_runs_results/with_without_weights_mutation_comparison.png')

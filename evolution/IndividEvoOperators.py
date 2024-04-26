@@ -73,8 +73,9 @@ class IndividEvoOperators:
                 one_way_adj_matrix = mask_matrix * individ.adjacency_matrix
                 edges = np.array(np.where(one_way_adj_matrix == 1))
 
-                edges_to_mutate_indices = edges[:, np.random.randint(edges.shape[1], size=num_of_edges_to_mutate)]
-                individ.change_edges_length(edges_to_mutate_indices, mutate_intensity=0.2)
+                if edges.shape[1] > 0:
+                    edges_to_mutate_indices = edges[:, np.random.randint(edges.shape[1], size=num_of_edges_to_mutate)]
+                    individ.change_edges_length(edges_to_mutate_indices, mutate_intensity=0.2)
 
         return self.individs
 

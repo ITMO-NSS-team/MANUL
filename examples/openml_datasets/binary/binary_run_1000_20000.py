@@ -3,10 +3,9 @@ from datetime import datetime
 
 import numpy as np
 import openml
-import pandas as pd
 from matplotlib import pyplot as plt
 from sklearn.model_selection import StratifiedShuffleSplit
-from sklearn.preprocessing import StandardScaler, OneHotEncoder
+from sklearn.preprocessing import StandardScaler, LabelEncoder
 
 from evolution.Evolution import Evolution
 from evolution.IndividStructures import DataStructureGraph
@@ -29,9 +28,10 @@ def split_train_test_shuffle(dataset_df, target_name):
 
     return np.array(X_train), np.array(y_train), np.array(X_test), np.array(y_test)
 
+
 def run_openml_binary_classification(n_runs=5):
     start_time = datetime.now().strftime('%Y_%m_%d-%H_%M_%S_%p')
-    exp_folder = f'results/binary_50_1000_{start_time}'
+    exp_folder = f'results/binary_1000_20000_{start_time}'
     os.mkdir(exp_folder)
     log_file = f'{exp_folder}/log.txt'
 
@@ -46,12 +46,30 @@ def run_openml_binary_classification(n_runs=5):
             dataset_name = dataset.name
             target_name = dataset.default_target_attribute
             dataset_df = dataset.get_data()[0]
-            for column in dataset_df.columns:
-                if dataset_df[column].dtype.name in ['category', 'object']:
-                    encoder = OneHotEncoder()
-                    encoder.fit_transform(dataset_df[column].to_frame())
-                    dataset_df[column] = encoder.transform(dataset_df[column].to_frame()).toarray()
             dataset_df = dataset_df.dropna()
+            if len(dataset_df[target_name].unique()) < 3:
+                with open(log_file, 'a') as file:
+                    file.write(f"######\n\n"
+                               f"dataset_num {id}\n"
+                               f"dataset_name {dataset_name}\n"
+                               f"rows_num {dataset_df.shape[0]}\n"
+                               f"cols_num {dataset_df.shape[1]}\n\n"
+                               f"skipped - num classes < 3 after drop Nans")
+                continue
+
+            for column in dataset_df.columns:
+                if column != target_name:
+                    if dataset_df[column].dtype.name in ['object', 'category']:
+                        try:
+                            dataset_df[column] = dataset_df[column].astype(int)
+                        except Exception as e:
+                            encoder = LabelEncoder()
+                            encoder.fit_transform(dataset_df[column].to_frame())
+                            dataset_df[column] = encoder.transform(dataset_df[column].to_frame())
+                if column == target_name:
+                    encoder = LabelEncoder()
+                    encoder.fit_transform(dataset_df[column].to_frame())
+                    dataset_df[column] = encoder.transform(dataset_df[column].to_frame())
 
             with open(log_file, 'a') as file:
                 file.write(f"######\n\n"
@@ -96,11 +114,12 @@ def run_openml_binary_classification(n_runs=5):
                                          num_epochs=150,
                                          batch_size=300,
                                          problem='binary_class',
+
                                          cash_folder=f'{ds_folder}/{r}',
                                          model_name='base_model')
                     base_model.train()
-                    base_train_loss = base_model.get_loss_on_train()
-                    base_test_loss = base_model.get_loss_on_test(X_test, y_test)
+                    base_train_loss = base_model.get_metric_on_train()
+                    base_test_loss = base_model.get_metric_on_test(X_test, y_test)
 
                     with open(log_file, 'a') as file:
                         file.write(f"{datetime.now().strftime('%Y_%m_%d-%H_%M_%S_%p')}\n"
@@ -115,8 +134,8 @@ def run_openml_binary_classification(n_runs=5):
                                                model_name='with_graph'
                                                )
                     with_graph_model.train(base_individ)
-                    with_graph_train_loss = with_graph_model.get_loss_on_train()
-                    with_graph_test_loss = with_graph_model.get_loss_on_test(X_test, y_test)
+                    with_graph_train_loss = with_graph_model.get_metric_on_train()
+                    with_graph_test_loss = with_graph_model.get_metric_on_test(X_test, y_test)
 
                     with open(log_file, 'a') as file:
                         file.write(f"{datetime.now().strftime('%Y_%m_%d-%H_%M_%S_%p')}\n"
@@ -139,8 +158,8 @@ def run_openml_binary_classification(n_runs=5):
                     evolution.base_individ.show_2d(y_train, save_path=f'{ds_folder}/{r}/final_graph.png')
                     evolution.plot_evolution_fitnesses(save_path=f'{ds_folder}/{r}/evolution_conv.png')
 
-                    with_evolution_train_loss = with_evolution_model.get_loss_on_train()
-                    with_evolution_test_loss = with_evolution_model.get_loss_on_test(X_test, y_test)
+                    with_evolution_train_loss = with_evolution_model.get_metric_on_train()
+                    with_evolution_test_loss = with_evolution_model.get_metric_on_test(X_test, y_test)
 
                     with open(log_file, 'a') as file:
                         file.write(f"{datetime.now().strftime('%Y_%m_%d-%H_%M_%S_%p')}\n"
