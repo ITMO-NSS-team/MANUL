@@ -13,7 +13,6 @@ class Population:
         self.size = size
         self.base_individ = base_individ
         self.individs_pool = []
-        self.individs_models = []
 
     def generate(self, nodes_mutation_prob: float = None):
         """
@@ -22,7 +21,7 @@ class Population:
         :return: class object with individs pool
         """
         if nodes_mutation_prob is None:
-            nodes_mutation_prob = 0.3
+            nodes_mutation_prob = 0.5
 
         individs_pool = [self.base_individ]
         for i in range(1, self.size):
@@ -41,7 +40,7 @@ class Population:
         :param base_model: model in which loss with individ is calculated
         """
         for individ in self.individs_pool:
-            if individ.fitness is None:
+            if individ.fitness is None and individ.trained_model is None:
                 individ_model = deepcopy(base_model)
                 individ_model.train(individ, plot_convergence=False)
                 fitness = individ_model.get_loss_on_train()
@@ -49,6 +48,6 @@ class Population:
                     # функция приспособленности графа тем лучше чем меньше ошибка модели
                     fitness = 1/fitness
                 individ.fitness = fitness
-                self.individs_models.append(individ_model)
+                individ.trained_model = individ_model
         return self
 

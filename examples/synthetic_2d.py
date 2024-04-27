@@ -49,7 +49,7 @@ base_individ = DataStructureGraph(data=train_features,
                                   cash_folder='C:/Users/Julia/Documents/NSS_lab/fastnet/examples/info_log/2d_sinthetic',
                                   graph_file='base_graph.pkl')
 
-base_individ.show_2d(train_colors, cmap_name='Blues', euclidean=False)
+base_individ.show_2d(train_colors, cmap_name='Blues', euclidean=True)
 
 positions = base_individ.source_data[base_individ.basis]
 
@@ -116,7 +116,8 @@ plt.title('MSE on test set')
 plt.show()
 
 
-evolution.plot_evolution_fitnesses()
+evolution.plot_evolution_fitnesses(reverse=False)
+evolution.plot_evolution_fitnesses(reverse=True)
 ev_hist = evolution.evolution_history
 
 # отрисовка лучшего графа
@@ -141,7 +142,7 @@ nx.draw(g, pos=positions, labels=labels, node_color='green')
 plt.show()
 
 # специфичное для двумерных данных
-for generation_num in ev_hist.keys():
+'''for generation_num in ev_hist.keys():
     for graph_num in list(ev_hist[generation_num].keys()):
         graph = ev_hist[generation_num][graph_num]
         positions = base_individ.source_data[graph['basis']]
@@ -160,6 +161,6 @@ for generation_num in ev_hist.keys():
         plt.scatter(train_features[:, 0], train_features[:, 1], c='blue')
         plt.title(f'Generation {generation_num}\nIndivid {graph_num}\nFitness = {graph["fitness"]}')
         nx.draw(g, pos=positions, labels=labels, node_color='green')
-        plt.show()
+        plt.show()'''
 
 

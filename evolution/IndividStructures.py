@@ -59,6 +59,7 @@ class DataStructureGraph:
         self.elitism = False  # TODO вынести в класс предок - индивида (исп-ся только в эволюции)
         self.selected = False  # TODO вынести в класс предок - индивида (исп-ся только в эволюции)
         self.fitness = None
+        self.trained_model = None
         self.source_data = data.astype(float)
         if cash_folder is None:
             self.cash_folder = f"info_log/{datetime.now().strftime('%Y_%m_%d-%I_%M_%S_%p')}"

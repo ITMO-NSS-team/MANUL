@@ -82,7 +82,7 @@ def run_example():
 
     evolution = Evolution(base_individ=base_individ,
                           iterations=10,
-                          population_size=5,
+                          population_size=7,
                           model_to_optimize=with_evolution_model)
     evolution.run()
     evolution.plot_evolution_fitnesses()
