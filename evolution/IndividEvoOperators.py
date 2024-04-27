@@ -20,9 +20,12 @@ class IndividEvoOperators:
         if nodes_mutation_prob >= 1:
             raise Exception(
                 f'IndividEvoOperators.mutate nodes_mutation_prob={nodes_mutation_prob} should be from 0 to 1')
-        mutated_individs = []
+        append = False
         for individ in self.individs:
-            individ = deepcopy(individ)
+            if individ.elitism:
+                individ = deepcopy(individ)
+                individ.fitness = False
+                append = True  # create new individ of modify existing
             individ.elitism = False
             fullness_individ = individ.fullness
             num_nodes = individ.number_of_nodes
@@ -71,7 +74,7 @@ class IndividEvoOperators:
                     probability = []
                     edges = []
                     for node in graph:
-                        probability.extend(eds[node, graph[node]]) # типа длина каждого ребра с соседями
+                        probability.extend(eds[node, graph[node]])  # типа длина каждого ребра с соседями
 
                         elements = [[node, i] for i in graph[node]]
                         edges.extend(elements)
@@ -81,8 +84,8 @@ class IndividEvoOperators:
                                                   p=probability.astype(np.float64))[0]
                     edge = edges[edge_index]
                     individ.remove_edge(edge[0], edge[1])
-                mutated_individs.append(individ)
-            self.individs = mutated_individs
+            if append:
+                self.individs.append(individ)
         return self.individs
 
     def crossover_individs(self):

@@ -8,12 +8,12 @@ class Population:
         """
         Class for generation population from single individ with mutation operator
         :param size: int - number of individs in population
-        :param base_individ:
-        :type base_individ:
+        :param base_individ: DataStructureGraph with individ to mutate
         """
         self.size = size
         self.base_individ = base_individ
         self.individs_pool = []
+        self.individs_models = []
 
     def generate(self, nodes_mutation_prob: float = None):
         """
@@ -49,5 +49,6 @@ class Population:
                     # функция приспособленности графа тем лучше чем меньше ошибка модели
                     fitness = 1/fitness
                 individ.fitness = fitness
+                self.individs_models.append(individ_model)
         return self
 

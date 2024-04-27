@@ -73,48 +73,31 @@ class Evolution:
         for i in range(self.iterations):
             print(f'Evolution run, iteration - {i}')
             pop_operators = PopulationEvoOperators(population=self.population)
+
+            print('Elite individs')
             pop_operators.elitism(elits_num=self.evo_operators_params["elitism"].
                                   get('elits_num', None))
 
-            print([ind.fitness for ind in self.population.individs_pool])
-            print([ind.elitism for ind in self.population.individs_pool])
-            print([ind.selected for ind in self.population.individs_pool])
-
+            print('Selecting individs')
             pop_operators.roulette_wheel_selection(
                 tournament_size=self.evo_operators_params["roulette_wheel_selection"].
                 get('tournament_size', None),
                 winners_size=self.evo_operators_params["roulette_wheel_selection"].
                 get('winners_size', None))
 
-            print([ind.fitness for ind in self.population.individs_pool])
-            print([ind.elitism for ind in self.population.individs_pool])
-            print([ind.selected for ind in self.population.individs_pool])
-
+            print('Crossover individs')
             pop_operators.crossover_population(crossover_size_percent=self.evo_operators_params["crossover"].
                                                get('crossover_size_percent', None))
 
-            print([ind.fitness for ind in self.population.individs_pool])
-            print([ind.elitism for ind in self.population.individs_pool])
-            print([ind.selected for ind in self.population.individs_pool])
-
+            print('Mutate individs')
             pop_operators.mutate_population(mutation_prob=self.evo_operators_params["mutation"].
                                             get('mutation_prob', None))
 
-            print([ind.fitness for ind in self.population.individs_pool])
-            print([ind.elitism for ind in self.population.individs_pool])
-            print([ind.selected for ind in self.population.individs_pool])
-
+            print('Update fitnesses')
             self.evaluate_fitness()
 
-            print([ind.fitness for ind in self.population.individs_pool])
-            print([ind.elitism for ind in self.population.individs_pool])
-            print([ind.selected for ind in self.population.individs_pool])
-
+            print('Filter population')
             pop_operators.fiter_population()
-
-            print([ind.fitness for ind in self.population.individs_pool])
-            print([ind.elitism for ind in self.population.individs_pool])
-            print([ind.selected for ind in self.population.individs_pool])
 
             individ_parameters_dict = {}
             for k, individ in enumerate(self.population.individs_pool):
@@ -125,11 +108,9 @@ class Evolution:
             evolution_history[i + 1] = individ_parameters_dict
         self.evolution_history = evolution_history
 
-        # overwrite base_individ to best individ
-        pop_operators = PopulationEvoOperators(population=self.population)
-        pop_operators.elitism(elits_num=1)
-        self.base_individ = list(filter(lambda individ: individ.elitism, self.population.individs_pool))[0]
+        # overwrite base_individ and base model to best individ
+        best_individ_index = [ind.fitness for ind in self.population.individs_pool].index(max([ind.fitness for ind in self.population.individs_pool]))
+        self.base_individ = self.population.individs_pool[best_individ_index]
+        self.base_model = self.population.individs_models[best_individ_index]
 
-        # train base_model with best individ
-        self.base_model.train(self.base_individ, plot_convergence=True)
 
