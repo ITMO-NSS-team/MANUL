@@ -1,3 +1,4 @@
+import numpy as np
 from matplotlib import pyplot as plt
 
 from evolution.PopulationEvoOperators import PopulationEvoOperators
@@ -48,15 +49,19 @@ class Evolution:
     def evaluate_fitness(self):
         self.population = self.population.evaluate_individs_fitness(self.base_model)
 
-    def plot_evolution_fitnesses(self):
+    def plot_evolution_fitnesses(self, reverse: bool = False):
+        ylab = 'Fitness'
         for generation in range(len(self.evolution_history.keys())):
             generation_fitnesses = [self.evolution_history[generation][g]['fitness'] for g in
                                     self.evolution_history[generation].keys()]
+            if reverse:
+                generation_fitnesses = 1/np.array(generation_fitnesses)
+                ylab = 'Loss'
             plt.scatter([generation] * len(self.evolution_history[generation]), generation_fitnesses)
 
         plt.title('Evolution convergence')
         plt.xlabel('Generation')
-        plt.ylabel('Fitness')
+        plt.ylabel(ylab)
         plt.show()
 
     def run(self):
@@ -97,7 +102,10 @@ class Evolution:
             self.evaluate_fitness()
 
             print('Filter population')
-            pop_operators.fiter_population()
+            pop_operators.fiter_population(self.population_size)
+            for individ in self.population.individs_pool:
+                individ.selected = False
+                individ.elitism = False
 
             individ_parameters_dict = {}
             for k, individ in enumerate(self.population.individs_pool):
@@ -111,6 +119,4 @@ class Evolution:
         # overwrite base_individ and base model to best individ
         best_individ_index = [ind.fitness for ind in self.population.individs_pool].index(max([ind.fitness for ind in self.population.individs_pool]))
         self.base_individ = self.population.individs_pool[best_individ_index]
-        self.base_model = self.population.individs_models[best_individ_index]
-
-
+        self.base_model = self.base_model.train(self.base_individ)

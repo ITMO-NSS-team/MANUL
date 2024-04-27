@@ -62,17 +62,12 @@ class PopulationEvoOperators:
         selected_individs = [[selected_population[i], selected_population[j]] for i, j in
                              np.random.choice(np.arange(len(selected_population)), replace=False,
                                               size=(crossover_size, 2))]
+
         for individ1, individ2 in selected_individs:
-            if individ1.elitism:
-                individ1 = deepcopy(individ1)
-                individ1.elitism = False
-            if individ2.elitism:
-                individ2 = deepcopy(individ2)
-                individ2.elitism = False
+            individ1 = deepcopy(individ1)
+            individ2 = deepcopy(individ1)
             mutator = IndividEvoOperators([individ1, individ2])
             new_individs = mutator.crossover_individs()
-            for new_individ in new_individs:
-                new_individ.fitness = None
             self.population.individs_pool.extend(new_individs)
 
     def mutate_population(self, mutation_prob: int = None):
@@ -82,31 +77,33 @@ class PopulationEvoOperators:
         number_of_individs_to_mutate = int(len(selected_population) * mutation_prob)
 
         selected_individs = np.random.choice(selected_population, replace=False, size=number_of_individs_to_mutate).tolist()
+        selected_individs = [deepcopy(ind) for ind in selected_individs]
 
         mutator = IndividEvoOperators(selected_individs)
         # TODO прокинуть параметры мутации
         mutated_individs = mutator.mutate(nodes_mutation_prob=None)
-        for new_individ in mutated_individs:
-            new_individ.fitness = None
+        self.population.individs_pool.extend(mutated_individs)
 
-    def fiter_population(self):
-        elite = list(filter(lambda ind: ind.elitism, self.population.individs_pool))
-        for individ in elite:
-            self.population.individs_pool.remove(individ)
+
+    def fiter_population(self, size_to_save):
+        elite_inds = [ind.elitism for ind in self.population.individs_pool]
+        elite_inds = [i for i, x in enumerate(elite_inds) if x]
+        elite = [self.population.individs_pool[i] for i in elite_inds]
+        for i in elite_inds:
+            self.population.individs_pool.remove(self.population.individs_pool[i])
         fitnesses = [f.fitness for f in self.population.individs_pool]
         # filter individ duplicates
         uniq_fitnesses = set(fitnesses)
         uniq_inds = [i for i, e in enumerate(fitnesses) if e in uniq_fitnesses]
         self.population.individs_pool = [self.population.individs_pool[i] for i in uniq_inds]
         self.population.individs_pool = [x for _, x in sorted(zip([fitnesses[i] for i in uniq_inds], self.population.individs_pool),
-                                                              key=lambda pair: pair[0])][-self.population.size + len(elite):]
+                                                              key=lambda pair: pair[0])][-size_to_save + len(elite):]
 
         # if unique individs less than population size extend with elite
-        while len(self.population.individs_pool) <= self.population.size - len(elite):
+        while len(self.population.individs_pool) <= size_to_save - len(elite):
             self.population.individs_pool.extend(elite)
-        for individ in self.population.individs_pool:
-            individ.selected = False
-            individ.elitism = False
+
+
 
 
 
