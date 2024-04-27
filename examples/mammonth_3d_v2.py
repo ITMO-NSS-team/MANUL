@@ -48,10 +48,6 @@ def run_example():
     feature, target = form_dataset()
     train_features, test_features = split_dataset(feature)
     train_target, test_target = split_dataset(target)
-    '''train_features = torch.from_numpy(train_features)
-    test_features = torch.from_numpy(test_features)
-    train_target = torch.from_numpy(train_target)
-    test_target = torch.from_numpy(test_target)'''
 
     base_individ = DataStructureGraph(data=train_features,
                                       n_neighbors=10,
