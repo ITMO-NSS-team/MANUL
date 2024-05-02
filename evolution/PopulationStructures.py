@@ -40,7 +40,7 @@ class Population:
         :param base_model: model in which loss with individ is calculated
         """
         for individ in self.individs_pool:
-            if individ.fitness is None and individ.trained_model is None:
+            if individ.fitness is None:
                 individ_model = deepcopy(base_model)
                 individ_model.train(individ, plot_convergence=False)
                 fitness = individ_model.get_loss_on_train()
@@ -48,6 +48,5 @@ class Population:
                     # функция приспособленности графа тем лучше чем меньше ошибка модели
                     fitness = 1/fitness
                 individ.fitness = fitness
-                individ.trained_model = individ_model
         return self
 

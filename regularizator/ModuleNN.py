@@ -1,9 +1,11 @@
+from datetime import datetime
+
 import numpy as np
 from SALib import ProblemSpec
 import torch
 from matplotlib import pyplot as plt
 
-from sklearn.metrics import roc_curve
+from sklearn.metrics import roc_curve, accuracy_score
 import torch.nn as nn
 from torch import randperm, tensor
 from torch.optim import Adam
@@ -21,9 +23,11 @@ class ModelNN:
                  batch_size: int = 300,
                  stop_criteria_count: int = 10,
                  criterion=None,
-                 optimizer=None):
+                 optimizer=None,
+                 cash_folder: str = None,
+                 model_name: str = None):
         self.device = self.init_device()
-        self.features = train_feature
+        self.features = train_feature.astype(float)
         self.target = train_target
         self.num_epochs = num_epochs
         self.batch_size = batch_size
@@ -34,6 +38,8 @@ class ModelNN:
 
         self.threshold = None  # parameter for classification problem
         self.stop_criteria_count = stop_criteria_count
+        self.cash_folder = cash_folder
+        self.model_name = model_name
 
     def init_device(self, device: str = None):
         """
@@ -50,8 +56,8 @@ class ModelNN:
         """
         Function for initialization network model structure based on problem
         """
-        dim = self.features.shape[-1]
-        sequence = [nn.Linear(dim, 512, dtype=fl64),
+        input_dim = self.features.shape[-1]
+        sequence = [nn.Linear(input_dim, 512, dtype=fl64),
                     nn.ReLU(),
                     nn.Linear(512, 256, dtype=fl64),
                     nn.ReLU(),
@@ -59,7 +65,8 @@ class ModelNN:
                     nn.ReLU(),
                     nn.Linear(256, 64, dtype=fl64),
                     nn.ReLU(),
-                    nn.Linear(64, 1, dtype=fl64)]
+                    nn.Linear(64, 1, dtype=fl64),
+                    ]
         if problem == 'class':
             sequence.append(nn.Sigmoid())
         model = nn.Sequential(*sequence)
@@ -70,15 +77,16 @@ class ModelNN:
         Function for setting optimizer and criterion for optimization network based on problem
         """
         if self.problem == 'class' and criterion is None:
+            labels_num = np.unique(self.target).shape[0]
             criterion = nn.BCELoss()
         if self.problem == 'regres' and criterion is None:
             criterion = nn.L1Loss()
         if optimizer is None:
-            optimizer = Adam(self.model.parameters(), lr=1e-4, eps=1e-4)
+            optimizer = Adam(self.model.parameters(), lr=1e-3, eps=1e-4)
         return optimizer, criterion
 
     def _calc_threshold_classification_problem(self, target, predicted):
-        fpr, tpr, thresholds = roc_curve(target.reshape(-1), predicted.detach().numpy().reshape(-1))
+        fpr, tpr, thresholds = roc_curve(target.detach().cpu().numpy(), predicted.detach().cpu().numpy().reshape(-1))
         gmeans = np.sqrt(tpr * (1 - fpr))
         ix = np.argmax(gmeans)
         if not self.threshold:
@@ -155,7 +163,7 @@ class ModelNN:
 
         return [lam_nn / (np.max([lam_nn, lam_graph])), lam_graph / (np.max([lam_nn, lam_graph]))]
 
-    def train(self, graph: DataStructureGraph = None, plot_convergence=False, lmds: list[float, float] = None,
+    def train(self, graph: DataStructureGraph = None, plot_convergence=True, lmds: list[float, float] = None,
               weight_loss: bool = False, adaptive_lambda: bool = True):
         """
         :param adaptive_lambda: flag to calculate adaptive weights for combined loss on part of epochs
@@ -187,6 +195,10 @@ class ModelNN:
                 indices = permutation[i:i + self.batch_size]
                 batch_x, target_y = self.features[indices], self.target[indices]
                 batch_x = torch.Tensor(batch_x).to(fl64).to(self.device)
+                '''if self.problem == 'class':
+                    target_y = torch.Tensor(target_y)
+                    target_y = target_y.type(torch.LongTensor).to(self.device)'''
+
                 target_y = torch.Tensor(target_y).to(fl64).to(self.device)
                 self.optimizer.zero_grad()
                 output = self.model(batch_x)
@@ -215,8 +227,8 @@ class ModelNN:
 
                 loss_list = np.append(loss_list, loss.item())
 
-                if self.problem == 'class':
-                    self._calc_threshold_classification_problem(target_y, output)
+                '''if self.problem == 'class':
+                    self._calc_threshold_classification_problem(target_y, output)'''
 
                 loss.backward()
                 self.optimizer.step()
@@ -294,35 +306,20 @@ class ModelNN:
 
         fig.suptitle(f'Convergence plot\ntrain loss = {np.round(self.get_loss_on_train(), 5)}')
         plt.tight_layout()
-        plt.show()
-
-
-    def _plot_convergence_(self, losses, lmds_epoch, name: str = None):
-        """
-        Function to plot model convergence on losses list
-        :param losses: list of values to plot
-        :param lmds_epoch: number of epochs to mark them as lambda search
-        :param name: string to add into title
-        """
-        plt.plot(np.arange(len(losses)), losses)
-        if lmds_epoch is not None:
-            z = np.polyfit(np.arange(len(losses[lmds_epoch:])), losses[lmds_epoch:], 1)
-            plt.axvline(lmds_epoch, c='green', linewidth=0.5)
-        else:
-            z = np.polyfit(np.arange(len(losses)), losses, 1)
-        p = np.poly1d(z)
-        plt.plot(np.arange(len(losses)), p(np.arange(len(losses))), "r--")
-        plt.title(f'Convergence plot\ntrain loss = {np.round(self.get_loss_on_train(), 5)}\n{name}')
-        plt.xlabel('Epoch')
-        plt.ylabel('Loss value')
-        plt.tight_layout()
+        if self.cash_folder is not None:
+            if self.model_name is None:
+                self.model_name = f"{datetime.now().strftime('%Y_%m_%d-%I_%M_%S_%p')}_model"
+            plt.savefig(f'{self.cash_folder}/{self.model_name}_conv_plot.png')
+            plt.close()
         plt.show()
 
     def get_loss_on_train(self):
         output = self.model(torch.tensor(self.features).to(self.device)).cpu().detach().numpy()[:, 0]
         target_y = self.target.astype(float)
         if self.problem == 'class':
-            return_loss = roc_auc_score(target_y, output)
+            # output = np.where(output > self.threshold, 1, 0)
+            # return_loss = roc_auc_score(target_y, output)
+            return_loss = accuracy_score(target_y, output)
             return return_loss
         return_loss = mean_squared_error(target_y, output)
         return return_loss
@@ -332,10 +329,13 @@ class ModelNN:
         return output
 
     def get_loss_on_test(self, test_features, test_target):
-        output = self.model(torch.tensor(test_features).to(self.device)).cpu().detach().numpy()[:, 0]
         target_y = test_target.astype(float)
+        test_features = test_features.astype(float)
+        output = self.model(torch.tensor(test_features).to(self.device)).cpu().detach().numpy()[:, 0]
         if self.problem == 'class':
-            return_loss = roc_auc_score(target_y, output)
+            # output = np.where(output > self.threshold, 1, 0)
+            # return_loss = roc_auc_score(target_y, output)
+            return_loss = accuracy_score(target_y, output)
             return return_loss
         return_loss = mean_squared_error(target_y, output)
         return return_loss

@@ -59,7 +59,6 @@ class DataStructureGraph:
         self.elitism = False  # TODO вынести в класс предок - индивида (исп-ся только в эволюции)
         self.selected = False  # TODO вынести в класс предок - индивида (исп-ся только в эволюции)
         self.fitness = None
-        self.trained_model = None
         self.source_data = data.astype(float)
         if cash_folder is None:
             self.cash_folder = f"info_log/{datetime.now().strftime('%Y_%m_%d-%I_%M_%S_%p')}"
@@ -75,7 +74,12 @@ class DataStructureGraph:
         else:
             self.epsilon_neighborhood = eps
         if n_neighbors is None:
-            self.n_neighbors = 10
+            if data.shape[0] <= 500:
+                self.n_neighbors = 1
+            if 500 < data.shape[0] <= 2000:
+                self.n_neighbors = 2
+            if data.shape[0] > 2000:
+                self.n_neighbors = 10
         else:
             self.n_neighbors = n_neighbors
 
@@ -88,7 +92,7 @@ class DataStructureGraph:
             self.number_of_nodes = len(self.basis)
             # обновление ребер для разреженного графа
             self.find_edges(data[self.basis], use_kernel=False)
-            self.filter_graph(data[self.basis])
+            self.filter_graph(data[self.basis].astype(float))
             self.calc_fullness()
             # сохраняем в кэш
             self.save_cash_object('base_graph')
@@ -138,6 +142,7 @@ class DataStructureGraph:
         fig.suptitle(title)
         if save_path is not None:
             plt.savefig(save_path)
+            plt.close()
         plt.show()
 
     def show_3d(self, labels: Optional[np.ndarray] = None,
@@ -146,6 +151,7 @@ class DataStructureGraph:
 
         nodes_coordinates = self.source_data[self.basis]
         if nodes_coordinates.shape[1] > 3:
+            print(f'Computing PCA from {nodes_coordinates.shape[1]} to 3')
             pca = PCA(n_components=3)
             pca.fit(nodes_coordinates)
             nodes_coordinates = pca.transform(nodes_coordinates)
@@ -207,7 +213,7 @@ class DataStructureGraph:
                     )
 
         layout = go.Layout(
-            title=title,
+            title=f'{title}\nProjection of {nodes_coordinates.shape[1]} features to 3d',
             width=1000,
             height=1000,
             showlegend=False,
@@ -451,6 +457,7 @@ class DataStructureGraph:
         Method for filter the graph from unvisible neighbours.
         :param data: matrix n * m, where n - number of nodes, m - number of features. Keeping values of nodes by fields.
         """
+        print('Filtering graph base')
         start_node_index = self.get_start_node()
         delete_edges = get_indices_to_del(data, self.adjacency_matrix, self.matrix_connect, start_node_index)
         self.remove_edges(delete_edges)
