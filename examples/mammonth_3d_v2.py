@@ -50,10 +50,8 @@ def run_example():
     train_target, test_target = split_dataset(target)
 
     base_individ = DataStructureGraph(data=train_features,
-                                      n_neighbors=10,
-                                      eps=0.15,
-                                      cash_folder='C:/Users/Julia/Documents/NSS_lab/fastnet/examples/info_log/2024_04_26-09_16_29_AM',
-                                      graph_file='base_graph.pkl')
+                                      cash_folder='C:/Users/Julia/Documents/NSS_lab/fastnet/examples/info_log/mammonth_test',
+                                      )
 
 
     base_individ.show_3d(labels=train_target, title='Before evolution')
@@ -81,7 +79,7 @@ def run_example():
                                    batch_size=300, problem='regres')
 
     evolution = Evolution(base_individ=base_individ,
-                          iterations=10,
+                          iterations=20,
                           population_size=7,
                           model_to_optimize=with_evolution_model)
     evolution.run()

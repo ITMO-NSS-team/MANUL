@@ -49,7 +49,7 @@ class Evolution:
     def evaluate_fitness(self):
         self.population = self.population.evaluate_individs_fitness(self.base_model)
 
-    def plot_evolution_fitnesses(self, reverse: bool = False):
+    def plot_evolution_fitnesses(self, reverse: bool = False, save_path: str = None):
         ylab = 'Fitness'
         for generation in range(len(self.evolution_history.keys())):
             generation_fitnesses = [self.evolution_history[generation][g]['fitness'] for g in
@@ -62,7 +62,11 @@ class Evolution:
         plt.title('Evolution convergence')
         plt.xlabel('Generation')
         plt.ylabel(ylab)
-        plt.show()
+        if save_path is not None:
+            plt.savefig(f'{save_path}')
+            plt.close()
+        else:
+            plt.show()
 
     def run(self):
         evolution_history = {}
@@ -120,3 +124,4 @@ class Evolution:
         best_individ_index = [ind.fitness for ind in self.population.individs_pool].index(max([ind.fitness for ind in self.population.individs_pool]))
         self.base_individ = self.population.individs_pool[best_individ_index]
         self.base_model = self.base_model.train(self.base_individ)
+        self.base_individ.save_cash_object(name='final_graph')

@@ -5,7 +5,7 @@ import pandas as pd
 from matplotlib import pyplot as plt
 from matplotlib.ticker import FixedFormatter
 
-log_folder = 'C:/Users/Julia/Documents/NSS_lab/fastnet/examples/openml_log/regression/2024_05_03-10_08_50_AM'
+log_folder = 'C:/Users/Julia/Documents/NSS_lab/fastnet/examples/openml_log/regression/2024_05_02-12_51_47_PM'
 
 
 def save_boxplots():
@@ -14,9 +14,6 @@ def save_boxplots():
     test_dataset_metrics = []
     labels = []
     for folder in os.listdir(log_folder):
-        '''plots_save_folder = f'{log_folder}/{folder}/boxplots'
-        if not os.path.exists(plots_save_folder):
-            os.mkdir(plots_save_folder)'''
         if '.txt' not in folder:
             df = pd.read_csv(f'{log_folder}/{folder}/metrics.csv')
             if df.shape[0] != 0:
@@ -38,7 +35,6 @@ def save_boxplots():
         axs[1].boxplot(test_dataset_metrics[n][0:3], labels=['base', 'with graph', 'with evolution'])
         axs[1].set_title('MSE on test set')
         fig.suptitle(labels[n])
-        # plt.savefig(f'{plots_save_folder}/')
         plt.show()
 
 
@@ -52,22 +48,12 @@ def form_mean_table():
             if df.shape[0] != 0:
                 labels.append(folder)
                 mean_df = df.mean()
-                train_max = df[['base_train_loss', 'with_graph_train_loss', 'with_evolution_train_loss']].max().max()
-                test_max = df[['base_test_loss', 'with_graph_test_loss', 'with_evolution_test_loss']].max().max()
-
-                normed_mean = []
-                for i, val in enumerate(mean_df.values):
-                    if i < 3:
-                        normed_mean.append(val / train_max)
-                    if i >= 3:
-                        normed_mean.append(val / test_max)
-                        # mean_df = mean_df/df.max()
-                errors_df[folder] = normed_mean
+                mean_df = mean_df/df.max()
+                errors_df[folder] = mean_df
             else:
                 print(f'Empty - {folder}')
     errors_df.style.apply(lambda col: ['font-weight:bold' if x == col.min() else '' for x in col])
     errors_df = errors_df.T
-    errors_df.columns = df.columns
     print(errors_df.to_string())
 
     train_errors_df = errors_df[['base_train_loss', 'with_graph_train_loss', 'with_evolution_train_loss']].to_numpy()
@@ -80,7 +66,7 @@ def form_mean_table():
             plt.text(j, i, round(train_errors_df[i, j], 5), ha="center", va="center")
     plt.yticks(ticks=np.arange(len(labels)), labels=labels)
     plt.xticks(ticks=np.arange(3), labels=['base', 'with_graph', 'with_evolution'])
-    plt.title('MSE/max(MSE) Train')
+    plt.title('MSE Train')
     plt.tight_layout()
     plt.show()
 
@@ -94,7 +80,7 @@ def form_mean_table():
             plt.text(j, i, round(test_errors_df[i, j], 5), ha="center", va="center")
     plt.yticks(ticks=np.arange(len(labels)), labels=labels)
     plt.xticks(ticks=np.arange(3), labels=['base', 'with_graph', 'with_evolution'])
-    plt.title('MSE/max(MSE) Test')
+    plt.title('MSE Test')
     plt.tight_layout()
     plt.show()
 

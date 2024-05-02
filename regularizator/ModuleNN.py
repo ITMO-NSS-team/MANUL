@@ -1,5 +1,4 @@
 from datetime import datetime
-from typing import Callable
 
 import numpy as np
 from SALib import ProblemSpec
@@ -25,35 +24,17 @@ class ModelNN:
                  stop_criteria_count: int = 10,
                  criterion=None,
                  optimizer=None,
-                 target_metric: Callable = None,
                  cash_folder: str = None,
                  model_name: str = None):
-        """
-        :param train_feature: array with features for model training
-        :param train_target: array with target for model training
-        :param num_epochs: number of epochs for model training
-        :param problem: "regres" or "class" are available
-        :param batch_size: batch size for model training
-        :param stop_criteria_count: number of low loss changes epochs for training stop
-        :param criterion: torch loss function (for custom training)
-        :param optimizer: torch optimizer (for custom training)
-        :param target_metric: function to calculate metric on prediction and target
-                                          (default regres - mse, binary class - roc_auc, multiclass - accuracy)
-        :param cash_folder: string with cash folder to save convergence plots (if empty plots doesn't save)
-        :param model_name: string with model name to save on plot
-        """
         self.device = self.init_device()
         self.features = train_feature.astype(float)
         self.target = train_target
         self.num_epochs = num_epochs
         self.batch_size = batch_size
         self.problem = problem
-        if self.problem == 'class':
-            self.class_num = np.unique(self.target).shape[0]
 
         self.model = self._init_baseline_model(problem).to(self.device)
         self.optimizer, self.criterion = self._init_training_settings(criterion, optimizer)
-        self.target_metric = self._init_target_metric(target_metric)
 
         self.threshold = None  # parameter for classification problem
         self.stop_criteria_count = stop_criteria_count
@@ -71,18 +52,6 @@ class ModelNN:
                 device = 'cpu'
         return device
 
-    def _init_target_metric(self, target_metric: [Callable, None]):
-        if target_metric is None:
-            if self.problem == 'regres':
-                return mean_squared_error
-            if self.problem == 'class':
-                if self.class_num == 2:
-                    return roc_auc_score
-                if self.class_num > 2:
-                    return accuracy_score
-        else:
-            return target_metric
-
     def _init_baseline_model(self, problem):
         """
         Function for initialization network model structure based on problem
@@ -99,8 +68,7 @@ class ModelNN:
                     nn.Linear(64, 1, dtype=fl64),
                     ]
         if problem == 'class':
-            if self.class_num == 2:
-                sequence.append(nn.Sigmoid())
+            sequence.append(nn.Sigmoid())
         model = nn.Sequential(*sequence)
         return model
 
@@ -109,10 +77,8 @@ class ModelNN:
         Function for setting optimizer and criterion for optimization network based on problem
         """
         if self.problem == 'class' and criterion is None:
-            if self.class_num == 2:
-                criterion = nn.BCELoss()
-            else:
-                raise NotImplementedError('Multiclass classification is not implemented')
+            labels_num = np.unique(self.target).shape[0]
+            criterion = nn.BCELoss()
         if self.problem == 'regres' and criterion is None:
             criterion = nn.L1Loss()
         if optimizer is None:
@@ -229,6 +195,9 @@ class ModelNN:
                 indices = permutation[i:i + self.batch_size]
                 batch_x, target_y = self.features[indices], self.target[indices]
                 batch_x = torch.Tensor(batch_x).to(fl64).to(self.device)
+                '''if self.problem == 'class':
+                    target_y = torch.Tensor(target_y)
+                    target_y = target_y.type(torch.LongTensor).to(self.device)'''
 
                 target_y = torch.Tensor(target_y).to(fl64).to(self.device)
                 self.optimizer.zero_grad()
@@ -258,9 +227,8 @@ class ModelNN:
 
                 loss_list = np.append(loss_list, loss.item())
 
-                if self.problem == 'class':
-                    if self.class_num == 2:
-                        self._calc_threshold_classification_problem(target_y, output)
+                '''if self.problem == 'class':
+                    self._calc_threshold_classification_problem(target_y, output)'''
 
                 loss.backward()
                 self.optimizer.step()
@@ -347,13 +315,13 @@ class ModelNN:
 
     def get_loss_on_train(self):
         output = self.model(torch.tensor(self.features).to(self.device)).cpu().detach().numpy()[:, 0]
+        target_y = self.target.astype(float)
         if self.problem == 'class':
-            if self.class_num ==2:
-                target_y = self.target.astype(int)
-                output = np.where(output > self.threshold, 1, 0)
-        else:
-            target_y = self.target.astype(float)
-        return_loss = self.target_metric(target_y, output)
+            # output = np.where(output > self.threshold, 1, 0)
+            # return_loss = roc_auc_score(target_y, output)
+            return_loss = accuracy_score(target_y, output)
+            return return_loss
+        return_loss = mean_squared_error(target_y, output)
         return return_loss
 
     def predict(self, test_features):
@@ -361,15 +329,13 @@ class ModelNN:
         return output
 
     def get_loss_on_test(self, test_features, test_target):
+        target_y = test_target.astype(float)
         test_features = test_features.astype(float)
         output = self.model(torch.tensor(test_features).to(self.device)).cpu().detach().numpy()[:, 0]
         if self.problem == 'class':
-            if self.class_num ==2:
-                target_y = test_target.astype(int)
-                output = np.where(output > self.threshold, 1, 0)
-            if self.class_num > 2:
-                raise NotImplementedError('Multiclass classification is not implemented')
-        else:
-            target_y = test_target.astype(float)
-        return_loss = self.target_metric(target_y, output)
+            # output = np.where(output > self.threshold, 1, 0)
+            # return_loss = roc_auc_score(target_y, output)
+            return_loss = accuracy_score(target_y, output)
+            return return_loss
+        return_loss = mean_squared_error(target_y, output)
         return return_loss

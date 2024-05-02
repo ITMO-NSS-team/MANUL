@@ -24,7 +24,6 @@ class IndividEvoOperators:
         for individ in self.individs:
             individ.elitism = False
             individ.fitness = None
-            individ.trained_model = None
             fullness_individ = individ.fullness
             num_nodes = individ.number_of_nodes
             number_of_nodes_to_mutate = int(num_nodes * nodes_mutation_prob)
@@ -49,9 +48,13 @@ class IndividEvoOperators:
                     mean_dist_from_neighbours = max(mean_dist_from_neighbours) - mean_dist_from_neighbours
                     probability = mean_dist_from_neighbours / np.sum(mean_dist_from_neighbours)
                     # чем ближе узел к соседям, тем ниже вероятность его выбрать
-                    node_index = np.random.choice(np.arange(individ.number_of_nodes),
-                                                  size=1,
-                                                  p=probability.astype(np.float64))[0]
+                    try:
+                        node_index = np.random.choice(np.arange(individ.number_of_nodes),
+                                                      size=1,
+                                                      p=probability.astype(np.float64))[0]
+                    except Exception as e:
+                        node_index = np.random.choice(np.arange(individ.number_of_nodes),
+                                                      size=1)[0]
                     individ.twist_node(node_index)
 
             edges_mutation_flags = np.random.choice(np.arange(2), size=number_of_nodes_to_mutate,
@@ -98,9 +101,7 @@ class IndividEvoOperators:
         individ1.elitism = False
         individ2.elitism = False
         individ1.fitness = None
-        individ1.trained_model = None
         individ2.fitness = None
-        individ2.trained_model = None
 
         probability = np.array(
             [abs(len(individ1.graph[i]) - len(individ2.graph[i])) for i in range(individ1.number_of_nodes)])
