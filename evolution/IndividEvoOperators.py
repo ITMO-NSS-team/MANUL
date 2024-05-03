@@ -30,32 +30,34 @@ class IndividEvoOperators:
             eds = individ.matrix_connect
             graph = individ.graph
 
-            nodes_mutation_flags = np.random.choice(np.arange(2), size=number_of_nodes_to_mutate)
-            for flag in nodes_mutation_flags:
-                if flag:
-                    mean_dist_from_neighbours = []
-                    for node in graph:
-                        dist_from_neighbours = []
-                        for neighbour in graph[node]:
-                            dist_from_neighbours.append(eds[node, neighbour])
-                        if len(dist_from_neighbours) == 0:
-                            mean_dist_from_neighbours.append(np.nan)
-                        else:
-                            mean_dist_from_neighbours.append(np.nanmean(np.array(dist_from_neighbours)))
+            if len(individ.basis) != individ.source_data.shape[0]:
+                # nodes mutation runs only when base is not equal to full graph
+                nodes_mutation_flags = np.random.choice(np.arange(2), size=number_of_nodes_to_mutate)
+                for flag in nodes_mutation_flags:
+                    if flag:
+                        mean_dist_from_neighbours = []
+                        for node in graph:
+                            dist_from_neighbours = []
+                            for neighbour in graph[node]:
+                                dist_from_neighbours.append(eds[node, neighbour])
+                            if len(dist_from_neighbours) == 0:
+                                mean_dist_from_neighbours.append(np.nan)
+                            else:
+                                mean_dist_from_neighbours.append(np.nanmean(np.array(dist_from_neighbours)))
 
-                    mean_dist = float(np.nanmean(mean_dist_from_neighbours))
-                    mean_dist_from_neighbours = np.nan_to_num(mean_dist_from_neighbours, nan=mean_dist)
-                    mean_dist_from_neighbours = max(mean_dist_from_neighbours) - mean_dist_from_neighbours
-                    probability = mean_dist_from_neighbours / np.sum(mean_dist_from_neighbours)
-                    # чем ближе узел к соседям, тем ниже вероятность его выбрать
-                    try:
-                        node_index = np.random.choice(np.arange(individ.number_of_nodes),
-                                                      size=1,
-                                                      p=probability.astype(np.float64))[0]
-                    except Exception as e:
-                        node_index = np.random.choice(np.arange(individ.number_of_nodes),
-                                                      size=1)[0]
-                    individ.twist_node(node_index)
+                        mean_dist = float(np.nanmean(mean_dist_from_neighbours))
+                        mean_dist_from_neighbours = np.nan_to_num(mean_dist_from_neighbours, nan=mean_dist)
+                        mean_dist_from_neighbours = max(mean_dist_from_neighbours) - mean_dist_from_neighbours
+                        probability = mean_dist_from_neighbours / np.sum(mean_dist_from_neighbours)
+                        # чем ближе узел к соседям, тем ниже вероятность его выбрать
+                        try:
+                            node_index = np.random.choice(np.arange(individ.number_of_nodes),
+                                                          size=1,
+                                                          p=probability.astype(np.float64))[0]
+                        except Exception as e:
+                            node_index = np.random.choice(np.arange(individ.number_of_nodes),
+                                                          size=1)[0]
+                        individ.twist_node(node_index)
 
             edges_mutation_flags = np.random.choice(np.arange(2), size=number_of_nodes_to_mutate,
                                                     p=[fullness_individ / 100, 1 - (fullness_individ / 100)])

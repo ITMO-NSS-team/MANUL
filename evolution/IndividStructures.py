@@ -78,8 +78,10 @@ class DataStructureGraph:
                 self.n_neighbors = 1
             if 500 < data.shape[0] <= 2000:
                 self.n_neighbors = 2
-            if data.shape[0] > 2000:
+            if 2000 < data.shape[0] <= 10000:
                 self.n_neighbors = 10
+            if 10000 < data.shape[0]:
+                self.n_neighbors = 20
         else:
             self.n_neighbors = n_neighbors
 
