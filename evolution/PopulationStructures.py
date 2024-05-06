@@ -8,8 +8,7 @@ class Population:
         """
         Class for generation population from single individ with mutation operator
         :param size: int - number of individs in population
-        :param base_individ:
-        :type base_individ:
+        :param base_individ: DataStructureGraph with individ to mutate
         """
         self.size = size
         self.base_individ = base_individ
@@ -22,7 +21,7 @@ class Population:
         :return: class object with individs pool
         """
         if nodes_mutation_prob is None:
-            nodes_mutation_prob = 0.3
+            nodes_mutation_prob = 0.5
 
         individs_pool = [self.base_individ]
         for i in range(1, self.size):

@@ -1,13 +1,19 @@
-import ast
 import os
 import pickle
+from typing import Optional
+
+import networkx as nx
 import numpy as np
 import numba.types as tp
+from matplotlib import pyplot as plt
 from numba import njit
 from datetime import datetime
 
 import topo as tp
+from sklearn.decomposition import PCA
 from sklearn.metrics.pairwise import euclidean_distances
+import plotly.graph_objects as go
+import plotly
 
 
 def get_basis(graph, source_data: np.ndarray):
@@ -68,7 +74,14 @@ class DataStructureGraph:
         else:
             self.epsilon_neighborhood = eps
         if n_neighbors is None:
-            self.n_neighbors = 10
+            if data.shape[0] <= 500:
+                self.n_neighbors = 1
+            if 500 < data.shape[0] <= 2000:
+                self.n_neighbors = 2
+            if 2000 < data.shape[0] <= 10000:
+                self.n_neighbors = 10
+            if 10000 < data.shape[0]:
+                self.n_neighbors = 20
         else:
             self.n_neighbors = n_neighbors
 
@@ -81,10 +94,149 @@ class DataStructureGraph:
             self.number_of_nodes = len(self.basis)
             # обновление ребер для разреженного графа
             self.find_edges(data[self.basis], use_kernel=False)
-            self.filter_graph(data[self.basis])
+            self.filter_graph(data[self.basis].astype(float))
             self.calc_fullness()
             # сохраняем в кэш
             self.save_cash_object('base_graph')
+
+    def show_2d(self, labels: Optional[np.ndarray] = None,
+                title: str = None,
+                cmap_name: str = 'brg',
+                save_path: str = None, euclidean=True):
+        """
+        Function to visualize individ graph structure in 2D projection
+        :param save_path: string with path to save plot
+        :param labels: array with target values of samples (nodes)
+        :param title: string with name of plot
+        :param cmap_name: string with Matplotlib colormap name
+        :param euclidean: use adjacency_matrix for graph generation or euq
+        """
+        nodes_coordinates = self.source_data[self.basis]
+        if nodes_coordinates.shape[1] > 2:
+            pca = PCA(n_components=2)
+            pca.fit(nodes_coordinates)
+            nodes_coordinates = pca.transform(nodes_coordinates)
+
+        fig, ax = plt.subplots()
+        if euclidean:
+            g = nx.Graph(self.adjacency_matrix)
+        if not euclidean:
+            g = nx.Graph(self.matrix_connect)
+        if labels is not None:
+            nodes_labels = labels[self.basis]
+            colors = nodes_labels
+            sm = plt.cm.ScalarMappable(cmap=cmap_name, norm=plt.Normalize(vmin=min(colors), vmax=max(colors)))
+            c = plt.colorbar(sm, ax=ax)
+            c.set_label('Target values')
+        else:
+            colors = 'black'
+
+        if euclidean:
+            nx.draw_networkx_edges(g, pos=nodes_coordinates)
+            n = nx.draw_networkx_nodes(g, pos=nodes_coordinates, linewidths=0.5, node_size=15, node_color=colors,
+                                       cmap=cmap_name)
+            n.set_edgecolor('black')
+
+        if not euclidean:
+            # drawing without fixed nodes position, but based on edges lengths
+            nx.draw(g, node_color=colors, cmap=cmap_name, node_size=15, linewidths=0.1)
+
+        fig.suptitle(title)
+        if save_path is not None:
+            plt.savefig(save_path)
+            plt.close()
+        plt.show()
+
+    def show_3d(self, labels: Optional[np.ndarray] = None,
+                title: str = None,
+                save_path: str = None):
+
+        nodes_coordinates = self.source_data[self.basis]
+        if nodes_coordinates.shape[1] > 3:
+            print(f'Computing PCA from {nodes_coordinates.shape[1]} to 3')
+            pca = PCA(n_components=3)
+            pca.fit(nodes_coordinates)
+            nodes_coordinates = pca.transform(nodes_coordinates)
+
+        Xn = []  # x-coordinates of nodes
+        Yn = []  # y-coordinates
+        Zn = []  # z-coordinates
+        Xe = []
+        Ye = []
+        Ze = []
+
+        for node in self.graph.keys():
+            start_node_coords = nodes_coordinates[node]
+            Xn.append(start_node_coords[0])
+            Yn.append(start_node_coords[1])
+            Zn.append(start_node_coords[2])
+
+            for child_node in self.graph[node]:
+                end_node_coords = nodes_coordinates[child_node]
+
+                Xe += [start_node_coords[0], end_node_coords[0], None]  # x-coordinates of edge ends
+                Ye += [start_node_coords[1], end_node_coords[1], None]
+                Ze += [start_node_coords[2], end_node_coords[2], None]
+
+        if labels is not None:
+            nodes_labels = labels[self.basis]
+        else:
+            nodes_labels = [1] * len(self.basis)
+        colors = nodes_labels
+        trace1 = go.Scatter3d(x=Xe,
+                              y=Ye,
+                              z=Ze,
+                              mode='lines',
+                              line=dict(color='rgb(125,125,125)', width=1),
+                              hoverinfo='none'
+                              )
+
+        trace2 = go.Scatter3d(x=Xn,
+                              y=Yn,
+                              z=Zn,
+                              mode='markers',
+                              name='actors',
+                              marker=dict(symbol='circle',
+                                          size=6,
+                                          color=colors,
+                                          colorscale='Viridis',
+                                          line=dict(color='rgb(50,50,50)', width=0.5)
+                                          ),
+                              text=labels,
+                              hoverinfo='text'
+                              )
+
+        axis = dict(showbackground=False,
+                    showline=False,
+                    zeroline=False,
+                    showgrid=True,
+                    showticklabels=False,
+                    title=''
+                    )
+
+        layout = go.Layout(
+            title=f'{title}\nProjection of {nodes_coordinates.shape[1]} features to 3d',
+            width=1000,
+            height=1000,
+            showlegend=False,
+            scene=dict(
+                xaxis=dict(axis),
+                yaxis=dict(axis),
+                zaxis=dict(axis),
+            ),
+            margin=dict(
+                t=100
+            ),
+            hovermode='closest',
+        )
+        data = [trace1, trace2]
+        fig = go.Figure(data=data, layout=layout)
+
+        if not save_path:
+            if title is None:
+                title = '3d_graph'
+            save_path = f'{self.cash_folder}/{title}.html'
+        plotly.offline.plot(fig, filename=save_path)
 
     def save_cash_object(self, name: str = None):
         """
@@ -180,23 +332,6 @@ class DataStructureGraph:
         self.matrix_connect = matrix_connect
         self.number_of_edges = number_of_edges
 
-    def _load_graph(self, path):
-        with open(path) as file:
-            data = file.read()
-            data = np.array(ast.literal_eval(data))
-        self.graph = data
-
-    def save_end_graph(self, name):
-        res = []
-        for i in range(self.number_of_nodes):
-            try:
-                val = self.graph[i]
-            except:
-                val = []
-            res.append(val)
-        with open(f"{self.cash_folder}/graph_{name}.txt", "w") as fl:
-            fl.write(str(res))
-
     def add_edge(self, from_node: int, to_node: int):
         """
         Method for adding new edges.
@@ -257,15 +392,9 @@ class DataStructureGraph:
                 continue
             try:
                 self.graph[edge[0]].remove(edge[1])
-            except Exception as e:
+            except Exception:
                 self.graph[edge[1]].remove(edge[0])
             self.number_of_edges -= 1
-
-            if edge[0] in self.graph[edge[1]] or edge[1] in self.graph[edge[0]]:
-                print("ux")
-
-            if edge[0] in self.graph[edge[1]] or edge[1] in self.graph[edge[0]]:
-                print("ux")
 
     def replace_subgraph(self, node: int, new_edges: list):
         """
@@ -278,7 +407,7 @@ class DataStructureGraph:
         for elem in new_edges:
             self.add_edge(node, elem)
 
-    def check_vn_part(self, source_data: np.ndarray, node1: int, node2:int):
+    def check_vn_part(self, source_data: np.ndarray, node1: int, node2: int):
         """
         Method for check visible neighbours in new edge in graph added using crossover/evolution
         :param source_data : matrix n * m, where n - number of nodes, m - number of features. Keeping values of nodes by fields.
@@ -330,6 +459,7 @@ class DataStructureGraph:
         Method for filter the graph from unvisible neighbours.
         :param data: matrix n * m, where n - number of nodes, m - number of features. Keeping values of nodes by fields.
         """
+        print('Filtering graph base')
         start_node_index = self.get_start_node()
         delete_edges = get_indices_to_del(data, self.adjacency_matrix, self.matrix_connect, start_node_index)
         self.remove_edges(delete_edges)
