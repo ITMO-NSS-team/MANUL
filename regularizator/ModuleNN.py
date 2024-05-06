@@ -1,5 +1,6 @@
 from datetime import datetime
 from typing import Callable
+from tqdm import tqdm
 
 import numpy as np
 from SALib import ProblemSpec
@@ -14,6 +15,8 @@ from torch import float64 as fl64
 from sklearn.metrics import roc_auc_score, mean_squared_error
 
 from evolution.IndividStructures import DataStructureGraph
+import warnings
+warnings.filterwarnings("ignore")
 
 
 class ModelNN:
@@ -250,6 +253,9 @@ class ModelNN:
         graph_losses = []
         nn_losses = []
 
+        progress_bar = tqdm(list(np.arange(self.num_epochs)), desc="Epoch")
+        info_bar = {"Loss":0}
+
         while epoch < self.num_epochs and no_changes_epoch <= self.stop_criteria_count:
             permutation = randperm(self.features.shape[0])
             loss_list = np.array([])
@@ -277,7 +283,9 @@ class ModelNN:
                             loss = lmds[0] * loss + lmds[1] * tensor(add_loss)
                         if epoch > lmds_epochs:  # then lambdas are used as new constants
                             lmds = self._get_adaptive_lambda(losses, graph_losses, nn_losses)
-                            print(f'Set lambdas nn_lmd = {lmds[0]}, graph_lmd = {lmds[1]}')
+                            # print(f'Set lambdas nn_lmd = {lmds[0]}, graph_lmd = {lmds[1]}')
+                            info_bar['nn_lmd'] = np.round(lmds[0], 5)
+                            info_bar['graph_lmd'] = np.round(lmds[1], 5)
                             adaptive_lambda = False
 
                     if weight_loss and not adaptive_lambda:
@@ -297,7 +305,11 @@ class ModelNN:
 
             loss_epoch_mean = np.mean(loss_list)
 
-            print(f'Epoch: {epoch} / {self.num_epochs} - Loss = {np.round(loss_epoch_mean, 5)}')
+            info_bar['Loss'] = np.round(loss_epoch_mean, 5)
+            progress_bar.update()
+            progress_bar.set_postfix_str(info_bar)
+
+            # print(f'Epoch: {epoch} / {self.num_epochs} - Loss = {np.round(loss_epoch_mean, 5)}')
             losses.append(np.round(loss_epoch_mean, 5))
             graph_losses.append(np.round(np.mean(graph_loss_list), 5))
             nn_losses.append(np.round(np.mean(nn_loss_list), 5))

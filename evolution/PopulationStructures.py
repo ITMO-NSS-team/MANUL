@@ -1,4 +1,5 @@
 from copy import deepcopy
+from tqdm import tqdm
 
 from evolution.PopulationEvoOperators import IndividEvoOperators
 
@@ -24,8 +25,8 @@ class Population:
             nodes_mutation_prob = 0.5
 
         individs_pool = [self.base_individ]
-        for i in range(1, self.size):
-            print(f'Generate individ {i} / {self.size}')
+        for i in tqdm(range(1, self.size), desc='Generate individ'):
+            # print(f'Generate individ {i} / {self.size}')
             new_indvid = deepcopy(self.base_individ)
             mutator = IndividEvoOperators([new_indvid])
             new_indvid = mutator.mutate(nodes_mutation_prob=nodes_mutation_prob)[0]

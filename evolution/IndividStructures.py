@@ -1,6 +1,7 @@
 import os
 import pickle
 from typing import Optional
+from tqdm import tqdm
 
 import networkx as nx
 import numpy as np
@@ -274,8 +275,10 @@ class DataStructureGraph:
         graph = {}
         number_of_edges = 0
         adjacency_matrix = np.zeros(distances.shape)
+        progress_bar = tqdm(list(np.arange(len(distances))), desc="Process node")
         for i in range(len(distances)):
-            print(f'Process node {i}/{len(distances)}')
+            # print(f'Process node {i}/{len(distances)}')
+            progress_bar.update()
             graph[i] = []
             for j in range(i, len(distances)):
                 if i == j:
@@ -292,8 +295,10 @@ class DataStructureGraph:
         number_of_edges = 0
         adjacency_matrix = np.zeros(distances.shape)
         different = np.zeros((distances.shape[0], distances.shape[0], nodes_data.shape[1]))
+        progress_bar = tqdm(list(np.arange(len(distances))), desc="Process node")
         for i in range(len(distances)):
-            print(f'Process node {i}/{len(distances)}')
+            # print(f'Process node {i}/{len(distances)}')
+            progress_bar.update()
             graph[i] = []
             different[i] = -1 * different[:, i]
             for j in range(i, len(distances)):
