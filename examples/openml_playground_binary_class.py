@@ -94,9 +94,9 @@ def run_openml_binary_classification(n_runs=5):
                     base_individ.cash_folder = f'{ds_folder}/{r}'
 
                     base_model = ModelNN(X_train[base_individ.basis], y_train[base_individ.basis],
-                                         num_epochs=100,
+                                         num_epochs=150,
                                          batch_size=300,
-                                         problem='class',
+                                         problem='binary_class',
                                          cash_folder=f'{ds_folder}/{r}',
                                          model_name='base_model')
                     base_model.train()
@@ -109,9 +109,9 @@ def run_openml_binary_classification(n_runs=5):
                                    f"base_test_loss {base_test_loss}\n")
 
                     with_graph_model = ModelNN(X_train[base_individ.basis], y_train[base_individ.basis],
-                                               num_epochs=100,
+                                               num_epochs=150,
                                                batch_size=300,
-                                               problem='class',
+                                               problem='binary_class',
                                                cash_folder=f'{ds_folder}/{r}',
                                                model_name='with_graph'
                                                )
@@ -126,9 +126,9 @@ def run_openml_binary_classification(n_runs=5):
 
                     # считаем для кучи нейронок для каждого индивида в популяции с выбором лучшей модели
                     with_evolution_model = ModelNN(X_train[base_individ.basis], y_train[base_individ.basis],
-                                                   num_epochs=100,
+                                                   num_epochs=150,
                                                    batch_size=300,
-                                                   problem='class',
+                                                   problem='binary_class',
                                                    cash_folder=f'{ds_folder}/{r}',
                                                    model_name='with_evolution'
                                                    )
@@ -152,10 +152,10 @@ def run_openml_binary_classification(n_runs=5):
                     fig, axs = plt.subplots(1, 2, figsize=(8, 4))
                     axs[0].bar(['base', 'with graph', 'with evolution'],
                                [base_train_loss, with_graph_train_loss, with_evolution_train_loss])
-                    axs[0].set_title('MSE on train set')
+                    axs[0].set_title('ROC AUC on train set')
                     axs[1].bar(['base', 'with graph', 'with evolution'],
                                [base_test_loss, with_graph_test_loss, with_evolution_test_loss])
-                    axs[1].set_title('MSE on test set')
+                    axs[1].set_title('ROC AUC on test set')
                     plt.savefig(f'{ds_folder}/{r}/metrics_bar.png')
                     plt.close()
 
@@ -174,7 +174,6 @@ def run_openml_binary_classification(n_runs=5):
                 file.write(f"{datetime.now().strftime('%Y_%m_%d-%H_%M_%S_%p')}\n"
                            f"{e}\n")
             continue
-
 
 
 run_openml_binary_classification()

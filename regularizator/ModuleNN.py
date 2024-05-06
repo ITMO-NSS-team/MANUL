@@ -32,7 +32,7 @@ class ModelNN:
         :param train_feature: array with features for model training
         :param train_target: array with target for model training
         :param num_epochs: number of epochs for model training
-        :param problem: "regres" or "class" are available
+        :param problem: "regres","binary_class", "multiclass" are available
         :param batch_size: batch size for model training
         :param stop_criteria_count: number of low loss changes epochs for training stop
         :param criterion: torch loss function (for custom training)
@@ -48,8 +48,6 @@ class ModelNN:
         self.num_epochs = num_epochs
         self.batch_size = batch_size
         self.problem = problem
-        if self.problem == 'class':
-            self.class_num = np.unique(self.target).shape[0]
 
         self.model = self._init_baseline_model(problem).to(self.device)
         self.optimizer, self.criterion = self._init_training_settings(criterion, optimizer)
@@ -75,11 +73,10 @@ class ModelNN:
         if target_metric is None:
             if self.problem == 'regres':
                 return mean_squared_error
-            if self.problem == 'class':
-                if self.class_num == 2:
-                    return roc_auc_score
-                if self.class_num > 2:
-                    return accuracy_score
+            if self.problem == 'binary_class':
+                return roc_auc_score
+            if self.problem == 'multiclass':
+                return accuracy_score
         else:
             return target_metric
 
@@ -87,20 +84,40 @@ class ModelNN:
         """
         Function for initialization network model structure based on problem
         """
+        if problem not in ['regres', 'binary_class', 'multiclass']:
+            raise Exception(f'No base model for problem - {problem} implemented, '
+                            f'available problems: "regres", "binary_class", "multiclass" ')
         input_dim = self.features.shape[-1]
-        sequence = [nn.Linear(input_dim, 512, dtype=fl64),
-                    nn.ReLU(),
-                    nn.Linear(512, 256, dtype=fl64),
-                    nn.ReLU(),
-                    nn.Linear(256, 256, dtype=fl64),
-                    nn.ReLU(),
-                    nn.Linear(256, 64, dtype=fl64),
-                    nn.ReLU(),
-                    nn.Linear(64, 1, dtype=fl64),
-                    ]
-        if problem == 'class':
-            if self.class_num == 2:
-                sequence.append(nn.Sigmoid())
+        if problem == 'regres':
+            sequence = [nn.Linear(input_dim, 512, dtype=fl64),
+                        nn.ReLU(),
+                        nn.Linear(512, 256, dtype=fl64),
+                        nn.ReLU(),
+                        nn.Linear(256, 256, dtype=fl64),
+                        nn.ReLU(),
+                        nn.Linear(256, 64, dtype=fl64),
+                        nn.ReLU(),
+                        nn.Linear(64, 1, dtype=fl64)]
+        if problem == 'binary_class':
+            sequence = [nn.Linear(input_dim, 512, dtype=fl64),
+                        nn.ReLU(),
+                        nn.Linear(512, 256, dtype=fl64),
+                        nn.ReLU(),
+                        nn.Linear(256, 256, dtype=fl64),
+                        nn.ReLU(),
+                        nn.Linear(256, 64, dtype=fl64),
+                        nn.ReLU(),
+                        nn.Linear(64, 1, dtype=fl64),
+                        nn.Sigmoid()]
+        if problem == 'multiclass':
+            sequence = [nn.Linear(input_dim, 512, dtype=fl64),
+                        nn.ReLU(),
+                        nn.Linear(512, 128, dtype=fl64),
+                        nn.ReLU(),
+                        nn.Dropout(p=0.25),
+                        nn.Linear(128, 10, dtype=fl64),
+                        nn.Softmax(dim=1)]
+
         model = nn.Sequential(*sequence)
         return model
 
@@ -108,11 +125,10 @@ class ModelNN:
         """
         Function for setting optimizer and criterion for optimization network based on problem
         """
-        if self.problem == 'class' and criterion is None:
-            if self.class_num == 2:
-                criterion = nn.BCELoss()
-            else:
-                raise NotImplementedError('Multiclass classification is not implemented')
+        if self.problem == 'binary_class' and criterion is None:
+            criterion = nn.BCELoss()
+        if self.problem == 'multiclass' and criterion is None:
+            criterion = nn.CrossEntropyLoss()
         if self.problem == 'regres' and criterion is None:
             criterion = nn.L1Loss()
         if optimizer is None:
@@ -197,6 +213,21 @@ class ModelNN:
 
         return [lam_nn / (np.max([lam_nn, lam_graph])), lam_graph / (np.max([lam_nn, lam_graph]))]
 
+    def preprocess_target(self, nn_output, target_y: np.ndarray):
+        """
+        Function to reshape and preprocess target to output format based on task
+        """
+        if self.problem == 'multiclass':
+            temp = np.zeros(nn_output.shape)
+            trans_target = target_y.astype('int')
+            temp[np.arange(target_y.shape[0]).astype(int), trans_target] = 1
+            target_y = torch.Tensor(temp).to(fl64).to(self.device)
+            #target_y = torch.Tensor(target_y.astype('int'))
+        else:
+            target_y = torch.Tensor(target_y).to(fl64).to(self.device)
+        return target_y
+
+
     def train(self, graph: DataStructureGraph = None, plot_convergence=True, lmds: list[float, float] = None,
               weight_loss: bool = False, adaptive_lambda: bool = True):
         """
@@ -230,9 +261,9 @@ class ModelNN:
                 batch_x, target_y = self.features[indices], self.target[indices]
                 batch_x = torch.Tensor(batch_x).to(fl64).to(self.device)
 
-                target_y = torch.Tensor(target_y).to(fl64).to(self.device)
                 self.optimizer.zero_grad()
                 output = self.model(batch_x)
+                target_y = self.preprocess_target(output, target_y)
                 loss = self.criterion(output, target_y.reshape_as(output))
                 nn_loss_list = np.append(nn_loss_list, loss.item())
 
@@ -258,9 +289,8 @@ class ModelNN:
 
                 loss_list = np.append(loss_list, loss.item())
 
-                if self.problem == 'class':
-                    if self.class_num == 2:
-                        self._calc_threshold_classification_problem(target_y, output)
+                if self.problem == 'binary_class':
+                    self._calc_threshold_classification_problem(target_y, output)
 
                 loss.backward()
                 self.optimizer.step()
@@ -346,12 +376,18 @@ class ModelNN:
         plt.show()
 
     def get_loss_on_train(self):
-        output = self.model(torch.tensor(self.features).to(self.device)).cpu().detach().numpy()[:, 0]
-        if self.problem == 'class':
-            if self.class_num ==2:
-                target_y = self.target.astype(int)
-                output = np.where(output > self.threshold, 1, 0)
-        else:
+        output = self.model(torch.tensor(self.features).to(self.device))
+        if self.problem == 'multiclass':
+            output = output.cpu().detach().numpy()
+            max_possible_labels = np.argmax(output, axis=1)
+            output = max_possible_labels
+            target_y = self.target.astype(int)
+        if self.problem == 'binary_class':
+            output = output.cpu().detach().numpy()[:, 0]
+            target_y = self.target.astype(int)
+            output = np.where(output > self.threshold, 1, 0)
+        if self.problem == 'regres':
+            output = output.cpu().detach().numpy()[:, 0]
             target_y = self.target.astype(float)
         return_loss = self.target_metric(target_y, output)
         return return_loss
@@ -362,14 +398,18 @@ class ModelNN:
 
     def get_loss_on_test(self, test_features, test_target):
         test_features = test_features.astype(float)
-        output = self.model(torch.tensor(test_features).to(self.device)).cpu().detach().numpy()[:, 0]
-        if self.problem == 'class':
-            if self.class_num ==2:
-                target_y = test_target.astype(int)
-                output = np.where(output > self.threshold, 1, 0)
-            if self.class_num > 2:
-                raise NotImplementedError('Multiclass classification is not implemented')
-        else:
+        output = self.model(torch.tensor(test_features).to(self.device))
+        if self.problem == 'multiclass':
+            output = output.cpu().detach().numpy()
+            max_possible_labels = np.argmax(output, axis=1)
+            output = max_possible_labels
+            target_y = test_target.astype(int)
+        if self.problem == 'binary_class':
+            output = output.cpu().detach().numpy()[:, 0]
+            target_y = test_target.astype(int)
+            output = np.where(output > self.threshold, 1, 0)
+        if self.problem == 'regres':
+            output = output.cpu().detach().numpy()[:, 0]
             target_y = test_target.astype(float)
         return_loss = self.target_metric(target_y, output)
         return return_loss
