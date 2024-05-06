@@ -1,6 +1,3 @@
-import math
-from copy import deepcopy
-
 import numpy as np
 
 from evolution.IndividStructures import DataStructureGraph
@@ -82,9 +79,14 @@ class IndividEvoOperators:
                         elements = [[node, i] for i in graph[node]]
                         edges.extend(elements)
                     probability = probability / np.sum(probability)
-                    edge_index = np.random.choice(np.arange(individ.number_of_edges),
-                                                  size=1,
-                                                  p=probability.astype(np.float64))[0]
+                    try:
+                        #TODO отследить откуда возникают наны в вероятностях (деление на 0)
+                        edge_index = np.random.choice(np.arange(individ.number_of_edges),
+                                                      size=1,
+                                                      p=probability.astype(np.float64))[0]
+                    except Exception:
+                        edge_index = np.random.choice(np.arange(individ.number_of_edges),
+                                                      size=1)[0]
                     edge = edges[edge_index]
                     individ.remove_edge(edge[0], edge[1])
         return self.individs
