@@ -45,7 +45,7 @@ class Population:
                 individ_model.train(individ, plot_convergence=False)
                 fitness = individ_model.get_loss_on_train()
                 if individ_model.problem == 'regres':
-                    # функция приспособленности графа тем лучше чем меньше ошибка модели
+                    # better fitness function for individ with less model loss function value on train
                     fitness = 1/fitness
                 individ.fitness = fitness
         return self

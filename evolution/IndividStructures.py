@@ -69,10 +69,7 @@ class DataStructureGraph:
             os.makedirs(self.cash_folder)
         print(f'Log folder set as {self.cash_folder}')
 
-        if eps is None:
-            self.epsilon_neighborhood = 0.15
-        else:
-            self.epsilon_neighborhood = eps
+        self.epsilon_neighborhood = eps
         if n_neighbors is None:
             if data.shape[0] <= 500:
                 self.n_neighbors = 1
@@ -150,8 +147,9 @@ class DataStructureGraph:
                 save_path: str = None):
 
         nodes_coordinates = self.source_data[self.basis]
+        initial_dims = nodes_coordinates.shape[1]
         if nodes_coordinates.shape[1] > 3:
-            print(f'Computing PCA from {nodes_coordinates.shape[1]} to 3')
+            print(f'Computing PCA from {initial_dims} to 3')
             pca = PCA(n_components=3)
             pca.fit(nodes_coordinates)
             nodes_coordinates = pca.transform(nodes_coordinates)
@@ -200,7 +198,7 @@ class DataStructureGraph:
                                           colorscale='Viridis',
                                           line=dict(color='rgb(50,50,50)', width=0.5)
                                           ),
-                              text=labels,
+                              text=nodes_labels,
                               hoverinfo='text'
                               )
 
@@ -213,7 +211,7 @@ class DataStructureGraph:
                     )
 
         layout = go.Layout(
-            title=f'{title}\nProjection of {nodes_coordinates.shape[1]} features to 3d',
+            title=f'{title}\nProjection of {initial_dims} features to 3d',
             width=1000,
             height=1000,
             showlegend=False,
@@ -300,7 +298,7 @@ class DataStructureGraph:
                 different[i][j] = nodes_data[i] - nodes_data[j]
                 if i == j:
                     continue
-                if distances[i][j] / np.max(distances) <= self.epsilon_neighborhood:
+                if self.matrix_connect[i][j] <= self.epsilon_neighborhood:
                     adjacency_matrix[i][j] = 1
                     adjacency_matrix[j][i] = 1
                     graph[i].append(j)
@@ -311,6 +309,20 @@ class DataStructureGraph:
     def find_edges(self, nodes_data, use_kernel=True):
         euclid_dists = euclidean_distances(nodes_data, nodes_data)
         matrix_connect = euclid_dists / np.max(euclid_dists)
+        self.matrix_connect = matrix_connect
+        if self.epsilon_neighborhood is None:
+            # TODO вывести формулу зависимости квантиля от числа нод,
+            #  вынести параметр квартиля в гиперпараметры
+            if nodes_data.shape[0] > 10000:
+                quantile = 0.005
+            elif 1000 <= nodes_data.shape[0] <= 10000:
+                quantile = 0.1
+            elif 500 <= nodes_data.shape[0] < 1000:
+                quantile = 0.25
+            elif nodes_data.shape[0] < 500:
+                quantile = 0.9
+            # filtering edges by saving 0.1 quantile of all edged based on edge distance
+            self.epsilon_neighborhood = np.round(np.quantile(matrix_connect, quantile), 2)
 
         if use_kernel:
             print('Form graph (laplassian method)')
@@ -327,7 +339,6 @@ class DataStructureGraph:
 
         self.graph = graph
         self.adjacency_matrix = adjacency_matrix
-        self.matrix_connect = matrix_connect
         self.number_of_edges = number_of_edges
 
     def add_edge(self, from_node: int, to_node: int):

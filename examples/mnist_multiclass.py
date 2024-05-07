@@ -1,4 +1,3 @@
-import ast
 import numpy as np
 from matplotlib import pyplot as plt
 from evolution.Evolution import Evolution
@@ -14,8 +13,10 @@ def get_data():
     new_feature = []
     new_target = []
     for i, elem in enumerate(target):
-        new_feature.append(new_features[i])
-        new_target.append(elem)
+        if elem not in [5, 6, 7, 8, 9]:
+            # remove 9 from classification because augmentation makes it equal to 6
+            new_feature.append(new_features[i])
+            new_target.append(elem)
     samples_num = 20000
     new_feature = np.array(new_feature[:samples_num], dtype='int64')
     new_feature[new_feature != 0] = 1
@@ -36,8 +37,9 @@ def run_example():
     train_target, test_target = split_dataset(target)
 
     base_individ = DataStructureGraph(data=train_features,
-                                      cash_folder='C:/Users/Julia/Documents/NSS_lab/fastnet/examples/info_log/mnist_multiclass',
-                                      n_neighbors=10
+                                      cash_folder='C:/Users/Julia/Documents/NSS_lab/fastnet/examples/info_log/mnist_5class',
+                                      n_neighbors=20,
+                                      graph_file='base_graph.pkl'
                                       )
     base_individ.show_3d(labels=train_target, title='Before evolution')
     base_individ.show_2d(labels=train_target, euclidean=True)
@@ -52,7 +54,7 @@ def run_example():
 
     # считаем для простой нейронки с базовым графом
     with_graph_model = ModelNN(train_features[base_individ.basis], train_target[base_individ.basis],
-                               num_epochs=300,
+                               num_epochs=100,
                                batch_size=300, problem='multiclass')
     with_graph_model.train(base_individ)
     with_graph_train_loss = with_graph_model.get_loss_on_train()
@@ -60,11 +62,11 @@ def run_example():
 
     # считаем для кучи нейронок для каждого индивида в популяции с выбором лучшей модели
     with_evolution_model = ModelNN(train_features[base_individ.basis], train_target[base_individ.basis],
-                                   num_epochs=300,
+                                   num_epochs=100,
                                    batch_size=300, problem='multiclass')
 
     evolution = Evolution(base_individ=base_individ,
-                          iterations=20,
+                          iterations=30,
                           population_size=7,
                           model_to_optimize=with_evolution_model)
     evolution.run()

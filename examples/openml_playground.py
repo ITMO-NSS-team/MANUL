@@ -43,7 +43,7 @@ def run_openml_regression(n_runs=5):
     datalist = openml.datasets.list_datasets(output_format="dataframe")
     datalist['ValidInstNum'] = datalist['NumberOfInstances'] - datalist['NumberOfInstancesWithMissingValues']
     datasets_list = datalist[(datalist['NumberOfClasses'] == 0) & (datalist['ValidInstNum'] < 20000) & (datalist['ValidInstNum'] > 50)]
-    for id in datasets_list['did'][19:]:
+    for id in datasets_list['did'][207:]:
         try:
             dataset = openml.datasets.get_dataset(id)
             dataset_name = dataset.name
