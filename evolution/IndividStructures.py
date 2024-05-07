@@ -7,7 +7,9 @@ import networkx as nx
 import numpy as np
 import numba.types as tp
 from matplotlib import pyplot as plt
-from numba import njit
+from numba import njit, types
+from numba.typed import Dict
+from scipy.optimize import minimize
 from datetime import datetime
 
 import topo as tp
@@ -15,6 +17,185 @@ from sklearn.decomposition import PCA
 from sklearn.metrics.pairwise import euclidean_distances
 import plotly.graph_objects as go
 import plotly
+
+class CustomPCA:
+
+    def __init__(self, nodes_coordinate, eds, graph, n_components):
+        self.structure = {}
+        self.start_point = None
+        self.eds = eds
+        self.var = []
+        self.avg = []
+        self.neighbours = Dict.empty(key_type=types.int64, value_type=types.int32[:])
+        # self.neighbours = graph
+        temp = None
+        for i in range(len(nodes_coordinate)):
+            self.structure[i] = {
+                'name': i,
+                'orig_pos': nodes_coordinate[i],
+                'neighbours': graph[i]
+            }
+            if self.start_point is None or len(graph[i]) > temp:
+                self.start_point = i
+                temp = len(graph[i])
+            self.neighbours[i] = np.asarray(graph[i], dtype=np.int32)
+
+        for i in range(len(nodes_coordinate[0])):
+            self.avg.append(np.average(nodes_coordinate[:, i]))
+            self.var.append(np.var(nodes_coordinate[:, i]))
+        
+        self.structure[self.start_point]['min_distance'] = 0
+        self.structure[self.start_point]['from_mode'] = None
+        self.dijkstra()
+        self.pca = PCA(n_components=n_components)
+    
+    def fit(self):
+        fit_data = self.get_data_for_pca()
+        self.pca.fit(fit_data)
+        self.set_new_params(self.pca.transform(fit_data))
+        self.find_raw_params()
+
+    def transform(self):
+        nodes = self.structure[self.start_point]['neighbours']
+        self.transform_nodes(nodes)
+        new_coordinate = [self.structure[index]['tr_pos'] for index in self.structure]
+
+        return np.array(new_coordinate)
+
+    def transform_nodes(self, nodes):
+        return_nodes = []
+        while len(nodes) > 0:
+            from_node, nodes = self.find_node_from(nodes)
+            if from_node is None:
+                nodes = []
+                continue
+            transform_nodes = self.find_all_next_nodes(from_node)
+            if len(transform_nodes) == 0:
+                continue
+            # self.test_transform(transform_nodes)
+            self.transform_part(transform_nodes)
+
+            nodes.extend(transform_nodes)
+            return_nodes.extend(transform_nodes)
+    
+    def transform_part(self, nodes):
+        for node_index in nodes:
+            all_results = []
+            rows = []
+
+            node = self.structure[node_index]
+            from_node = self.structure[node["from_node"]]
+            a = node["orig_pos"] - from_node["orig_pos"]
+            norm_of_a = self.find_norma(node["raw_pos"] - from_node["raw_pos"])
+
+            for neigh_node_index in from_node["neighbours"]:
+                if not self.structure[neigh_node_index].get("transform", None):
+                    continue
+
+                b = self.structure[neigh_node_index]["orig_pos"] - from_node["orig_pos"]
+                current_cos = np.dot(a, b) / (self.find_norma(a) * self.find_norma(b))
+                all_results.append(current_cos)
+                diff = self.structure[neigh_node_index]["tr_pos"] - from_node["tr_pos"]
+                row = diff.T / (norm_of_a * self.find_norma(diff))
+                rows.append(row)
+            x0 = from_node["tr_pos"]
+            cons = ({'type': 'eq',
+                'fun' : lambda x: self.find_norma(x) - norm_of_a})
+            res = minimize(self._fitness_wrapper, x0.reshape(-1), args=(np.array(rows), np.array(all_results)), method='SLSQP', constraints=cons)
+            self.structure[node_index]["tr_pos"] = res.x + from_node["tr_pos"]
+            self.structure[node_index]["transform"] = True
+
+    def find_raw_params(self):
+        for node_index in self.structure:
+            node = self.structure[node_index]
+            params = (node["orig_pos"] - self.avg) / self.var
+            res = self.pca.transform([params])
+            self.structure[node_index]["raw_pos"] = res[0]
+            self.structure[node_index]["tr_pos"] = res[0]
+
+    
+
+    def set_new_params(self, pca_params):
+        self.structure[self.start_point]["tr_pos"] = pca_params[0]
+        index_neighbors = self.structure[self.start_point]['neighbours']
+        for i, params in enumerate(pca_params):
+            if i == 0:
+                continue
+            self.structure[index_neighbors[i - 1]]["tr_pos"] = params
+
+    def get_data_for_pca(self):
+        result = [self.structure[self.start_point]['orig_pos']]
+        for neigh in self.structure[self.start_point]["neighbours"]:
+            result.append(self.structure[neigh]["orig_pos"])
+            self.structure[neigh]["transform"] = True
+        self.structure[self.start_point]["transform"] = True
+
+        return np.array(result)
+
+    @staticmethod
+    @njit
+    def fastik(neighbours, nodes, eds):
+        min_distance = np.array([-1 for _ in range(len(neighbours))])
+        from_node = np.array([0 for _ in range(len(neighbours))])
+        visit = np.array([False for _ in range(len(neighbours))])
+        min_distance[nodes[0]] = 0
+        while len(nodes) > 0:
+            node_index, nodes = nodes[0], nodes[1:]
+            for next_node_index in neighbours[node_index]:
+                their_edge = eds[node_index][next_node_index]
+                if min_distance[next_node_index] == -1 or min_distance[next_node_index] > min_distance[node_index] + their_edge:
+                    min_distance[next_node_index] = min_distance[node_index] + their_edge
+                    from_node[next_node_index] = node_index
+                
+                if not visit[next_node_index]:
+                    np.append(nodes, next_node_index)
+            visit[node_index] = True
+
+        return from_node, min_distance
+
+    @staticmethod
+    @njit
+    def find_norma(params):
+        result = 0
+        for param in params:
+            result += np.power(param, 2)
+        
+        return np.sqrt(result)
+    
+    def find_node_from(self, nodes):
+        max_trans = 0
+        result_node = None
+
+        for nn in nodes:
+            your_neighs = list(filter(lambda x_node: self.structure[x_node].get("transform", False), self.structure[nn]['neighbours']))
+            if len(your_neighs) > max_trans:
+                max_trans = len(your_neighs)
+                result_node = nn
+        
+        try:
+            tr = nodes.remove(result_node)
+        except Exception as e:
+            print("there are transform all")
+        return result_node, nodes
+    
+    def find_all_next_nodes(self, from_node):
+        result_nodes = []
+        for node_index in self.structure:
+            node = self.structure[node_index]
+            if node.get("from_node", None) is not None and node["from_node"] == from_node and not node.get("transform", None):
+                result_nodes.append(node_index)
+        
+        result_nodes = sorted(result_nodes, key=lambda x_node: self.structure[x_node]["min_distance"])
+        return result_nodes
+
+
+    def dijkstra(self):
+        from_nodes, min_d = CustomPCA.fastik(self.neighbours, np.array([self.start_point]), self.eds)
+        for i, value in enumerate(from_nodes):
+            self.structure[i]["from_node"] = value
+            self.structure[i]["min_distance"] = min_d[i]
+
+
 
 
 def get_basis(graph, source_data: np.ndarray):
@@ -112,9 +293,12 @@ class DataStructureGraph:
         """
         nodes_coordinates = self.source_data[self.basis]
         if nodes_coordinates.shape[1] > 2:
-            pca = PCA(n_components=2)
-            pca.fit(nodes_coordinates)
-            nodes_coordinates = pca.transform(nodes_coordinates)
+            pca = CustomPCA(nodes_coordinate=nodes_coordinates, eds=self.matrix_connect, graph=self.graph, n_components=2)
+            pca.fit()
+            nodes_coordinates = pca.transform()
+            # pca = PCA(n_components=2)
+            # pca.fit(nodes_coordinates)
+            # nodes_coordinates = pca.transform(nodes_coordinates)
 
         fig, ax = plt.subplots()
         if euclidean:
@@ -152,10 +336,13 @@ class DataStructureGraph:
 
         nodes_coordinates = self.source_data[self.basis]
         if nodes_coordinates.shape[1] > 3:
-            print(f'Computing PCA from {nodes_coordinates.shape[1]} to 3')
-            pca = PCA(n_components=3)
-            pca.fit(nodes_coordinates)
-            nodes_coordinates = pca.transform(nodes_coordinates)
+            pca = CustomPCA(nodes_coordinate=nodes_coordinates, eds=self.matrix_connect, graph=self.graph, n_components=3)
+            pca.fit()
+            nodes_coordinates = pca.transform()
+            # print(f'Computing PCA from {nodes_coordinates.shape[1]} to 3')
+            # pca = PCA(n_components=3)
+            # pca.fit(nodes_coordinates)
+            # nodes_coordinates = pca.transform(nodes_coordinates)
 
         Xn = []  # x-coordinates of nodes
         Yn = []  # y-coordinates
