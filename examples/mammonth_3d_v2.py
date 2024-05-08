@@ -1,13 +1,22 @@
 import ast
+import os
+import sys
+
+root_dir = '/'.join(os.getcwd().split("/")[:-1])
+sys.path.append(root_dir)
+
 import numpy as np
+import torch
 from matplotlib import pyplot as plt
+
 from evolution.Evolution import Evolution
+from evolution.PopulationStructures import Population
 from evolution.IndividStructures import DataStructureGraph
 from regularizator.ModuleNN import ModelNN
 
 
 def form_dataset():
-    fl = open("data/mammoth_3d.json ", "r")
+    fl = open("examples/data/mammoth_3d.json ", "r")
     data = fl.read()
     data = np.array(ast.literal_eval(data))
     colors = np.linspace(0, 0.9, len(data))
@@ -46,8 +55,8 @@ def run_example():
     train_target, test_target = split_dataset(target)
 
     base_individ = DataStructureGraph(data=train_features,
-                                      cash_folder='C:/Users/Julia/Documents/NSS_lab/fastnet/examples/info_log/mammonth_test',
-                                      )
+                                      cash_folder='info_log/2024_05_06-01_06_37_PM',
+                                      graph_file='base_graph.pkl')
 
 
     base_individ.show_3d(labels=train_target, title='Before evolution')
@@ -75,7 +84,7 @@ def run_example():
                                    batch_size=300, problem='regres')
 
     evolution = Evolution(base_individ=base_individ,
-                          iterations=20,
+                          iterations=10,
                           population_size=7,
                           model_to_optimize=with_evolution_model)
     evolution.run()

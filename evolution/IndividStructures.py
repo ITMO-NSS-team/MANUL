@@ -11,6 +11,7 @@ from numba import njit, types
 from numba.typed import Dict
 from scipy.optimize import minimize
 from datetime import datetime
+from copy import deepcopy
 
 import topo as tp
 from sklearn.decomposition import PCA
@@ -29,6 +30,17 @@ class CustomPCA:
         self.neighbours = Dict.empty(key_type=types.int64, value_type=types.int32[:])
         # self.neighbours = graph
         temp = None
+        i = 0
+
+        while i < len(nodes_coordinate[0]):
+            variance = np.var(nodes_coordinate[:, i])
+            if variance == 0:
+                nodes_coordinate = np.delete(nodes_coordinate, i, 1)
+                continue
+            self.avg.append(np.average(nodes_coordinate[:, i]))
+            self.var.append(variance)
+            i += 1
+            
         for i in range(len(nodes_coordinate)):
             self.structure[i] = {
                 'name': i,
@@ -39,15 +51,12 @@ class CustomPCA:
                 self.start_point = i
                 temp = len(graph[i])
             self.neighbours[i] = np.asarray(graph[i], dtype=np.int32)
-
-        for i in range(len(nodes_coordinate[0])):
-            self.avg.append(np.average(nodes_coordinate[:, i]))
-            self.var.append(np.var(nodes_coordinate[:, i]))
         
         self.structure[self.start_point]['min_distance'] = 0
         self.structure[self.start_point]['from_mode'] = None
         self.dijkstra()
         self.pca = PCA(n_components=n_components)
+        self.data = nodes_coordinate
     
     def fit(self):
         fit_data = self.get_data_for_pca()
@@ -56,6 +65,7 @@ class CustomPCA:
         self.find_raw_params()
 
     def transform(self):
+        print("im here")
         nodes = self.structure[self.start_point]['neighbours']
         self.transform_nodes(nodes)
         new_coordinate = [self.structure[index]['tr_pos'] for index in self.structure]
@@ -242,6 +252,7 @@ class DataStructureGraph:
         self.selected = False  # TODO вынести в класс предок - индивида (исп-ся только в эволюции)
         self.fitness = None
         self.source_data = data.astype(float)
+        self.lmds = None
         if cash_folder is None:
             self.cash_folder = f"info_log/{datetime.now().strftime('%Y_%m_%d-%I_%M_%S_%p')}"
         else:
@@ -293,7 +304,7 @@ class DataStructureGraph:
         """
         nodes_coordinates = self.source_data[self.basis]
         if nodes_coordinates.shape[1] > 2:
-            pca = CustomPCA(nodes_coordinate=nodes_coordinates, eds=self.matrix_connect, graph=self.graph, n_components=2)
+            pca = CustomPCA(nodes_coordinate=nodes_coordinates, eds=self.matrix_connect, graph=deepcopy(self.graph), n_components=2)
             pca.fit()
             nodes_coordinates = pca.transform()
             # pca = PCA(n_components=2)
@@ -332,11 +343,12 @@ class DataStructureGraph:
 
     def show_3d(self, labels: Optional[np.ndarray] = None,
                 title: str = None,
+                sym: Optional[np.ndarray] = None,
                 save_path: str = None):
 
         nodes_coordinates = self.source_data[self.basis]
         if nodes_coordinates.shape[1] > 3:
-            pca = CustomPCA(nodes_coordinate=nodes_coordinates, eds=self.matrix_connect, graph=self.graph, n_components=3)
+            pca = CustomPCA(nodes_coordinate=nodes_coordinates, eds=self.matrix_connect, graph=deepcopy(self.graph), n_components=3)
             pca.fit()
             nodes_coordinates = pca.transform()
             # print(f'Computing PCA from {nodes_coordinates.shape[1]} to 3')
@@ -382,7 +394,7 @@ class DataStructureGraph:
                               z=Zn,
                               mode='markers',
                               name='actors',
-                              marker=dict(symbol='circle',
+                              marker=dict(symbol=sym,
                                           size=6,
                                           color=colors,
                                           colorscale='Viridis',
@@ -522,7 +534,7 @@ class DataStructureGraph:
         self.matrix_connect = matrix_connect
         self.number_of_edges = number_of_edges
 
-    def add_edge(self, from_node: int, to_node: int):
+    def add_edge(self, from_node: int, to_node: int, new_dist: float=None):
         """
         Method for adding new edges.
         :param from_node:  start node of the edge
@@ -530,6 +542,10 @@ class DataStructureGraph:
         """
         self.graph[from_node].append(to_node)
         self.number_of_edges += 1
+        if new_dist:
+            self.matrix_connect[from_node][to_node] = new_dist
+            self.matrix_connect[to_node][from_node] = new_dist
+
 
     def remove_edge(self, from_node: int, to_node: int):
         """
@@ -543,19 +559,21 @@ class DataStructureGraph:
             self.graph[to_node].remove(from_node)
         self.number_of_edges -= 1
 
-    def twist_node(self, current_node: int):
+    def twist_node(self, current_node_ind: int):
         """
         Method for changing current node to another one from whole search space (source_data)
-        :param current_node:  index of node to replace
+        :param current_node_ind:  index of node to replace
         """
+        euclid_dists = euclidean_distances(self.source_data[self.basis], self.source_data[self.basis])
         all_nodes_indeces = np.arange(self.source_data.shape[0])
         available_nodes = np.delete(all_nodes_indeces, self.basis)
         new_node = available_nodes[np.random.choice(np.arange(available_nodes.shape[0]), size=1)[0]]
-        self.basis[current_node] = new_node
-        # recalculate distance between nodes
-        euclid_dists = euclidean_distances(self.source_data[self.basis], self.source_data[self.basis])
-        matrix_connect = euclid_dists / np.max(euclid_dists)
-        self.matrix_connect = matrix_connect
+        self.basis[current_node_ind] = new_node
+        childs = self.graph[current_node_ind]
+        for child in childs:
+            dist = np.linalg.norm(self.source_data[self.basis[current_node_ind]] - self.source_data[self.basis[child]])
+            self.matrix_connect[current_node_ind][child] = dist / np.max(euclid_dists)
+            self.matrix_connect[child][current_node_ind] = dist / np.max(euclid_dists)
 
     def get_start_node(self):
         """
@@ -628,6 +646,8 @@ class DataStructureGraph:
             del_list.append((node2, general_neighbours[i]))
 
         self.remove_edges(del_list)
+        if self.number_of_edges != self.get_n_edges():
+            print("KAPUTT")
 
     @property
     def laplassian(self):
@@ -636,6 +656,14 @@ class DataStructureGraph:
         for key in self.graph:
             laplassian[[key], [self.graph[key]]] = temp[[key], [self.graph[key]]]
         return laplassian
+    
+    def get_n_edges(self):
+        edges = []
+        for node in self.graph:
+            elements = [[node, i] for i in self.graph[node]]
+            edges.extend(elements)
+        
+        return len(edges)
 
     def calc_fullness(self):
         """

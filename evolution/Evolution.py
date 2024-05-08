@@ -123,5 +123,5 @@ class Evolution:
         # overwrite base_individ and base model to best individ
         best_individ_index = [ind.fitness for ind in self.population.individs_pool].index(max([ind.fitness for ind in self.population.individs_pool]))
         self.base_individ = self.population.individs_pool[best_individ_index]
-        self.base_model = self.base_model.train(self.base_individ)
+        self.base_model = self.base_model.train(self.base_individ, adaptive_lambda=False)
         self.base_individ.save_cash_object(name='final_graph')

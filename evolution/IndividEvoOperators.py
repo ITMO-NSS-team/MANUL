@@ -65,7 +65,10 @@ class IndividEvoOperators:
                     nodes = np.random.choice(np.arange(num_nodes), size=2, replace=False)
                     while current_laplassian[nodes[0]][nodes[1]] != 0:
                         nodes = np.random.choice(np.arange(num_nodes), size=2, replace=False)
-                    individ.add_edge(nodes[0], nodes[1])
+                    new_dist = np.random.uniform(0, 1)
+                    while new_dist == 0:
+                        new_dist = np.random.uniform(0, 1)
+                    individ.add_edge(nodes[0], nodes[1], new_dist=new_dist)
                     individ.check_vn_part(individ.source_data[individ.basis], nodes[0], nodes[1])
                 else:
                     # удаление ребра

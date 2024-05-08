@@ -159,7 +159,7 @@ class ModelNN:
         else:
             if abs(current_loss - last_loss) <= tolerance:
                 no_changes_counter += 1
-                print(f'Stop criteria {no_changes_counter} / {self.stop_criteria_count}')
+                # print(f'Stop criteria {no_changes_counter} / {self.stop_criteria_count}')
             last_loss = current_loss
         return last_loss, no_changes_counter
 
@@ -241,7 +241,7 @@ class ModelNN:
         :param plot_convergence: flag for plotting of mean epoch loss value
         """
         if lmds is None:
-            lmds = [1, 1]
+            lmds = [1, 1/((self.batch_size) ** 2)]
 
         self.model.train()
 
@@ -287,6 +287,7 @@ class ModelNN:
                             info_bar['nn_lmd'] = np.round(lmds[0], 5)
                             info_bar['graph_lmd'] = np.round(lmds[1], 5)
                             adaptive_lambda = False
+                            graph.lmds = lmds
 
                     if weight_loss and not adaptive_lambda:
                         nn_loss = self._get_scaled_loss(nn_loss_list)
@@ -306,6 +307,7 @@ class ModelNN:
             loss_epoch_mean = np.mean(loss_list)
 
             info_bar['Loss'] = np.round(loss_epoch_mean, 5)
+            # info_bar['stop_criterion'] = no_changes_epoch
             progress_bar.update()
             progress_bar.set_postfix_str(info_bar)
 
