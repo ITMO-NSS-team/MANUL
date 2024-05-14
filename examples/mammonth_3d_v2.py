@@ -46,8 +46,10 @@ def run_example():
     train_target, test_target = split_dataset(target)
 
     base_individ = DataStructureGraph(data=train_features,
-                                      cash_folder='C:/Users/Julia/Documents/NSS_lab/fastnet/examples/info_log/mammonth_test',
-                                      )
+                                      cash_folder='C:/Users/Julia/Documents/NSS_lab/fastnet/examples/info_log/mammonth_fix2',
+                                      n_neighbors=10,
+                                      epsilon_neighborhood=0.18,
+                                      graph_file='base_graph.pkl')
 
 
     base_individ.show_3d(labels=train_target, title='Before evolution')
@@ -70,30 +72,32 @@ def run_example():
     with_graph_test_loss = base_model.get_loss_on_test(test_features, test_target)
 
     # считаем для кучи нейронок для каждого индивида в популяции с выбором лучшей модели
-    with_evolution_model = ModelNN(train_features[base_individ.basis], train_target[base_individ.basis],
-                                   num_epochs=50,
-                                   batch_size=300, problem='regres')
 
-    evolution = Evolution(base_individ=base_individ,
-                          iterations=20,
-                          population_size=7,
-                          model_to_optimize=with_evolution_model)
-    evolution.run()
-    evolution.plot_evolution_fitnesses()
+    for i in range(5):
+        with_evolution_model = ModelNN(train_features[base_individ.basis], train_target[base_individ.basis],
+                                       num_epochs=50,
+                                       batch_size=300, problem='regres')
 
-    evolution.base_individ.show_2d(train_target, euclidean=True)
-    evolution.base_individ.show_3d(train_target, title='After evolution')
+        evolution = Evolution(base_individ=base_individ,
+                              iterations=30,
+                              population_size=7,
+                              model_to_optimize=with_evolution_model)
+        evolution.run()
+        evolution.plot_evolution_fitnesses()
 
-    with_evolution_train_loss = with_evolution_model.get_loss_on_train()
-    with_evolution_test_loss = with_evolution_model.get_loss_on_test(test_features, test_target)
+        #evolution.base_individ.show_2d(train_target, euclidean=True)
+        evolution.base_individ.show_3d(train_target, title=f'After evolution {i}')
 
-    plt.bar(['base', 'with graph', 'with evolution'],
-            [base_train_loss, with_graph_train_loss, with_evolution_train_loss])
-    plt.title('MSE on train set')
-    plt.show()
-    plt.bar(['base', 'with graph', 'with evolution'], [base_test_loss, with_graph_test_loss, with_evolution_test_loss])
-    plt.title('MSE on test set')
-    plt.show()
+        with_evolution_train_loss = with_evolution_model.get_loss_on_train()
+        with_evolution_test_loss = with_evolution_model.get_loss_on_test(test_features, test_target)
+
+        plt.bar(['base', 'with graph', 'with evolution'],
+                [base_train_loss, with_graph_train_loss, with_evolution_train_loss])
+        plt.title('MSE on train set')
+        plt.show()
+        plt.bar(['base', 'with graph', 'with evolution'], [base_test_loss, with_graph_test_loss, with_evolution_test_loss])
+        plt.title('MSE on test set')
+        plt.show()
 
 
 run_example()

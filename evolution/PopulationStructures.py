@@ -21,7 +21,7 @@ class Population:
         :return: class object with individs pool
         """
         if nodes_mutation_prob is None:
-            nodes_mutation_prob = 0.5
+            nodes_mutation_prob = 0.1
 
         individs_pool = [self.base_individ]
         for i in range(1, self.size):

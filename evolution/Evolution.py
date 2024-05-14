@@ -75,8 +75,7 @@ class Evolution:
         individ_parameters_dict = {}
         for k, individ in enumerate(self.population.individs_pool):
             individ_parameters_dict[k] = {'fitness': individ.fitness,
-                                          'basis': individ.basis,
-                                          'graph': individ.graph}
+                                          'basis': individ.basis}
         evolution_history[0] = individ_parameters_dict
 
         for i in range(self.iterations):
@@ -114,8 +113,7 @@ class Evolution:
             individ_parameters_dict = {}
             for k, individ in enumerate(self.population.individs_pool):
                 individ_parameters_dict[k] = {'fitness': individ.fitness,
-                                              'basis': individ.basis,
-                                              'graph': individ.graph}
+                                              'basis': individ.basis}
 
             evolution_history[i + 1] = individ_parameters_dict
         self.evolution_history = evolution_history
