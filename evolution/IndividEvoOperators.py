@@ -1,3 +1,5 @@
+import math
+
 import numpy as np
 
 from evolution.IndividStructures import DataStructureGraph
@@ -11,7 +13,7 @@ class IndividEvoOperators:
         """
         self.individs = individs
 
-    def mutate(self, nodes_mutation_prob: float,
+    def mutate(self, nodes_mutation_prob: float = 0.1,
                edges_len_mutation_prob: float = 0.3,
                edges_existence_mutation_prob: float = 0.05):
         if nodes_mutation_prob >= 1:
@@ -22,8 +24,8 @@ class IndividEvoOperators:
             individ.elitism = False
             individ.fitness = None
             num_nodes = individ.number_of_nodes
-            number_of_nodes_to_mutate = int(num_nodes * nodes_mutation_prob)
-            number_of_edges_to_mutate = int(individ.adjacency_matrix.size * edges_existence_mutation_prob)
+            number_of_nodes_to_mutate = int(math.ceil(num_nodes * nodes_mutation_prob))
+            number_of_edges_to_mutate = int(math.ceil(individ.adjacency_matrix.size * edges_existence_mutation_prob))
 
             # GRAPH BASE MUTATION
             if len(individ.basis) != individ.source_data.shape[0]:
@@ -42,8 +44,8 @@ class IndividEvoOperators:
 
             # fixing number of edges to add and to remove to close values
             min_num = np.min([inds_to_remove_edge.shape[1], inds_to_add_edge.shape[1]])
-            #min_num_with_disturbance = np.random.randint(-min_num, min_num) + min_num
-            min_num_with_disturbance = min_num
+            min_num_with_disturbance = np.random.randint(-min_num, min_num) + min_num
+            #min_num_with_disturbance = min_num
 
             if inds_to_add_edge.shape[1] != min_num:
                 inds_to_add_edge = inds_to_add_edge[:, :min_num_with_disturbance]
@@ -55,8 +57,12 @@ class IndividEvoOperators:
 
             # mutate edges length
             num_of_edges_to_mutate = int(num_nodes * edges_len_mutation_prob)
-            edges_to_mutate_indices = np.random.randint(num_nodes, size=(num_of_edges_to_mutate, 2))
-            individ.change_edges_length(edges_to_mutate_indices, mutate_intensity=0.1)
+            mask_matrix = np.tril(np.full(individ.adjacency_matrix.shape, 1), -1)
+            one_way_adj_matrix = mask_matrix * individ.adjacency_matrix
+            edges = np.array(np.where(one_way_adj_matrix == 1))
+
+            edges_to_mutate_indices = edges[:, np.random.randint(edges.shape[1], size=num_of_edges_to_mutate)]
+            individ.change_edges_length(edges_to_mutate_indices, mutate_intensity=0.2)
 
         return self.individs
 
@@ -82,8 +88,8 @@ class IndividEvoOperators:
 
         selected_node_index = np.random.randint(individ1.number_of_nodes)
 
-        subgraph1 = np.where(individ1.adjacency_matrix[selected_node_index] == 1)
-        subgraph2 = np.where(individ2.adjacency_matrix[selected_node_index] == 1)
+        subgraph1 = np.array(np.where(individ1.adjacency_matrix[selected_node_index] == 1))
+        subgraph2 = np.array(np.where(individ2.adjacency_matrix[selected_node_index] == 1))
 
         individ1.replace_subgraph(selected_node_index, subgraph2)
         individ2.replace_subgraph(selected_node_index, subgraph1)

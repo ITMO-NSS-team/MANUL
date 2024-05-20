@@ -48,9 +48,7 @@ def run_example():
     base_individ = DataStructureGraph(data=train_features,
                                       cash_folder='C:/Users/Julia/Documents/NSS_lab/fastnet/examples/info_log/mammonth_fix2',
                                       n_neighbors=10,
-                                      epsilon_neighborhood=0.18,
-                                      graph_file='base_graph.pkl')
-
+                                      epsilon_neighborhood=0.18,)
 
     base_individ.show_3d(labels=train_target, title='Before evolution')
     base_individ.show_2d(labels=train_target, euclidean=True)
@@ -79,7 +77,7 @@ def run_example():
                                        batch_size=300, problem='regres')
 
         evolution = Evolution(base_individ=base_individ,
-                              iterations=30,
+                              iterations=20,
                               population_size=7,
                               model_to_optimize=with_evolution_model)
         evolution.run()

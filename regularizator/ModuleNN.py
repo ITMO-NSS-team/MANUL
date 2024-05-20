@@ -1,3 +1,4 @@
+import functools
 from datetime import datetime
 from typing import Callable
 
@@ -6,7 +7,7 @@ from SALib import ProblemSpec
 import torch
 from matplotlib import pyplot as plt
 
-from sklearn.metrics import roc_curve, accuracy_score
+from sklearn.metrics import roc_curve, accuracy_score, f1_score
 import torch.nn as nn
 from torch import randperm, tensor
 from torch.optim import Adam
@@ -72,11 +73,11 @@ class ModelNN:
     def _init_target_metric(self, target_metric: [Callable, None]):
         if target_metric is None:
             if self.problem == 'regres':
-                return mean_squared_error
+                return 'mean_squared_error'
             if self.problem == 'binary_class':
-                return roc_auc_score
+                return 'roc_auc_score'
             if self.problem == 'multiclass':
-                return accuracy_score
+                return 'f1_score'
         else:
             return target_metric
 
@@ -222,7 +223,6 @@ class ModelNN:
             trans_target = target_y.astype('int')
             temp[np.arange(target_y.shape[0]).astype(int), trans_target] = 1
             target_y = torch.Tensor(temp).to(fl64).to(self.device)
-            #target_y = torch.Tensor(target_y.astype('int'))
         else:
             target_y = torch.Tensor(target_y).to(fl64).to(self.device)
         return target_y
@@ -375,6 +375,20 @@ class ModelNN:
             plt.close()
         plt.show()
 
+
+    def get_metric(self, true: np.ndarray, predicted:np.ndarray):
+        """
+        Funtion to calculate metric value for target and prediction
+        """
+        if self.target_metric == 'mean_squared_error':
+            return mean_squared_error(true, predicted)
+        if self.target_metric == 'roc_auc_score':
+            return roc_auc_score(true, predicted)
+        if self.target_metric == 'f1_score':
+            return f1_score(true, predicted, average='weighted')
+        else:
+            return self.target_metric(true, predicted)
+
     def get_loss_on_train(self):
         output = self.model(torch.tensor(self.features).to(self.device))
         if self.problem == 'multiclass':
@@ -389,7 +403,7 @@ class ModelNN:
         if self.problem == 'regres':
             output = output.cpu().detach().numpy()[:, 0]
             target_y = self.target.astype(float)
-        return_loss = self.target_metric(target_y, output)
+        return_loss = self.get_metric(target_y, output)
         return return_loss
 
     def predict(self, test_features):
@@ -411,5 +425,5 @@ class ModelNN:
         if self.problem == 'regres':
             output = output.cpu().detach().numpy()[:, 0]
             target_y = test_target.astype(float)
-        return_loss = self.target_metric(target_y, output)
+        return_loss = self.get_metric(target_y, output)
         return return_loss

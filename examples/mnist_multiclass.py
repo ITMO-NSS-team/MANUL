@@ -15,7 +15,7 @@ def get_data():
     new_target = []
     new_angles = []
     for i, elem in enumerate(target):
-        if elem not in [3, 4, 5, 6, 7, 8, 9]:
+        if elem not in [9]:
             # remove 9 from classification because augmentation makes it equal to 6
             new_feature.append(new_features[i])
             new_target.append(elem)
@@ -61,12 +61,12 @@ def run_example():
                                       cash_folder='C:/Users/Julia/Documents/NSS_lab/fastnet/examples/info_log/mnist_3class_fix',
                                       n_neighbors=20
                                       )
-    base_individ.show_3d(labels=train_target, markers=train_angles, title='Before evolution')
+    base_individ.show_3d(labels=train_target, title='Before evolution')
     base_individ.show_2d(labels=train_target, euclidean=True)
 
     # считаем для простой нейронки без графа
     base_model = ModelNN(train_features[base_individ.basis], train_target[base_individ.basis],
-                         num_epochs=50,
+                         num_epochs=100,
                          batch_size=300, problem='multiclass')
     base_model.train()
     base_train_loss = base_model.get_loss_on_train()
@@ -74,7 +74,7 @@ def run_example():
 
     # считаем для простой нейронки с базовым графом
     with_graph_model = ModelNN(train_features[base_individ.basis], train_target[base_individ.basis],
-                               num_epochs=50,
+                               num_epochs=100,
                                batch_size=300, problem='multiclass')
     with_graph_model.train(base_individ)
     with_graph_train_loss = with_graph_model.get_loss_on_train()
@@ -82,28 +82,28 @@ def run_example():
 
     # считаем для кучи нейронок для каждого индивида в популяции с выбором лучшей модели
     with_evolution_model = ModelNN(train_features[base_individ.basis], train_target[base_individ.basis],
-                                   num_epochs=50,
+                                   num_epochs=100,
                                    batch_size=300, problem='multiclass')
 
     evolution = Evolution(base_individ=base_individ,
-                          iterations=30,
-                          population_size=7,
+                          iterations=50,
+                          population_size=10,
                           model_to_optimize=with_evolution_model)
     evolution.run()
     evolution.plot_evolution_fitnesses()
 
     evolution.base_individ.show_2d(train_target, euclidean=True)
-    evolution.base_individ.show_3d(train_target, markers=train_angles, title='After evolution')
+    evolution.base_individ.show_3d(train_target, title='After evolution')
 
     with_evolution_train_loss = with_evolution_model.get_loss_on_train()
     with_evolution_test_loss = with_evolution_model.get_loss_on_test(test_features, test_target)
 
     plt.bar(['base', 'with graph', 'with evolution'],
             [base_train_loss, with_graph_train_loss, with_evolution_train_loss])
-    plt.title('Accuracy on train set')
+    plt.title('F1 on train set')
     plt.show()
     plt.bar(['base', 'with graph', 'with evolution'], [base_test_loss, with_graph_test_loss, with_evolution_test_loss])
-    plt.title('Accuracy on test set')
+    plt.title('F1 on test set')
     plt.show()
 
 

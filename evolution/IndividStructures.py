@@ -1,5 +1,7 @@
+import itertools
 import os
 import pickle
+import random
 from copy import deepcopy
 from typing import Optional
 
@@ -8,6 +10,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 from numba import njit
 from datetime import datetime
+
 
 import topo as tp
 from sklearn.decomposition import PCA
@@ -21,8 +24,7 @@ class DataStructureGraph:
                  n_neighbors: int = None,
                  epsilon_neighborhood: float = None,
                  graph_file: str = None,
-                 cash_folder: str = None,
-                 filter_obtuse_angles: bool = True):
+                 cash_folder: str = None):
         """
         Class for initialization individ  for evolution as complex graph structure with graph properties
         :param data: features table for graph structure creation
@@ -30,7 +32,6 @@ class DataStructureGraph:
         :param epsilon_neighborhood: epsilon distance between neighbors to decrease the closest
         :param graph_file: str - path to file .pkl with DataStructureGraph object
         :param cash_folder: str - path to save cash
-        :param filter_obtuse_angles:  filter edges by geodesic distance comparison with euclidean when create the graph
         """
         self.elitism = False
         self.selected = False
@@ -49,18 +50,7 @@ class DataStructureGraph:
 
         if graph_file is None and data is not None:
             self.source_data = data.astype(float)
-
-            if n_neighbors is None:
-                if data.shape[0] <= 500:
-                    n_neighbors = 1
-                if 500 < data.shape[0] <= 2000:
-                    n_neighbors = 2
-                if 2000 < data.shape[0]:
-                    n_neighbors = 10
-            else:
-                n_neighbors = n_neighbors
-
-            self.create_graph(data, n_neighbors, epsilon_neighborhood, filter_obtuse_angles)
+            self.create_graph(data, n_neighbors, epsilon_neighborhood)
             self.save_cash_object('base_graph')
 
     def save_cash_object(self, name: str = None):
@@ -99,11 +89,9 @@ class DataStructureGraph:
 
     def create_graph(self, nodes_data: np.ndarray,
                      n_neighbors: int,
-                     epsilon_neighborhood: float,
-                     filter_obtuse_angles: bool = True):
+                     epsilon_neighborhood: float):
         """
         Method to create graph from table data
-        :param filter_obtuse_angles: filter edges by geodesic distance comparison with euclidean
         :param epsilon_neighborhood: normalized to max distance threshold for long edges filtering
         :param n_neighbors: number of neighbors for kernel fit (filtered laplacian)
         :param nodes_data: matrix with features table data
@@ -111,32 +99,66 @@ class DataStructureGraph:
         euclid_dists = euclidean_distances(nodes_data, nodes_data)
         matrix_connect = euclid_dists / np.max(euclid_dists)
 
-        kernel = tp.tpgraph.Kernel(n_neighbors=n_neighbors, n_jobs=1, metric='cosine', fuzzy=True,
-                                   verbose=True)
-        print(f'Fit kernel, n_neighbors={n_neighbors} ')
-        kernel.fit(nodes_data)
-        print(f'Laplacian calculation')
-        filtered_lapl = kernel.L.todense()
+        # for small graphs fully connected adj matrix
+        filtered_lapl = np.ones(euclid_dists.shape)
+
+        if nodes_data.shape[0] > 500:
+            if n_neighbors is not None:
+                n_neighbors = n_neighbors
+            elif 500 < nodes_data.shape[0] <= 2000:
+                n_neighbors = 2
+            elif 2000 < nodes_data.shape[0]:
+                n_neighbors = 10
+            kernel = tp.tpgraph.Kernel(n_neighbors=n_neighbors, n_jobs=1, metric='cosine', fuzzy=True,
+                                       verbose=True)
+            print(f'Fit kernel, n_neighbors={n_neighbors} ')
+            kernel.fit(nodes_data)
+            print(f'Laplacian calculation')
+            filtered_lapl = kernel.L.todense()
 
         # filtering edges by filtered laplacian
-        adjacency_matrix = np.zeros(euclid_dists.shape)
-        adjacency_matrix[filtered_lapl != 0] = 1
-        np.fill_diagonal(adjacency_matrix, 0)
+        self.adjacency_matrix = np.zeros(euclid_dists.shape)
+        self.adjacency_matrix[filtered_lapl != 0] = 1
+        np.fill_diagonal(self.adjacency_matrix, 0)
 
         # get nodes pairs for edges
-        edges = np.array(np.where(adjacency_matrix != 0))
-        if filter_obtuse_angles:
-            print(f'Geodesic distances calculation')
-            geodesic_distances = kernel.SP
-            valid_edges_inds = np.where(geodesic_distances[edges[0], edges[1]] >= euclid_dists[edges[0], edges[1]])[0]
-            if valid_edges_inds.size != 0:
-                edges = edges[:, valid_edges_inds]
-        filtered_edges = edges[:, (edges[0] - edges[1]) != 0]
+        edges = np.array(np.where(self.adjacency_matrix != 0))
+
+        if self.number_of_nodes > 500:
+            print(f'Filter nodes')
+            matrix_connect[self.adjacency_matrix == 0] = None
+            for n in range(matrix_connect.shape[0]):
+                neigs = np.where(self.adjacency_matrix[n] != 0)[0]
+                neig_pairs = itertools.combinations(neigs, 2)
+                for pair in neig_pairs:
+                    neig1 = pair[0]
+                    neig2 = pair[1]
+                    cos = (matrix_connect[n][neig1]**2 - matrix_connect[n][neig2]**2 - matrix_connect[neig1, neig2]**2) / \
+                          (-2*matrix_connect[n][neig1]*matrix_connect[n][neig1])
+                    if cos < 0 or np.isnan(cos):
+                        matrix_connect[n] = None
+                        matrix_connect[:, n] = None
+                        self.adjacency_matrix[n] = 0
+                        self.adjacency_matrix[:, n] = 0
+                        break
+
+            base = np.where(np.sum(self.adjacency_matrix, axis=0) != 0)[0]
+
+        else:
+            base = np.unique(edges)
 
         # base is nodes which have at least one edge
-        self.basis = np.unique(filtered_edges)
-        adjacency_matrix = adjacency_matrix[self.basis][:, self.basis]
+        # TODO find cases why base can be empty
+        if base.size != 0:
+            self.basis = base
+        else:
+            self.basis = np.arange(matrix_connect.shape[0]).astype(int)
+        self.adjacency_matrix = self.adjacency_matrix[self.basis][:, self.basis]
 
+
+        # filtering too long edges (more than epsilon_neighborhood)
+        euclid_dists = euclidean_distances(nodes_data[self.basis], nodes_data[self.basis])
+        matrix_connect = euclid_dists / np.max(euclid_dists)
         if epsilon_neighborhood is None:
             # TODO  вынести параметр квартиля в гиперпараметры
             if nodes_data.shape[0] > 10000:
@@ -149,15 +171,29 @@ class DataStructureGraph:
             epsilon_neighborhood = np.round(np.quantile(matrix_connect, quantile), 2)
             print(f'epsilon_neighborhood = {epsilon_neighborhood}')
 
-        # filtering too long edges (more than epsilon_neighborhood)
-        euclid_dists = euclidean_distances(nodes_data[self.basis], nodes_data[self.basis])
-        matrix_connect = euclid_dists / np.max(euclid_dists)
-        euclid_adjacency_matrix = np.zeros(adjacency_matrix.shape)
-        euclid_adjacency_matrix[matrix_connect <= epsilon_neighborhood] = 1
-        np.fill_diagonal(euclid_adjacency_matrix, 0)
+        self.adjacency_matrix = np.zeros(euclid_dists.shape)
+        self.adjacency_matrix[matrix_connect <= epsilon_neighborhood] = 1
 
-        self.adjacency_matrix = euclid_adjacency_matrix
+        # random edges filter
+        default_ratio = 3 #available number of edges for one node
+        default_edges_num = self.basis.shape[0]*default_ratio
+        if self.number_of_edges > default_edges_num:
+            num_to_del = self.number_of_edges - default_edges_num
+
+            mask_matrix = np.full(self.adjacency_matrix.shape, 1)
+            mask_matrix = np.tril(mask_matrix, -1)
+            one_way_adj_matrix = mask_matrix * self.adjacency_matrix
+            edges = np.array(np.where(one_way_adj_matrix == 1))
+
+            inds_to_del = random.sample(range(0, edges.shape[1]), num_to_del)
+
+            edges_to_del = edges[:, inds_to_del]
+            self.adjacency_matrix[edges_to_del[0, :], edges_to_del[1, :]] = 0
+            self.adjacency_matrix[edges_to_del[1, :], edges_to_del[0, :]] = 0
+
+        np.fill_diagonal(self.adjacency_matrix, 0)
         self.matrix_connect = matrix_connect
+
 
     def add_edges(self, edges_list: np.ndarray):
         """
@@ -186,7 +222,6 @@ class DataStructureGraph:
         available_nodes = np.delete(all_nodes_source_indeces, self.basis)
         new_nodes_source_indices = available_nodes[np.random.choice(np.arange(available_nodes.shape[0]),
                                                                     size=current_nodes_indices.shape[0])]
-        self.basis = np.array(self.basis)
         self.basis[current_nodes_indices] = new_nodes_source_indices
         new_nodes_source_matrix = self.source_data[self.basis[current_nodes_indices]]
         new_nodes_distances = euclidean_distances(new_nodes_source_matrix, new_nodes_source_matrix)
@@ -218,7 +253,6 @@ class DataStructureGraph:
         self.adjacency_matrix[node][new_edges] = 1
         self.adjacency_matrix[new_edges, node] = 1
 
-
     @property
     def laplacian(self):
         """
@@ -245,7 +279,6 @@ class DataStructureGraph:
         Property return number of nodes in individ graph
         """
         return self.adjacency_matrix.shape[0]
-
 
     def show_2d(self, labels: Optional[np.ndarray] = None,
                 title: str = '',
@@ -319,12 +352,12 @@ class DataStructureGraph:
         Xe = []
         Ye = []
         Ze = []
+        line_colors = []
         for n in range(start_nodes_positions.shape[0]):
             Xe += [start_nodes_positions[n][0], end_nodes_positions[n][0], None]  # x-coordinates of edge ends
             Ye += [start_nodes_positions[n][1], end_nodes_positions[n][1], None]
             Ze += [start_nodes_positions[n][2], end_nodes_positions[n][2], None]
-
-        uniq_start_nodes_positions = nodes_coordinates[np.unique(edges[0]), :]
+            line_colors.append(self.matrix_connect[edges[0][n], edges[1][n]])
 
         if labels is not None:
             nodes_labels = labels[self.basis]
@@ -341,13 +374,14 @@ class DataStructureGraph:
                               y=Ye,
                               z=Ze,
                               mode='lines',
+                              #line=dict(color=line_colors, width=1),
                               line=dict(color='rgb(125,125,125)', width=1),
                               hoverinfo='none'
                               )
 
-        trace2 = go.Scatter3d(x=uniq_start_nodes_positions[:, 0],
-                              y=uniq_start_nodes_positions[:, 1],
-                              z=uniq_start_nodes_positions[:, 2],
+        trace2 = go.Scatter3d(x=nodes_coordinates[:, 0],
+                              y=nodes_coordinates[:, 1],
+                              z=nodes_coordinates[:, 2],
                               mode='markers',
                               name='actors',
                               marker=dict(symbol=(nodes_markers),
@@ -391,4 +425,3 @@ class DataStructureGraph:
                 title = '3d_graph'
             save_path = f'{self.cash_folder}/{title}.html'
         plotly.offline.plot(fig, filename=save_path)
-

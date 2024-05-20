@@ -82,7 +82,7 @@ class PopulationEvoOperators:
 
         mutator = IndividEvoOperators(selected_individs)
         # TODO прокинуть параметры мутации
-        mutated_individs = mutator.mutate(nodes_mutation_prob=0.1)
+        mutated_individs = mutator.mutate()
         self.population.individs_pool.extend(mutated_individs)
 
 

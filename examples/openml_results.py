@@ -5,7 +5,7 @@ import pandas as pd
 from matplotlib import pyplot as plt
 from matplotlib.ticker import FixedFormatter
 
-log_folder = 'C:/Users/Julia/Documents/NSS_lab/fastnet/examples/openml_log/regression/2024_05_06-22_50_50_PM'
+log_folder = 'C:/Users/Julia/Documents/NSS_lab/fastnet/examples/openml_log/regression/2024_05_15-17_16_57_PM'
 
 
 def save_boxplots():
