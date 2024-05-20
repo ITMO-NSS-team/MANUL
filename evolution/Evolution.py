@@ -12,6 +12,9 @@ class Evolution:
                  population_size: int,
                  iterations: int,
                  model_to_optimize: ModelNN,
+                 base_mutation=True,
+                 edges_mutation=True,
+                 edges_weight_mutation=True,
                  evo_operators_params: dict = None):
         """
         Class for set and run evolution optimization on graph for best model fitting on data
@@ -26,6 +29,9 @@ class Evolution:
         self.population_size = population_size
         self.iterations = iterations
         self.base_model = model_to_optimize
+        self.base_mutation = base_mutation
+        self.edges_mutation = edges_mutation
+        self.edges_weight_mutation = edges_weight_mutation
         self._init_evo_operators_parameters(evo_operators_params)
 
         self.population = self.init_population()
@@ -43,7 +49,9 @@ class Evolution:
                     self.evo_operators_params[operator][parameter] = evo_operators_params[operator][parameter]
 
     def init_population(self):
-        population = Population(base_individ=self.base_individ, size=self.population_size).generate()
+        population = Population(base_individ=self.base_individ, size=self.population_size).generate(base_mutation=self.base_mutation,
+                          edges_mutation=self.edges_mutation,
+                          edges_weight_mutation = self.edges_weight_mutation)
         return population
 
     def evaluate_fitness(self):
@@ -99,7 +107,10 @@ class Evolution:
 
             print('Mutate individs')
             pop_operators.mutate_population(mutation_prob=self.evo_operators_params["mutation"].
-                                            get('mutation_prob', None))
+                                            get('mutation_prob', None),
+                                            base_mutation=self.base_mutation,
+                                            edges_mutation=self.edges_mutation,
+                                            edges_weight_mutation=self.edges_weight_mutation)
 
             print('Update fitnesses')
             self.evaluate_fitness()

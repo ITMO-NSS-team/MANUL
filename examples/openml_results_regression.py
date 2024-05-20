@@ -5,8 +5,7 @@ import pandas as pd
 from matplotlib import pyplot as plt
 from matplotlib.ticker import FixedFormatter
 
-log_folder = 'C:/Users/Julia/Documents/NSS_lab/fastnet/examples/openml_log/regression/2024_05_15-17_16_57_PM'
-
+log_folder = 'C:/Users/Julia/Documents/NSS_lab/fastnet\examples/openml_paper_statement/regression/results/50_1000_2024_05_20-13_21_47_PM'
 
 def save_boxplots():
     # список для списков из 3х разбросов для 5 запусков
@@ -72,7 +71,7 @@ def form_mean_table():
 
     train_errors_df = errors_df[['base_train_loss', 'with_graph_train_loss', 'with_evolution_train_loss']].to_numpy()
     b = np.argsort(np.argsort(train_errors_df, axis=1), axis=1)
-    plt.rcParams['figure.figsize'] = (6, 16)
+    plt.rcParams['figure.figsize'] = (7, 10)
     im = plt.imshow(b, aspect="auto", cmap="Reds")
     plt.colorbar(im, ticks=np.array([0.0, 0.5, 1.0]) * b.max(),
                  format=FixedFormatter(["low", "middle", "high"]))

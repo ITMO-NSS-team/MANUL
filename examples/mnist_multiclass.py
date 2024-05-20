@@ -1,4 +1,7 @@
+from datetime import datetime
+
 import numpy as np
+import pandas as pd
 from matplotlib import pyplot as plt
 from evolution.Evolution import Evolution
 from evolution.IndividStructures import DataStructureGraph
@@ -47,7 +50,8 @@ def form_markers_by_angle(angles):
     return angles
 
 
-def run_example():
+def run_example(n_runs=10):
+
     feature, target, angles = get_data()
     train_features, test_features = split_dataset(feature)
     train_target, test_target = split_dataset(target)
@@ -56,55 +60,81 @@ def run_example():
     train_angles = form_markers_by_angle(train_angles)
     test_angles = form_markers_by_angle(test_angles)
 
+    train_base = []
+    train_with_graph = []
+    train_with_evolution = []
+    test_base = []
+    test_with_graph = []
+    test_with_evolution = []
 
-    base_individ = DataStructureGraph(data=train_features,
-                                      cash_folder='C:/Users/Julia/Documents/NSS_lab/fastnet/examples/info_log/mnist_3class_fix',
-                                      n_neighbors=20
-                                      )
-    base_individ.show_3d(labels=train_target, title='Before evolution')
-    base_individ.show_2d(labels=train_target, euclidean=True)
+    for run in range(n_runs):
+        start_time = datetime.now().strftime('%Y_%m_%d-%H_%M_%S_%p')
+        base_individ = DataStructureGraph(data=train_features,
+                                          cash_folder=f'C:/Users/Julia/Documents/NSS_lab/fastnet/examples/info_log/mnist_8class_noweightmut/{start_time}',
+                                          n_neighbors=20
+                                          )
+        base_individ.show_3d(labels=train_target, title='Before evolution')
+        base_individ.show_2d(labels=train_target, euclidean=True)
 
-    # считаем для простой нейронки без графа
-    base_model = ModelNN(train_features[base_individ.basis], train_target[base_individ.basis],
-                         num_epochs=100,
-                         batch_size=300, problem='multiclass')
-    base_model.train()
-    base_train_loss = base_model.get_loss_on_train()
-    base_test_loss = base_model.get_loss_on_test(test_features, test_target)
+        # считаем для простой нейронки без графа
+        base_model = ModelNN(train_features[base_individ.basis], train_target[base_individ.basis],
+                             num_epochs=100,
+                             batch_size=300, problem='multiclass')
+        base_model.train()
+        base_train_loss = base_model.get_loss_on_train()
+        base_test_loss = base_model.get_loss_on_test(test_features, test_target)
 
-    # считаем для простой нейронки с базовым графом
-    with_graph_model = ModelNN(train_features[base_individ.basis], train_target[base_individ.basis],
-                               num_epochs=100,
-                               batch_size=300, problem='multiclass')
-    with_graph_model.train(base_individ)
-    with_graph_train_loss = with_graph_model.get_loss_on_train()
-    with_graph_test_loss = base_model.get_loss_on_test(test_features, test_target)
-
-    # считаем для кучи нейронок для каждого индивида в популяции с выбором лучшей модели
-    with_evolution_model = ModelNN(train_features[base_individ.basis], train_target[base_individ.basis],
+        # считаем для простой нейронки с базовым графом
+        with_graph_model = ModelNN(train_features[base_individ.basis], train_target[base_individ.basis],
                                    num_epochs=100,
                                    batch_size=300, problem='multiclass')
+        with_graph_model.train(base_individ)
+        with_graph_train_loss = with_graph_model.get_loss_on_train()
+        with_graph_test_loss = base_model.get_loss_on_test(test_features, test_target)
 
-    evolution = Evolution(base_individ=base_individ,
-                          iterations=50,
-                          population_size=10,
-                          model_to_optimize=with_evolution_model)
-    evolution.run()
-    evolution.plot_evolution_fitnesses()
+        # считаем для кучи нейронок для каждого индивида в популяции с выбором лучшей модели
+        with_evolution_model = ModelNN(train_features[base_individ.basis], train_target[base_individ.basis],
+                                       num_epochs=100,
+                                       batch_size=300, problem='multiclass')
 
-    evolution.base_individ.show_2d(train_target, euclidean=True)
-    evolution.base_individ.show_3d(train_target, title='After evolution')
+        evolution = Evolution(base_individ=base_individ,
+                              iterations=50,
+                              population_size=10,
+                              model_to_optimize=with_evolution_model,
+                              edges_weight_mutation=False)
+        evolution.run()
+        evolution.plot_evolution_fitnesses()
 
-    with_evolution_train_loss = with_evolution_model.get_loss_on_train()
-    with_evolution_test_loss = with_evolution_model.get_loss_on_test(test_features, test_target)
+        evolution.base_individ.show_2d(train_target, euclidean=True)
+        evolution.base_individ.show_3d(train_target, title='After evolution')
 
-    plt.bar(['base', 'with graph', 'with evolution'],
-            [base_train_loss, with_graph_train_loss, with_evolution_train_loss])
-    plt.title('F1 on train set')
-    plt.show()
-    plt.bar(['base', 'with graph', 'with evolution'], [base_test_loss, with_graph_test_loss, with_evolution_test_loss])
-    plt.title('F1 on test set')
-    plt.show()
+        with_evolution_train_loss = with_evolution_model.get_loss_on_train()
+        with_evolution_test_loss = with_evolution_model.get_loss_on_test(test_features, test_target)
+
+        plt.bar(['base', 'with graph', 'with evolution'],
+                [base_train_loss, with_graph_train_loss, with_evolution_train_loss])
+        plt.title('F1 on train set')
+        plt.show()
+        plt.bar(['base', 'with graph', 'with evolution'], [base_test_loss, with_graph_test_loss, with_evolution_test_loss])
+        plt.title('F1 on test set')
+        plt.show()
+
+        train_base.append(base_train_loss)
+        train_with_graph.append(with_graph_train_loss)
+        train_with_evolution.append(with_evolution_train_loss)
+
+        test_base.append(base_test_loss)
+        test_with_graph.append(with_graph_test_loss)
+        test_with_evolution.append(with_evolution_test_loss)
+
+    df = pd.DataFrame()
+    df['train_base'] = train_base
+    df['train_with_graph'] = train_with_graph
+    df['train_with_evolution'] = train_with_evolution
+    df['test_base'] = test_base
+    df['test_with_graph'] = test_with_graph
+    df['test_with_evolution'] = test_with_evolution
+    df.to_csv(f'C:/Users/Julia/Documents/NSS_lab/fastnet/examples/info_log/mnist_8class/{n_runs}_mnist_8_class_aug.csv')
 
 
 run_example()

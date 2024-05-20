@@ -71,7 +71,10 @@ class PopulationEvoOperators:
             new_individs = mutator.crossover_individs()
             self.population.individs_pool.extend(new_individs)
 
-    def mutate_population(self, mutation_prob: int = None):
+    def mutate_population(self, base_mutation: bool,
+                          edges_mutation: bool,
+                          edges_weight_mutation: bool,
+                          mutation_prob: int = None):
         selected_population = self.population.individs_pool
         if mutation_prob is None:
             mutation_prob = 0.3
@@ -80,7 +83,7 @@ class PopulationEvoOperators:
         selected_individs = np.random.choice(selected_population, replace=False, size=number_of_individs_to_mutate).tolist()
         selected_individs = [deepcopy(ind) for ind in selected_individs]
 
-        mutator = IndividEvoOperators(selected_individs)
+        mutator = IndividEvoOperators(selected_individs, base_mutation, edges_mutation, edges_weight_mutation)
         # TODO прокинуть параметры мутации
         mutated_individs = mutator.mutate()
         self.population.individs_pool.extend(mutated_individs)

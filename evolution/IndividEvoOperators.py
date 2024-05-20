@@ -6,16 +6,25 @@ from evolution.IndividStructures import DataStructureGraph
 
 
 class IndividEvoOperators:
-    def __init__(self, individs: list[DataStructureGraph]):
+    def __init__(self, individs: list[DataStructureGraph],
+                 base_mutation: bool = True,
+                 edges_mutation: bool = True,
+                 edges_weight_mutation: bool = True,
+                 ):
         """
         Class for applying available evolutionary operators to individs
         :param individs: list with graph individs for changing
         """
         self.individs = individs
+        self.base_mutation = base_mutation
+        self.edges_mutation = edges_mutation
+        self.edges_weight_mutation = edges_weight_mutation
 
-    def mutate(self, nodes_mutation_prob: float = 0.1,
+    def mutate(self,
+               nodes_mutation_prob: float = 0.1,
                edges_len_mutation_prob: float = 0.3,
-               edges_existence_mutation_prob: float = 0.05):
+               edges_existence_mutation_prob: float = 0.05,
+               ):
         if nodes_mutation_prob >= 1:
             raise Exception(
                 f'IndividEvoOperators.mutate nodes_mutation_prob={nodes_mutation_prob} should be from 0 to 1')
@@ -28,41 +37,44 @@ class IndividEvoOperators:
             number_of_edges_to_mutate = int(math.ceil(individ.adjacency_matrix.size * edges_existence_mutation_prob))
 
             # GRAPH BASE MUTATION
-            if len(individ.basis) != individ.source_data.shape[0]:
-                # nodes mutation runs only when base is not equal to full graph
-                nodes_indices_to_change = np.random.randint(num_nodes, size=number_of_nodes_to_mutate)
-                individ.twist_nodes(nodes_indices_to_change)
+            if self.base_mutation:
+                if len(individ.basis) != individ.source_data.shape[0]:
+                    # nodes mutation runs only when base is not equal to full graph
+                    nodes_indices_to_change = np.random.randint(num_nodes, size=number_of_nodes_to_mutate)
+                    individ.twist_nodes(nodes_indices_to_change)
 
             # GRAPH EDGES MUTATION
-            nodes_indices_to_change_edge = np.random.randint(num_nodes, size=(2, number_of_edges_to_mutate))
-            # remove circular edges
-            nodes_indices_to_change_edge = nodes_indices_to_change_edge[:, nodes_indices_to_change_edge[0] != nodes_indices_to_change_edge[1]]
-            edges_values = individ.adjacency_matrix[nodes_indices_to_change_edge[0], nodes_indices_to_change_edge[1]]
+            if self.edges_mutation:
+                nodes_indices_to_change_edge = np.random.randint(num_nodes, size=(2, number_of_edges_to_mutate))
+                # remove circular edges
+                nodes_indices_to_change_edge = nodes_indices_to_change_edge[:, nodes_indices_to_change_edge[0] != nodes_indices_to_change_edge[1]]
+                edges_values = individ.adjacency_matrix[nodes_indices_to_change_edge[0], nodes_indices_to_change_edge[1]]
 
-            inds_to_add_edge = nodes_indices_to_change_edge[:, edges_values == 0]
-            inds_to_remove_edge = nodes_indices_to_change_edge[:, edges_values == 1]
+                inds_to_add_edge = nodes_indices_to_change_edge[:, edges_values == 0]
+                inds_to_remove_edge = nodes_indices_to_change_edge[:, edges_values == 1]
 
-            # fixing number of edges to add and to remove to close values
-            min_num = np.min([inds_to_remove_edge.shape[1], inds_to_add_edge.shape[1]])
-            min_num_with_disturbance = np.random.randint(-min_num, min_num) + min_num
-            #min_num_with_disturbance = min_num
+                # fixing number of edges to add and to remove to close values
+                min_num = np.min([inds_to_remove_edge.shape[1], inds_to_add_edge.shape[1]])
+                min_num_with_disturbance = np.random.randint(-min_num, min_num) + min_num
+                #min_num_with_disturbance = min_num
 
-            if inds_to_add_edge.shape[1] != min_num:
-                inds_to_add_edge = inds_to_add_edge[:, :min_num_with_disturbance]
-            if inds_to_remove_edge.shape[1] != min_num:
-                inds_to_remove_edge = inds_to_remove_edge[:, :min_num_with_disturbance]
+                if inds_to_add_edge.shape[1] != min_num:
+                    inds_to_add_edge = inds_to_add_edge[:, :min_num_with_disturbance]
+                if inds_to_remove_edge.shape[1] != min_num:
+                    inds_to_remove_edge = inds_to_remove_edge[:, :min_num_with_disturbance]
 
-            individ.add_edges(inds_to_add_edge)
-            individ.remove_edges(inds_to_remove_edge)
+                individ.add_edges(inds_to_add_edge)
+                individ.remove_edges(inds_to_remove_edge)
 
             # mutate edges length
-            num_of_edges_to_mutate = int(num_nodes * edges_len_mutation_prob)
-            mask_matrix = np.tril(np.full(individ.adjacency_matrix.shape, 1), -1)
-            one_way_adj_matrix = mask_matrix * individ.adjacency_matrix
-            edges = np.array(np.where(one_way_adj_matrix == 1))
+            if self.edges_weight_mutation:
+                num_of_edges_to_mutate = int(num_nodes * edges_len_mutation_prob)
+                mask_matrix = np.tril(np.full(individ.adjacency_matrix.shape, 1), -1)
+                one_way_adj_matrix = mask_matrix * individ.adjacency_matrix
+                edges = np.array(np.where(one_way_adj_matrix == 1))
 
-            edges_to_mutate_indices = edges[:, np.random.randint(edges.shape[1], size=num_of_edges_to_mutate)]
-            individ.change_edges_length(edges_to_mutate_indices, mutate_intensity=0.2)
+                edges_to_mutate_indices = edges[:, np.random.randint(edges.shape[1], size=num_of_edges_to_mutate)]
+                individ.change_edges_length(edges_to_mutate_indices, mutate_intensity=0.2)
 
         return self.individs
 
