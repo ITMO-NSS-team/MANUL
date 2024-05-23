@@ -1,13 +1,13 @@
-import functools
 from datetime import datetime
 from typing import Callable
+from tqdm import tqdm
 
 import numpy as np
 from SALib import ProblemSpec
 import torch
 from matplotlib import pyplot as plt
 
-from sklearn.metrics import roc_curve, accuracy_score, f1_score
+from sklearn.metrics import roc_curve, f1_score
 import torch.nn as nn
 from torch import randperm, tensor
 from torch.optim import Adam
@@ -16,6 +16,9 @@ from sklearn.metrics import roc_auc_score, mean_squared_error
 
 from evolution.IndividStructures import DataStructureGraph
 
+import warnings
+warnings.filterwarnings('ignore', module='SALib')  # pandas deprecation warning
+warnings.filterwarnings('ignore', module='numpy')  # empty slice mean
 
 class ModelNN:
     def __init__(self, train_feature: np.ndarray,
@@ -209,10 +212,17 @@ class ModelNN:
         nn_disp = sum(ST[:nn_loss.shape[1]])
         graph_disp = sum(ST[nn_loss.shape[1]:])
 
+        if nn_disp == 0 or graph_disp == 0:
+            print(f'Lambda search failed: nn_disp={nn_disp}, graph_disp={graph_disp}')
+            return [1, 1]
+
         lam_nn = total_disp / nn_disp
         lam_graph = total_disp / graph_disp
 
-        return [lam_nn / (np.max([lam_nn, lam_graph])), lam_graph / (np.max([lam_nn, lam_graph]))]
+        if np.isnan(lam_nn) or np.isnan(lam_graph):
+            print(f'Lambda search failed: nn_disp={lam_nn}, graph_disp={lam_graph}')
+            return [1, 1]
+        return [lam_nn / (np.nanmax([lam_nn, lam_graph])), lam_graph / (np.nanmax([lam_nn, lam_graph]))]
 
     def preprocess_target(self, nn_output, target_y: np.ndarray):
         """
@@ -227,9 +237,11 @@ class ModelNN:
             target_y = torch.Tensor(target_y).to(fl64).to(self.device)
         return target_y
 
-
-    def train(self, graph: DataStructureGraph = None, plot_convergence=True, lmds: list[float, float] = None,
-              weight_loss: bool = False, adaptive_lambda: bool = True):
+    def train(self, graph: DataStructureGraph = None,
+              plot_convergence=False,
+              lmds: list[float, float] = None,
+              weight_loss: bool = False,
+              adaptive_lambda: bool = True):
         """
         :param adaptive_lambda: flag to calculate adaptive weights for combined loss on part of epochs
         :param weight_loss: flag to use dynamical weighting (by scaling) of two parts of combined loss
@@ -249,6 +261,9 @@ class ModelNN:
         losses = []
         graph_losses = []
         nn_losses = []
+
+        progress_bar = tqdm(list(np.arange(self.num_epochs)), desc="Epoch", colour="white")
+        info_bar = {"Loss": 0}
 
         while epoch < self.num_epochs and no_changes_epoch <= self.stop_criteria_count:
             permutation = randperm(self.features.shape[0])
@@ -277,7 +292,8 @@ class ModelNN:
                             loss = lmds[0] * loss + lmds[1] * tensor(add_loss)
                         if epoch > lmds_epochs:  # then lambdas are used as new constants
                             lmds = self._get_adaptive_lambda(losses, graph_losses, nn_losses)
-                            print(f'Set lambdas nn_lmd = {lmds[0]}, graph_lmd = {lmds[1]}')
+                            info_bar['nn_lmd'] = np.round(lmds[0], 5)
+                            info_bar['graph_lmd'] = np.round(lmds[1], 5)
                             adaptive_lambda = False
 
                     if weight_loss and not adaptive_lambda:
@@ -296,16 +312,18 @@ class ModelNN:
                 self.optimizer.step()
 
             loss_epoch_mean = np.mean(loss_list)
+            info_bar['Loss'] = np.round(loss_epoch_mean, 5)
+            progress_bar.update()
+            progress_bar.set_postfix_str(info_bar)
 
-            print(f'Epoch: {epoch} / {self.num_epochs} - Loss = {np.round(loss_epoch_mean, 5)}')
             losses.append(np.round(loss_epoch_mean, 5))
             graph_losses.append(np.round(np.mean(graph_loss_list), 5))
             nn_losses.append(np.round(np.mean(nn_loss_list), 5))
 
             if graph is not None:
-                last_loss, no_changes_epoch = self._check_stop_criteria_on_graph(last_loss, loss_epoch_mean,
+                last_loss, no_changes_epoch = self._check_stop_criteria_on_graph(last_loss,
+                                                                                 loss_epoch_mean,
                                                                                  no_changes_epoch)
-
             epoch += 1
         self.model.eval()
         if plot_convergence:
@@ -375,10 +393,9 @@ class ModelNN:
             plt.close()
         plt.show()
 
-
-    def get_metric(self, true: np.ndarray, predicted:np.ndarray):
+    def get_metric(self, true: np.ndarray, predicted: np.ndarray):
         """
-        Funtion to calculate metric value for target and prediction
+        Function to calculate metric value for target and prediction
         """
         if self.target_metric == 'mean_squared_error':
             return mean_squared_error(true, predicted)

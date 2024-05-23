@@ -41,7 +41,7 @@ class PopulationEvoOperators:
         probabilities = population_fitnesses / fits_sum
 
         try:
-            # TODO отдебажить ошибки и убрать try
+            # TODO debug and remove try
             winners = [selected_individs[i] for i in
                        np.random.choice(np.arange(tournament_size), size=winners_size, p=probabilities,
                                         replace=False)]
@@ -84,7 +84,7 @@ class PopulationEvoOperators:
         selected_individs = [deepcopy(ind) for ind in selected_individs]
 
         mutator = IndividEvoOperators(selected_individs, base_mutation, edges_mutation, edges_weight_mutation)
-        # TODO прокинуть параметры мутации
+        # TODO throw mutation parameters to upper layers
         mutated_individs = mutator.mutate()
         self.population.individs_pool.extend(mutated_individs)
 
@@ -102,13 +102,16 @@ class PopulationEvoOperators:
         self.population.individs_pool = [self.population.individs_pool[i] for i in uniq_inds]
 
         # crop population to fixed size
+
+        # test code - if individs are chosen by probability
         '''fitnesses = [f.fitness for f in self.population.individs_pool]
         fitnesses = (fitnesses - np.min(fitnesses)) / (np.max(fitnesses) - np.min(fitnesses))
         posibs_to_live = fitnesses / np.sum(fitnesses)
         alive_inds_indices = np.random.choice(len(fitnesses), size=size_to_save-len(elite), p=posibs_to_live, replace=False)
         self.population.individs_pool = [self.population.individs_pool[i] for i in alive_inds_indices]'''
 
-        self.population.individs_pool = [x for _, x in sorted(zip([fitnesses[i] for i in uniq_inds], self.population.individs_pool),
+        self.population.individs_pool = [x for _, x in sorted(zip([fitnesses[i] for i in uniq_inds],
+                                                                  self.population.individs_pool),
                                                               key=lambda pair: pair[0])][-size_to_save + len(elite):]
 
         # if unique individs less than population size extend with elite

@@ -36,14 +36,14 @@ class DataStructureGraph:
         self.elitism = False
         self.selected = False
         self.fitness = None
+
         if cash_folder is None:
-            self.cash_folder = f"info_log/{datetime.now().strftime('%Y_%m_%d-%I_%M_%S_%p')}"
+            self.cash_folder = f"cash/{datetime.now().strftime('%Y_%m_%d-%I_%M_%S_%p')}"
         else:
             self.cash_folder = cash_folder
-
         if not os.path.exists(self.cash_folder):
             os.makedirs(self.cash_folder)
-        print(f'Log folder set as {self.cash_folder}')
+        print(f'Cash folder set as {self.cash_folder}')
 
         if graph_file is not None:
             self.load_cash_object(graph_file)
@@ -64,14 +64,21 @@ class DataStructureGraph:
             pickle.dump(self.__dict__, outp, pickle.HIGHEST_PROTOCOL)
             print(f'Graph object saved to {self.cash_folder}/{name}.pkl')
 
-    def load_cash_object(self, name):
+    def load_cash_object(self, path: str):
         """
         Function to load self object from pickle file
-        :param name: name of file with graph object .pkl to load in cash folder
+        :param path: name of file with graph object .pkl to load in cash folder or absolute path
         """
-        with open(f'{self.cash_folder}/{name}', 'rb') as inp:
-            tmp_dict = pickle.load(inp)
-            self.__dict__.update(tmp_dict)
+        if os.path.isfile(path):
+            with open(path, 'rb') as inp:
+                tmp_dict = pickle.load(inp)
+                self.__dict__.update(tmp_dict)
+        elif os.path.isfile(f'{self.cash_folder}/{path}'):
+            with open(f'{self.cash_folder}/{path}', 'rb') as inp:
+                tmp_dict = pickle.load(inp)
+                self.__dict__.update(tmp_dict)
+        else:
+            raise Exception(f'Failed to load graph object, no such file {path}')
 
     def loss_function(self, f_x: np.ndarray, indices=None):
         """
@@ -96,6 +103,7 @@ class DataStructureGraph:
         :param n_neighbors: number of neighbors for kernel fit (filtered laplacian)
         :param nodes_data: matrix with features table data
         """
+        print('Calculate Euclidean distances')
         euclid_dists = euclidean_distances(nodes_data, nodes_data)
         matrix_connect = euclid_dists / np.max(euclid_dists)
 
@@ -155,12 +163,11 @@ class DataStructureGraph:
             self.basis = np.arange(matrix_connect.shape[0]).astype(int)
         self.adjacency_matrix = self.adjacency_matrix[self.basis][:, self.basis]
 
-
         # filtering too long edges (more than epsilon_neighborhood)
         euclid_dists = euclidean_distances(nodes_data[self.basis], nodes_data[self.basis])
         matrix_connect = euclid_dists / np.max(euclid_dists)
         if epsilon_neighborhood is None:
-            # TODO  вынести параметр квартиля в гиперпараметры
+            # TODO  remove quantile to hyperparameters
             if nodes_data.shape[0] > 10000:
                 quantile = 0.005
             elif 1000 <= nodes_data.shape[0] <= 10000:
@@ -175,7 +182,7 @@ class DataStructureGraph:
         self.adjacency_matrix[matrix_connect <= epsilon_neighborhood] = 1
 
         # random edges filter
-        default_ratio = 3 #available number of edges for one node
+        default_ratio = 3 # available number of edges for one node
         default_edges_num = self.basis.shape[0]*default_ratio
         if self.number_of_edges > default_edges_num:
             num_to_del = self.number_of_edges - default_edges_num
@@ -193,7 +200,6 @@ class DataStructureGraph:
 
         np.fill_diagonal(self.adjacency_matrix, 0)
         self.matrix_connect = matrix_connect
-
 
     def add_edges(self, edges_list: np.ndarray):
         """
@@ -256,9 +262,9 @@ class DataStructureGraph:
     @property
     def laplacian(self):
         """
-        L=D-A, где D - степени вершин, а A - матрица весов
-        Лапласиан как разница матрицы степеней вершин и матрицы весов,
-        матрица степеней считается как сумма весов исходящих из вершины
+        L=D-A, where D are the degrees of the vertices and A is the weight matrix
+        Laplacian as the difference between the degree matrix of vertices and the weight matrix,
+        the degree matrix is calculated as the sum of the weights emanating from the vertex
         """
         weights_matrix = deepcopy(self.matrix_connect)
         weights_matrix[self.adjacency_matrix == 0] = 0
@@ -302,7 +308,8 @@ class DataStructureGraph:
         if euclidean:
             g = nx.Graph(self.adjacency_matrix)
         if not euclidean:
-            g = nx.Graph(self.matrix_connect)
+            weights_matrix = self.adjacency_matrix*self.matrix_connect
+            g = nx.Graph(weights_matrix)
         if labels is not None:
             nodes_labels = labels[self.basis]
             colors = nodes_labels
@@ -319,7 +326,7 @@ class DataStructureGraph:
             n.set_edgecolor('black')
 
         if not euclidean:
-            # drawing without fixed nodes position, but based on edges lengths
+            # drawing without fixed nodes position, but based on edges weights(length)
             nx.draw(g, node_color=colors, cmap=cmap_name, node_size=15, linewidths=0.1)
 
         fig.suptitle(title)
@@ -332,7 +339,13 @@ class DataStructureGraph:
                 markers: Optional[np.ndarray] = None,
                 title: str = None,
                 save_path: str = None):
-
+        """
+        Function to visualize individ graph structure in 3D projection as html page
+        :param labels: array with target values of samples (nodes)
+        :param markers: list with markers names for each target value
+        :param title: string with name of plot
+        :param save_path: string with path to save plot
+        """
         nodes_coordinates = self.source_data[self.basis]
         initial_dims = nodes_coordinates.shape[1]
         if nodes_coordinates.shape[1] > 3:

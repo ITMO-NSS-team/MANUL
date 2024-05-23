@@ -49,9 +49,10 @@ class Evolution:
                     self.evo_operators_params[operator][parameter] = evo_operators_params[operator][parameter]
 
     def init_population(self):
-        population = Population(base_individ=self.base_individ, size=self.population_size).generate(base_mutation=self.base_mutation,
-                          edges_mutation=self.edges_mutation,
-                          edges_weight_mutation = self.edges_weight_mutation)
+        population = Population(base_individ=self.base_individ, size=self.population_size).generate(
+            base_mutation=self.base_mutation,
+            edges_mutation=self.edges_mutation,
+            edges_weight_mutation=self.edges_weight_mutation)
         return population
 
     def evaluate_fitness(self):
@@ -63,7 +64,7 @@ class Evolution:
             generation_fitnesses = [self.evolution_history[generation][g]['fitness'] for g in
                                     self.evolution_history[generation].keys()]
             if reverse:
-                generation_fitnesses = 1/np.array(generation_fitnesses)
+                generation_fitnesses = 1 / np.array(generation_fitnesses)
                 ylab = 'Loss'
             plt.scatter([generation] * len(self.evolution_history[generation]), generation_fitnesses)
 
@@ -130,7 +131,8 @@ class Evolution:
         self.evolution_history = evolution_history
 
         # overwrite base_individ and base model to best individ
-        best_individ_index = [ind.fitness for ind in self.population.individs_pool].index(max([ind.fitness for ind in self.population.individs_pool]))
+        best_individ_index = [ind.fitness for ind in self.population.individs_pool].index(
+            max([ind.fitness for ind in self.population.individs_pool]))
         self.base_individ = self.population.individs_pool[best_individ_index]
         self.base_model = self.base_model.train(self.base_individ)
         self.base_individ.save_cash_object(name='final_graph')

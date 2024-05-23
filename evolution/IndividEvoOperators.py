@@ -23,7 +23,7 @@ class IndividEvoOperators:
     def mutate(self,
                nodes_mutation_prob: float = 0.1,
                edges_len_mutation_prob: float = 0.3,
-               edges_existence_mutation_prob: float = 0.05,
+               edges_existence_mutation_prob: float = 0.2,
                ):
         if nodes_mutation_prob >= 1:
             raise Exception(

@@ -7,10 +7,6 @@ from evolution.IndividStructures import DataStructureGraph
 def test_edge_len_mutation():
     n = 10
     matrix = np.zeros((n, n), dtype=float)
-    '''matrix = (matrix + matrix.T) / 2
-    np.fill_diagonal(matrix, 0)
-    plt.imshow(matrix)
-    plt.show()'''
 
     individ_shell = DataStructureGraph()
     individ_shell.matrix_connect = matrix
@@ -35,7 +31,7 @@ def test_subgraph_replacing():
     individ_shell.adjacency_matrix = matrix
     edges_before = individ_shell.number_of_edges
 
-    individ_shell.replace_subgraph(5, [1, 2, 3])
+    individ_shell.replace_subgraph(5, np.array([1, 2, 3]))
     edges_after = individ_shell.number_of_edges
     plt.imshow(individ_shell.adjacency_matrix)
     plt.show()

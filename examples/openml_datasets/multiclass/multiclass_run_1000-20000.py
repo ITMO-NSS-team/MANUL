@@ -1,38 +1,45 @@
 import os
 from datetime import datetime
 
+import numpy as np
 import openml
-import pandas as pd
 from matplotlib import pyplot as plt
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import LabelEncoder
+from sklearn.model_selection import StratifiedShuffleSplit
+from sklearn.preprocessing import StandardScaler, OneHotEncoder, LabelEncoder
 
 from evolution.Evolution import Evolution
 from evolution.IndividStructures import DataStructureGraph
 from regularizator.ModuleNN import ModelNN
 
 
+def split_train_test_shuffle(dataset_df, target_name):
+    y = dataset_df[target_name].to_numpy()
+    X = dataset_df[dataset_df.columns.drop(target_name)].to_numpy()
 
-def split_train_test(dataset, target_name, split_ratio: float = 0.2):
-    y = dataset[target_name].to_numpy()
-    X = dataset[dataset.columns.drop(target_name)].to_numpy()
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=split_ratio, random_state=0)
-    return X_train, y_train, X_test, y_test
+    splitter = StratifiedShuffleSplit(n_splits=1, test_size=0.2, random_state=0)
+    for train_idx, test_idx in splitter.split(X, y):
+        X_train = [X[i] for i in train_idx]
+        y_train = [y[i] for i in train_idx]
+        X_test = [X[i] for i in test_idx]
+        y_test = [y[i] for i in test_idx]
+
+    scaler = StandardScaler()
+    X_train = scaler.fit_transform(X_train)
+    X_test = scaler.transform(X_test)
+
+    return np.array(X_train), np.array(y_train), np.array(X_test), np.array(y_test)
 
 
-def run_openml_regression(n_runs=5):
+def run_openml_multiclass_classification(n_runs=5):
     start_time = datetime.now().strftime('%Y_%m_%d-%H_%M_%S_%p')
-    exp_folder = f'C:/Users/Julia/Documents/NSS_lab/fastnet/examples/openml_paper_statement/regression/results/50_1000_{start_time}'
+    exp_folder = f'results/1000_20000_{start_time}'
     os.mkdir(exp_folder)
     log_file = f'{exp_folder}/log.txt'
 
-
     datalist = openml.datasets.list_datasets(output_format="dataframe")
     datalist['ValidInstNum'] = datalist['NumberOfInstances'] - datalist['NumberOfInstancesWithMissingValues']
-    datasets_list = datalist[(datalist['NumberOfClasses'] == 0)
-                             & (datalist['ValidInstNum'] < 1000)
-                             & (datalist['ValidInstNum'] > 50)
-                             & (datalist['NumberOfNumericFeatures'] >= 3)]
+    datasets_list = datalist[
+        (datalist['NumberOfClasses'] > 2) & (datalist['ValidInstNum'] < 20000) & (datalist['ValidInstNum'] > 1000)]
 
     for id in datasets_list['did']:
         try:
@@ -40,22 +47,30 @@ def run_openml_regression(n_runs=5):
             dataset_name = dataset.name
             target_name = dataset.default_target_attribute
             dataset_df = dataset.get_data()[0]
-            #dataset_df = dataset_df.apply(pd.to_numeric, errors='coerce')
             dataset_df = dataset_df.dropna()
+            if len(dataset_df[target_name].unique()) < 3:
+                with open(log_file, 'a') as file:
+                    file.write(f"######\n\n"
+                               f"dataset_num {id}\n"
+                               f"dataset_name {dataset_name}\n"
+                               f"rows_num {dataset_df.shape[0]}\n"
+                               f"cols_num {dataset_df.shape[1]}\n\n"
+                               f"skipped - num classes < 3 after drop Nans")
+                continue
+
             for column in dataset_df.columns:
                 if column != target_name:
                     if dataset_df[column].dtype.name in ['object', 'category']:
                         try:
                             dataset_df[column] = dataset_df[column].astype(int)
                         except Exception as e:
-                            try:
-                                encoder = LabelEncoder()
-                                encoder.fit_transform(dataset_df[column].to_frame())
-                                dataset_df[column] = encoder.transform(dataset_df[column].to_frame())
-                            except Exception as e:
-                                pass
-            dataset_df = dataset_df.apply(pd.to_numeric, errors='coerce')
-            dataset_df = dataset_df.dropna()
+                            encoder = LabelEncoder()
+                            encoder.fit_transform(dataset_df[column].to_frame())
+                            dataset_df[column] = encoder.transform(dataset_df[column].to_frame())
+                if column == target_name:
+                    encoder = LabelEncoder()
+                    encoder.fit_transform(dataset_df[column].to_frame())
+                    dataset_df[column] = encoder.transform(dataset_df[column].to_frame())
 
             with open(log_file, 'a') as file:
                 file.write(f"######\n\n"
@@ -64,7 +79,7 @@ def run_openml_regression(n_runs=5):
                            f"rows_num {dataset_df.shape[0]}\n"
                            f"cols_num {dataset_df.shape[1]}\n\n")
 
-            X_train, y_train, X_test, y_test = split_train_test(dataset_df, target_name)
+            X_train, y_train, X_test, y_test = split_train_test_shuffle(dataset_df, target_name)
 
             ds_folder = f'{exp_folder}/{id}_{dataset_name}'
             if not os.path.exists(ds_folder):
@@ -97,9 +112,9 @@ def run_openml_regression(n_runs=5):
                     base_individ.cash_folder = f'{ds_folder}/{r}'
 
                     base_model = ModelNN(X_train[base_individ.basis], y_train[base_individ.basis],
-                                         num_epochs=50,
+                                         num_epochs=100,
                                          batch_size=300,
-                                         problem='regres',
+                                         problem='multiclass',
                                          cash_folder=f'{ds_folder}/{r}',
                                          model_name='base_model')
                     base_model.train()
@@ -112,33 +127,31 @@ def run_openml_regression(n_runs=5):
                                    f"base_test_loss {base_test_loss}\n")
 
                     with_graph_model = ModelNN(X_train[base_individ.basis], y_train[base_individ.basis],
-                                               num_epochs=50,
+                                               num_epochs=100,
                                                batch_size=300,
-                                               problem='regres',
+                                               problem='multiclass',
                                                cash_folder=f'{ds_folder}/{r}',
                                                model_name='with_graph'
                                                )
                     with_graph_model.train(base_individ)
                     with_graph_train_loss = with_graph_model.get_loss_on_train()
-                    with_graph_test_loss = base_model.get_loss_on_test(X_test, y_test)
+                    with_graph_test_loss = with_graph_model.get_loss_on_test(X_test, y_test)
 
                     with open(log_file, 'a') as file:
                         file.write(f"{datetime.now().strftime('%Y_%m_%d-%H_%M_%S_%p')}\n"
                                    f"with_graph_train_loss {with_graph_train_loss}\n"
                                    f"with_graph_test_loss {with_graph_test_loss}\n")
 
-
-                    # считаем для кучи нейронок для каждого индивида в популяции с выбором лучшей модели
                     with_evolution_model = ModelNN(X_train[base_individ.basis], y_train[base_individ.basis],
-                                                   num_epochs=50,
+                                                   num_epochs=100,
                                                    batch_size=300,
-                                                   problem='regres',
+                                                   problem='multiclass',
                                                    cash_folder=f'{ds_folder}/{r}',
                                                    model_name='with_evolution'
                                                    )
 
                     evolution = Evolution(base_individ=base_individ,
-                                          iterations=50,
+                                          iterations=30,
                                           population_size=10,
                                           model_to_optimize=with_evolution_model)
                     evolution.run()
@@ -155,11 +168,11 @@ def run_openml_regression(n_runs=5):
 
                     fig, axs = plt.subplots(1, 2, figsize=(8, 4))
                     axs[0].bar(['base', 'with graph', 'with evolution'],
-                            [base_train_loss, with_graph_train_loss, with_evolution_train_loss])
-                    axs[0].set_title('MSE on train set')
+                               [base_train_loss, with_graph_train_loss, with_evolution_train_loss])
+                    axs[0].set_title('F1 on train set')
                     axs[1].bar(['base', 'with graph', 'with evolution'],
-                            [base_test_loss, with_graph_test_loss, with_evolution_test_loss])
-                    axs[1].set_title('MSE on test set')
+                               [base_test_loss, with_graph_test_loss, with_evolution_test_loss])
+                    axs[1].set_title('F1 on test set')
                     plt.savefig(f'{ds_folder}/{r}/metrics_bar.png')
                     plt.close()
 
@@ -179,10 +192,5 @@ def run_openml_regression(n_runs=5):
                            f"{e}\n")
             continue
 
-run_openml_regression()
 
-
-
-
-
-
+run_openml_multiclass_classification()
