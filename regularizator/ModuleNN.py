@@ -160,7 +160,6 @@ class ModelNN:
         else:
             if abs(current_loss - last_loss) <= tolerance:
                 no_changes_counter += 1
-                print(f'Stop criteria {no_changes_counter} / {self.stop_criteria_count}')
             last_loss = current_loss
         return last_loss, no_changes_counter
 
