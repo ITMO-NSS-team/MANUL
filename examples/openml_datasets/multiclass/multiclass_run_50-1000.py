@@ -3,10 +3,9 @@ from datetime import datetime
 
 import numpy as np
 import openml
-import pandas as pd
 from matplotlib import pyplot as plt
-from sklearn.model_selection import StratifiedShuffleSplit, train_test_split
-from sklearn.preprocessing import LabelEncoder, StandardScaler, OneHotEncoder
+from sklearn.model_selection import StratifiedShuffleSplit
+from sklearn.preprocessing import StandardScaler, LabelEncoder
 
 from evolution.Evolution import Evolution
 from evolution.IndividStructures import DataStructureGraph
@@ -31,16 +30,16 @@ def split_train_test_shuffle(dataset_df, target_name):
     return np.array(X_train), np.array(y_train), np.array(X_test), np.array(y_test)
 
 
-def run_openml_binary_classification(n_runs=5):
+def run_openml_multiclass_classification(n_runs=5):
     start_time = datetime.now().strftime('%Y_%m_%d-%H_%M_%S_%p')
-    exp_folder = f'C:/Users/Julia/Documents/NSS_lab/fastnet/examples/openml_log/binary_classification/{start_time}'
+    exp_folder = f'results/50_1000_{start_time}'
     os.mkdir(exp_folder)
     log_file = f'{exp_folder}/log.txt'
 
     datalist = openml.datasets.list_datasets(output_format="dataframe")
     datalist['ValidInstNum'] = datalist['NumberOfInstances'] - datalist['NumberOfInstancesWithMissingValues']
     datasets_list = datalist[
-        (datalist['NumberOfClasses'] == 2) & (datalist['ValidInstNum'] < 20000) & (datalist['ValidInstNum'] > 50)]
+        (datalist['NumberOfClasses'] > 2) & (datalist['ValidInstNum'] < 1000) & (datalist['ValidInstNum'] > 50)]
 
     for id in datasets_list['did']:
         try:
@@ -48,12 +47,30 @@ def run_openml_binary_classification(n_runs=5):
             dataset_name = dataset.name
             target_name = dataset.default_target_attribute
             dataset_df = dataset.get_data()[0]
-            for column in dataset_df.columns:
-                if dataset_df[column].dtype.name in ['category', 'object']:
-                    encoder = OneHotEncoder()
-                    encoder.fit_transform(dataset_df[column].to_frame())
-                    dataset_df[column] = encoder.transform(dataset_df[column].to_frame()).toarray()
             dataset_df = dataset_df.dropna()
+            if len(dataset_df[target_name].unique()) < 3:
+                with open(log_file, 'a') as file:
+                    file.write(f"######\n\n"
+                               f"dataset_num {id}\n"
+                               f"dataset_name {dataset_name}\n"
+                               f"rows_num {dataset_df.shape[0]}\n"
+                               f"cols_num {dataset_df.shape[1]}\n\n"
+                               f"skipped - num classes < 3 after drop Nans")
+                continue
+
+            for column in dataset_df.columns:
+                if column != target_name:
+                    if dataset_df[column].dtype.name in ['object', 'category']:
+                        try:
+                            dataset_df[column] = dataset_df[column].astype(int)
+                        except Exception as e:
+                            encoder = LabelEncoder()
+                            encoder.fit_transform(dataset_df[column].to_frame())
+                            dataset_df[column] = encoder.transform(dataset_df[column].to_frame())
+                if column == target_name:
+                    encoder = LabelEncoder()
+                    encoder.fit_transform(dataset_df[column].to_frame())
+                    dataset_df[column] = encoder.transform(dataset_df[column].to_frame())
 
             with open(log_file, 'a') as file:
                 file.write(f"######\n\n"
@@ -68,6 +85,7 @@ def run_openml_binary_classification(n_runs=5):
             if not os.path.exists(ds_folder):
                 os.makedirs(ds_folder)
 
+            dataset_df.to_csv(f'{ds_folder}/{dataset_name}.csv')
             metrics_file = f'{ds_folder}/metrics.csv'
             with open(metrics_file, 'a') as file:
                 file.write(f"run,base_train_loss,with_graph_train_loss,with_evolution_train_loss,"
@@ -96,7 +114,7 @@ def run_openml_binary_classification(n_runs=5):
                     base_model = ModelNN(X_train[base_individ.basis], y_train[base_individ.basis],
                                          num_epochs=100,
                                          batch_size=300,
-                                         problem='class',
+                                         problem='multiclass',
                                          cash_folder=f'{ds_folder}/{r}',
                                          model_name='base_model')
                     base_model.train()
@@ -111,24 +129,23 @@ def run_openml_binary_classification(n_runs=5):
                     with_graph_model = ModelNN(X_train[base_individ.basis], y_train[base_individ.basis],
                                                num_epochs=100,
                                                batch_size=300,
-                                               problem='class',
+                                               problem='multiclass',
                                                cash_folder=f'{ds_folder}/{r}',
                                                model_name='with_graph'
                                                )
                     with_graph_model.train(base_individ)
                     with_graph_train_loss = with_graph_model.get_loss_on_train()
-                    with_graph_test_loss = base_model.get_loss_on_test(X_test, y_test)
+                    with_graph_test_loss = with_graph_model.get_loss_on_test(X_test, y_test)
 
                     with open(log_file, 'a') as file:
                         file.write(f"{datetime.now().strftime('%Y_%m_%d-%H_%M_%S_%p')}\n"
                                    f"with_graph_train_loss {with_graph_train_loss}\n"
                                    f"with_graph_test_loss {with_graph_test_loss}\n")
 
-                    # считаем для кучи нейронок для каждого индивида в популяции с выбором лучшей модели
                     with_evolution_model = ModelNN(X_train[base_individ.basis], y_train[base_individ.basis],
                                                    num_epochs=100,
                                                    batch_size=300,
-                                                   problem='class',
+                                                   problem='multiclass',
                                                    cash_folder=f'{ds_folder}/{r}',
                                                    model_name='with_evolution'
                                                    )
@@ -152,10 +169,10 @@ def run_openml_binary_classification(n_runs=5):
                     fig, axs = plt.subplots(1, 2, figsize=(8, 4))
                     axs[0].bar(['base', 'with graph', 'with evolution'],
                                [base_train_loss, with_graph_train_loss, with_evolution_train_loss])
-                    axs[0].set_title('MSE on train set')
+                    axs[0].set_title('F1 on train set')
                     axs[1].bar(['base', 'with graph', 'with evolution'],
                                [base_test_loss, with_graph_test_loss, with_evolution_test_loss])
-                    axs[1].set_title('MSE on test set')
+                    axs[1].set_title('F1 on test set')
                     plt.savefig(f'{ds_folder}/{r}/metrics_bar.png')
                     plt.close()
 
@@ -176,5 +193,4 @@ def run_openml_binary_classification(n_runs=5):
             continue
 
 
-
-run_openml_binary_classification()
+run_openml_multiclass_classification()

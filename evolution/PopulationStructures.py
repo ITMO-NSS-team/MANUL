@@ -14,20 +14,26 @@ class Population:
         self.base_individ = base_individ
         self.individs_pool = []
 
-    def generate(self, nodes_mutation_prob: float = None):
+    def generate(self, base_mutation: bool = True,
+                          edges_mutation: bool = True,
+                          edges_weight_mutation: bool = True,
+                 nodes_mutation_prob: float = None):
         """
         Function to generate population from base individ to pool by mutation
         :param nodes_mutation_prob: percentage of nodes for mutation
         :return: class object with individs pool
         """
         if nodes_mutation_prob is None:
-            nodes_mutation_prob = 0.5
+            nodes_mutation_prob = 0.1
 
         individs_pool = [self.base_individ]
         for i in range(1, self.size):
             print(f'Generate individ {i} / {self.size}')
             new_indvid = deepcopy(self.base_individ)
-            mutator = IndividEvoOperators([new_indvid])
+            mutator = IndividEvoOperators([new_indvid],
+                                          base_mutation,
+                                          edges_mutation,
+                                          edges_weight_mutation)
             new_indvid = mutator.mutate(nodes_mutation_prob=nodes_mutation_prob)[0]
             individs_pool.append(new_indvid)
 
@@ -45,7 +51,7 @@ class Population:
                 individ_model.train(individ, plot_convergence=False)
                 fitness = individ_model.get_loss_on_train()
                 if individ_model.problem == 'regres':
-                    # функция приспособленности графа тем лучше чем меньше ошибка модели
+                    # better fitness function for individ with less model loss function value on train
                     fitness = 1/fitness
                 individ.fitness = fitness
         return self

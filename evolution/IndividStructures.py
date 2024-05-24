@@ -1,13 +1,16 @@
+import itertools
 import os
 import pickle
+import random
+from copy import deepcopy
 from typing import Optional
 
 import networkx as nx
 import numpy as np
-import numba.types as tp
 from matplotlib import pyplot as plt
 from numba import njit
 from datetime import datetime
+
 
 import topo as tp
 from sklearn.decomposition import PCA
@@ -16,91 +19,275 @@ import plotly.graph_objects as go
 import plotly
 
 
-def get_basis(graph, source_data: np.ndarray):
-    """
-    Method for reducing nodes
-    :param source_data: matrix n * m, where n - number of nodes, m - number of features. Keeping values of nodes by fields.
-    :return basis : list -  indexes of the nodes that we save in the graph
-    """
-    named_graph = [{'index': i, 'neighbours': [], 'stamp': False} for i in graph]
-    for i in graph:
-        for k in graph[i]:
-            named_graph[k]['neighbours'].append(i)
-            named_graph[i]['neighbours'].append(k)
-    basis = []
-    temp_graph = list(filter(lambda elem: not elem['stamp'], named_graph))
-    while len(temp_graph) > 0:
-        max_index = np.argmax([len(elem['neighbours']) for elem in temp_graph])
-        use_index = temp_graph[max_index]['neighbours']
-        use_index.append(temp_graph[max_index]['index'])
-        average_values = np.average(source_data[use_index], axis=0)
-        choose_point = use_index[0]
-        for indx in use_index:
-            if np.sqrt(((source_data[indx] - average_values) ** 2).sum()) < np.sqrt(
-                    ((source_data[choose_point] - average_values) ** 2).sum()):
-                choose_point = indx
-            named_graph[indx]['stamp'] = True
-        basis.append(choose_point)
-        temp_graph = list(filter(lambda elem: elem['index'] not in use_index, temp_graph))
-    return basis
-
-
 class DataStructureGraph:
-    def __init__(self, data: np.ndarray, n_neighbors: int = None, eps: float = None, graph_file: str = None,
+    def __init__(self, data: np.ndarray = None,
+                 n_neighbors: int = None,
+                 epsilon_neighborhood: float = None,
+                 graph_file: str = None,
                  cash_folder: str = None):
         """
         Class for initialization individ  for evolution as complex graph structure with graph properties
         :param data: features table for graph structure creation
-        :param n_neighbors:  number of neighbors to save for node
-        :param eps: epsilon distance between neighbors to decrease the closest
+        :param n_neighbors:  number of neighbors for kernel fit (filtered laplacian)
+        :param epsilon_neighborhood: epsilon distance between neighbors to decrease the closest
         :param graph_file: str - path to file .pkl with DataStructureGraph object
         :param cash_folder: str - path to save cash
         """
-        self.elitism = False  # TODO вынести в класс предок - индивида (исп-ся только в эволюции)
-        self.selected = False  # TODO вынести в класс предок - индивида (исп-ся только в эволюции)
+        self.elitism = False
+        self.selected = False
         self.fitness = None
-        self.source_data = data.astype(float)
+
         if cash_folder is None:
-            self.cash_folder = f"info_log/{datetime.now().strftime('%Y_%m_%d-%I_%M_%S_%p')}"
+            self.cash_folder = f"cash/{datetime.now().strftime('%Y_%m_%d-%I_%M_%S_%p')}"
         else:
             self.cash_folder = cash_folder
-
         if not os.path.exists(self.cash_folder):
             os.makedirs(self.cash_folder)
-        print(f'Log folder set as {self.cash_folder}')
-
-        if eps is None:
-            self.epsilon_neighborhood = 0.15
-        else:
-            self.epsilon_neighborhood = eps
-        if n_neighbors is None:
-            if data.shape[0] <= 500:
-                self.n_neighbors = 1
-            if 500 < data.shape[0] <= 2000:
-                self.n_neighbors = 2
-            if 2000 < data.shape[0] <= 10000:
-                self.n_neighbors = 10
-            if 10000 < data.shape[0]:
-                self.n_neighbors = 20
-        else:
-            self.n_neighbors = n_neighbors
+        print(f'Cash folder set as {self.cash_folder}')
 
         if graph_file is not None:
             self.load_cash_object(graph_file)
-        else:
-            self.find_edges(data, use_kernel=True)
-            #  индексы для разреживания графа
-            self.basis = get_basis(self.graph, data)
-            self.number_of_nodes = len(self.basis)
-            # обновление ребер для разреженного графа
-            self.find_edges(data[self.basis], use_kernel=False)
-            self.filter_graph(data[self.basis].astype(float))
-            self.calc_fullness()
-            # сохраняем в кэш
+
+        if graph_file is None and data is not None:
+            self.source_data = data.astype(float)
+            self.create_graph(data, n_neighbors, epsilon_neighborhood)
             self.save_cash_object('base_graph')
 
+    def save_cash_object(self, name: str = None):
+        """
+        Function to save  self object as pickle file
+        :param name: string with name without .pkl to save in cash folder
+        """
+        if name is None:
+            name = 'graph_obj'
+        with open(f'{self.cash_folder}/{name}.pkl', 'wb') as outp:
+            pickle.dump(self.__dict__, outp, pickle.HIGHEST_PROTOCOL)
+            print(f'Graph object saved to {self.cash_folder}/{name}.pkl')
+
+    def load_cash_object(self, path: str):
+        """
+        Function to load self object from pickle file
+        :param path: name of file with graph object .pkl to load in cash folder or absolute path
+        """
+        if os.path.isfile(path):
+            with open(path, 'rb') as inp:
+                tmp_dict = pickle.load(inp)
+                self.__dict__.update(tmp_dict)
+        elif os.path.isfile(f'{self.cash_folder}/{path}'):
+            with open(f'{self.cash_folder}/{path}', 'rb') as inp:
+                tmp_dict = pickle.load(inp)
+                self.__dict__.update(tmp_dict)
+        else:
+            raise Exception(f'Failed to load graph object, no such file {path}')
+
+    def loss_function(self, f_x: np.ndarray, indices=None):
+        """
+        Function for calculation graph loss with f(x) values
+        :param f_x: np.ndarray - values of f(x) function for loss calculation
+        :param indices: list with batch indices
+        :return: float - value of loss function
+        """
+        laplacian = self.laplacian
+        if indices is not None:
+            laplacian = laplacian[indices][:, indices]
+        part_1 = np.dot(f_x.T, laplacian)
+        loss = np.dot(part_1, f_x)
+        return loss.reshape(-1)[0]
+
+    def create_graph(self, nodes_data: np.ndarray,
+                     n_neighbors: int,
+                     epsilon_neighborhood: float):
+        """
+        Method to create graph from table data
+        :param epsilon_neighborhood: normalized to max distance threshold for long edges filtering
+        :param n_neighbors: number of neighbors for kernel fit (filtered laplacian)
+        :param nodes_data: matrix with features table data
+        """
+        print('Calculate Euclidean distances')
+        euclid_dists = euclidean_distances(nodes_data, nodes_data)
+        matrix_connect = euclid_dists / np.max(euclid_dists)
+
+        # for small graphs fully connected adj matrix
+        filtered_lapl = np.ones(euclid_dists.shape)
+
+        if nodes_data.shape[0] > 500:
+            if n_neighbors is not None:
+                n_neighbors = n_neighbors
+            elif 500 < nodes_data.shape[0] <= 2000:
+                n_neighbors = 2
+            elif 2000 < nodes_data.shape[0]:
+                n_neighbors = 10
+            kernel = tp.tpgraph.Kernel(n_neighbors=n_neighbors, n_jobs=1, metric='cosine', fuzzy=True,
+                                       verbose=True)
+            print(f'Fit kernel, n_neighbors={n_neighbors} ')
+            kernel.fit(nodes_data)
+            print(f'Laplacian calculation')
+            filtered_lapl = kernel.L.todense()
+
+        # filtering edges by filtered laplacian
+        self.adjacency_matrix = np.zeros(euclid_dists.shape)
+        self.adjacency_matrix[filtered_lapl != 0] = 1
+        np.fill_diagonal(self.adjacency_matrix, 0)
+
+        # get nodes pairs for edges
+        edges = np.array(np.where(self.adjacency_matrix != 0))
+
+        if self.number_of_nodes > 500:
+            print(f'Filter nodes')
+            matrix_connect[self.adjacency_matrix == 0] = None
+            for n in range(matrix_connect.shape[0]):
+                neigs = np.where(self.adjacency_matrix[n] != 0)[0]
+                neig_pairs = itertools.combinations(neigs, 2)
+                for pair in neig_pairs:
+                    neig1 = pair[0]
+                    neig2 = pair[1]
+                    cos = (matrix_connect[n][neig1]**2 - matrix_connect[n][neig2]**2 - matrix_connect[neig1, neig2]**2) / \
+                          (-2*matrix_connect[n][neig1]*matrix_connect[n][neig1])
+                    if cos < 0 or np.isnan(cos):
+                        matrix_connect[n] = None
+                        matrix_connect[:, n] = None
+                        self.adjacency_matrix[n] = 0
+                        self.adjacency_matrix[:, n] = 0
+                        break
+
+            base = np.where(np.sum(self.adjacency_matrix, axis=0) != 0)[0]
+
+        else:
+            base = np.unique(edges)
+
+        # base is nodes which have at least one edge
+        # TODO find cases why base can be empty
+        if base.size != 0:
+            self.basis = base
+        else:
+            self.basis = np.arange(matrix_connect.shape[0]).astype(int)
+        self.adjacency_matrix = self.adjacency_matrix[self.basis][:, self.basis]
+
+        # filtering too long edges (more than epsilon_neighborhood)
+        euclid_dists = euclidean_distances(nodes_data[self.basis], nodes_data[self.basis])
+        matrix_connect = euclid_dists / np.max(euclid_dists)
+        if epsilon_neighborhood is None:
+            # TODO  remove quantile to hyperparameters
+            if nodes_data.shape[0] > 10000:
+                quantile = 0.005
+            elif 1000 <= nodes_data.shape[0] <= 10000:
+                quantile = 0.1
+            elif nodes_data.shape[0] < 1000:
+                quantile = 0.2
+            # filtering edges by saving quantile of all edged based on edge distance
+            epsilon_neighborhood = np.round(np.quantile(matrix_connect, quantile), 2)
+            print(f'epsilon_neighborhood = {epsilon_neighborhood}')
+
+        self.adjacency_matrix = np.zeros(euclid_dists.shape)
+        self.adjacency_matrix[matrix_connect <= epsilon_neighborhood] = 1
+
+        # random edges filter
+        default_ratio = 3 # available number of edges for one node
+        default_edges_num = self.basis.shape[0]*default_ratio
+        if self.number_of_edges > default_edges_num:
+            num_to_del = self.number_of_edges - default_edges_num
+
+            mask_matrix = np.full(self.adjacency_matrix.shape, 1)
+            mask_matrix = np.tril(mask_matrix, -1)
+            one_way_adj_matrix = mask_matrix * self.adjacency_matrix
+            edges = np.array(np.where(one_way_adj_matrix == 1))
+
+            inds_to_del = random.sample(range(0, edges.shape[1]), num_to_del)
+
+            edges_to_del = edges[:, inds_to_del]
+            self.adjacency_matrix[edges_to_del[0, :], edges_to_del[1, :]] = 0
+            self.adjacency_matrix[edges_to_del[1, :], edges_to_del[0, :]] = 0
+
+        np.fill_diagonal(self.adjacency_matrix, 0)
+        self.matrix_connect = matrix_connect
+
+    def add_edges(self, edges_list: np.ndarray):
+        """
+        Method for adding new edges into adjacency_matrix of individ
+        :param edges_list: pairwise indices of nodes to connect
+        """
+        self.adjacency_matrix[edges_list[0, :], edges_list[1, :]] = 1
+        self.adjacency_matrix[edges_list[1, :], edges_list[0, :]] = 1
+
+    def remove_edges(self, edges_list: np.ndarray):
+        """
+        Method for removing multiple edges from the list.
+        :param edges_list : list - tuples with start and end nodes of edges.
+        """
+        self.adjacency_matrix[edges_list[0, :], edges_list[1, :]] = 0
+        self.adjacency_matrix[edges_list[1, :], edges_list[0, :]] = 0
+
+    def twist_nodes(self, current_nodes_indices: np.ndarray):
+        """
+        Method for changing list of selected nodes to others from whole search space (source_data)
+        :param current_nodes_indices: indices from individ base to change
+        """
+        current_euclid_dists_max = np.max(
+            euclidean_distances(self.source_data[self.basis], self.source_data[self.basis]))
+        all_nodes_source_indeces = np.arange(self.source_data.shape[0])
+        available_nodes = np.delete(all_nodes_source_indeces, self.basis)
+        new_nodes_source_indices = available_nodes[np.random.choice(np.arange(available_nodes.shape[0]),
+                                                                    size=current_nodes_indices.shape[0])]
+        self.basis[current_nodes_indices] = new_nodes_source_indices
+        new_nodes_source_matrix = self.source_data[self.basis[current_nodes_indices]]
+        new_nodes_distances = euclidean_distances(new_nodes_source_matrix, new_nodes_source_matrix)
+        new_euclid_dist_max = np.max(new_nodes_distances)
+        new_nodes_distances = new_nodes_distances / np.max([new_euclid_dist_max, current_euclid_dists_max])
+        self.matrix_connect[np.ix_(current_nodes_indices, current_nodes_indices)] = new_nodes_distances
+
+    def change_edges_length(self, edges_inds: np.ndarray, mutate_intensity: float):
+        """
+        :param edges_inds: np array with integer indices of chosen edges
+        :param mutate_intensity: float that shows the range of distance values changing
+        """
+        lengths_add = np.random.uniform(-mutate_intensity, mutate_intensity, edges_inds.shape[0])
+        new_lengths = self.matrix_connect[edges_inds[:, 0], edges_inds[:, 1]] + lengths_add
+        self.matrix_connect[edges_inds[:, 0], edges_inds[:, 1]] = new_lengths
+        self.matrix_connect[edges_inds[:, 1], edges_inds[:, 0]] = new_lengths
+        np.fill_diagonal(self.matrix_connect, 0)
+        self.matrix_connect[self.matrix_connect > 1] = 1 - (self.matrix_connect[self.matrix_connect > 1] - 1)
+        self.matrix_connect[self.matrix_connect < 0] = -self.matrix_connect[self.matrix_connect < 0]
+
+    def replace_subgraph(self, node: int, new_edges: np.ndarray):
+        """
+        Method for replace some part of graph.
+        :param node: int - index of the node whose connections with neighbours will be changed
+        :param new_edges : indices of new neighbours for the node
+        """
+        self.adjacency_matrix[node] = 0
+        self.adjacency_matrix[:, node] = 0
+        self.adjacency_matrix[node][new_edges] = 1
+        self.adjacency_matrix[new_edges, node] = 1
+
+    @property
+    def laplacian(self):
+        """
+        L=D-A, where D are the degrees of the vertices and A is the weight matrix
+        Laplacian as the difference between the degree matrix of vertices and the weight matrix,
+        the degree matrix is calculated as the sum of the weights emanating from the vertex
+        """
+        weights_matrix = deepcopy(self.matrix_connect)
+        weights_matrix[self.adjacency_matrix == 0] = 0
+        nodes_weights = np.diag(np.sum(weights_matrix, axis=0))
+        lap = nodes_weights - weights_matrix
+        return lap
+
+    @property
+    def number_of_edges(self):
+        """
+        Property return number of edges in individ graph
+        """
+        return int(np.sum(self.adjacency_matrix) // 2)
+
+    @property
+    def number_of_nodes(self):
+        """
+        Property return number of nodes in individ graph
+        """
+        return self.adjacency_matrix.shape[0]
+
     def show_2d(self, labels: Optional[np.ndarray] = None,
-                title: str = None,
+                title: str = '',
                 cmap_name: str = 'brg',
                 save_path: str = None, euclidean=True):
         """
@@ -121,7 +308,8 @@ class DataStructureGraph:
         if euclidean:
             g = nx.Graph(self.adjacency_matrix)
         if not euclidean:
-            g = nx.Graph(self.matrix_connect)
+            weights_matrix = self.adjacency_matrix*self.matrix_connect
+            g = nx.Graph(weights_matrix)
         if labels is not None:
             nodes_labels = labels[self.basis]
             colors = nodes_labels
@@ -138,7 +326,7 @@ class DataStructureGraph:
             n.set_edgecolor('black')
 
         if not euclidean:
-            # drawing without fixed nodes position, but based on edges lengths
+            # drawing without fixed nodes position, but based on edges weights(length)
             nx.draw(g, node_color=colors, cmap=cmap_name, node_size=15, linewidths=0.1)
 
         fig.suptitle(title)
@@ -148,61 +336,74 @@ class DataStructureGraph:
         plt.show()
 
     def show_3d(self, labels: Optional[np.ndarray] = None,
+                markers: Optional[np.ndarray] = None,
                 title: str = None,
                 save_path: str = None):
-
+        """
+        Function to visualize individ graph structure in 3D projection as html page
+        :param labels: array with target values of samples (nodes)
+        :param markers: list with markers names for each target value
+        :param title: string with name of plot
+        :param save_path: string with path to save plot
+        """
         nodes_coordinates = self.source_data[self.basis]
+        initial_dims = nodes_coordinates.shape[1]
         if nodes_coordinates.shape[1] > 3:
-            print(f'Computing PCA from {nodes_coordinates.shape[1]} to 3')
+            print(f'Computing PCA from {initial_dims} to 3')
             pca = PCA(n_components=3)
             pca.fit(nodes_coordinates)
             nodes_coordinates = pca.transform(nodes_coordinates)
 
-        Xn = []  # x-coordinates of nodes
-        Yn = []  # y-coordinates
-        Zn = []  # z-coordinates
+        mask_matrix = np.full(self.adjacency_matrix.shape, 1)
+        mask_matrix = np.tril(mask_matrix, -1)
+        one_way_adj_matrix = mask_matrix * self.adjacency_matrix
+        edges = np.where(one_way_adj_matrix == 1)
+
+        start_nodes_positions = nodes_coordinates[edges[0], :]
+        end_nodes_positions = nodes_coordinates[edges[1], :]
+
         Xe = []
         Ye = []
         Ze = []
-
-        for node in self.graph.keys():
-            start_node_coords = nodes_coordinates[node]
-            Xn.append(start_node_coords[0])
-            Yn.append(start_node_coords[1])
-            Zn.append(start_node_coords[2])
-
-            for child_node in self.graph[node]:
-                end_node_coords = nodes_coordinates[child_node]
-
-                Xe += [start_node_coords[0], end_node_coords[0], None]  # x-coordinates of edge ends
-                Ye += [start_node_coords[1], end_node_coords[1], None]
-                Ze += [start_node_coords[2], end_node_coords[2], None]
+        line_colors = []
+        for n in range(start_nodes_positions.shape[0]):
+            Xe += [start_nodes_positions[n][0], end_nodes_positions[n][0], None]  # x-coordinates of edge ends
+            Ye += [start_nodes_positions[n][1], end_nodes_positions[n][1], None]
+            Ze += [start_nodes_positions[n][2], end_nodes_positions[n][2], None]
+            line_colors.append(self.matrix_connect[edges[0][n], edges[1][n]])
 
         if labels is not None:
             nodes_labels = labels[self.basis]
         else:
             nodes_labels = [1] * len(self.basis)
+
+        if markers is not None:
+            nodes_markers = markers[self.basis]
+        else:
+            nodes_markers = ['circle'] * len(self.basis)
+
         colors = nodes_labels
         trace1 = go.Scatter3d(x=Xe,
                               y=Ye,
                               z=Ze,
                               mode='lines',
+                              #line=dict(color=line_colors, width=1),
                               line=dict(color='rgb(125,125,125)', width=1),
                               hoverinfo='none'
                               )
 
-        trace2 = go.Scatter3d(x=Xn,
-                              y=Yn,
-                              z=Zn,
+        trace2 = go.Scatter3d(x=nodes_coordinates[:, 0],
+                              y=nodes_coordinates[:, 1],
+                              z=nodes_coordinates[:, 2],
                               mode='markers',
                               name='actors',
-                              marker=dict(symbol='circle',
+                              marker=dict(symbol=(nodes_markers),
                                           size=6,
                                           color=colors,
                                           colorscale='Viridis',
                                           line=dict(color='rgb(50,50,50)', width=0.5)
                                           ),
-                              text=labels,
+                              text=nodes_labels,
                               hoverinfo='text'
                               )
 
@@ -215,7 +416,7 @@ class DataStructureGraph:
                     )
 
         layout = go.Layout(
-            title=f'{title}\nProjection of {nodes_coordinates.shape[1]} features to 3d',
+            title=f'{title}\nProjection of {initial_dims} features to 3d',
             width=1000,
             height=1000,
             showlegend=False,
@@ -237,272 +438,3 @@ class DataStructureGraph:
                 title = '3d_graph'
             save_path = f'{self.cash_folder}/{title}.html'
         plotly.offline.plot(fig, filename=save_path)
-
-    def save_cash_object(self, name: str = None):
-        """
-        Function to save  self object as pickle file
-        :param name: string with name without .pkl to save in cash folder
-        """
-        if name is None:
-            name = 'graph_obj'
-        with open(f'{self.cash_folder}/{name}.pkl', 'wb') as outp:
-            pickle.dump(self.__dict__, outp, pickle.HIGHEST_PROTOCOL)
-            print(f'Graph object saved to {self.cash_folder}/{name}.pkl')
-
-    def load_cash_object(self, name):
-        """
-        Function to load self object from pickle file
-        :param name: name of file with graph object .pkl to load in cash folder
-        """
-        with open(f'{self.cash_folder}/{name}', 'rb') as inp:
-            tmp_dict = pickle.load(inp)
-            self.__dict__.update(tmp_dict)
-
-    def loss_function(self, f_x: np.ndarray, indices=None):
-        """
-        Function for calculation graph loss with f(x) values
-        :param f_x: np.ndarray - values of f(x) function for loss calculation
-        :param indices: list with batch indices
-        :return: float - value of loss function
-        """
-        laplassian = self.laplassian
-        if indices is not None:
-            laplassian = laplassian[indices][:, indices]
-        part_1 = np.dot(f_x.T, laplassian)
-        loss = np.dot(part_1, f_x)
-        return loss.reshape(-1)[0]
-
-    def form_graph_with_laplassian(self, distances, laplassian):
-        graph = {}
-        number_of_edges = 0
-        adjacency_matrix = np.zeros(distances.shape)
-        for i in range(len(distances)):
-            print(f'Process node {i}/{len(distances)}')
-            graph[i] = []
-            for j in range(i, len(distances)):
-                if i == j:
-                    continue
-                if laplassian[i, j] != 0:
-                    adjacency_matrix[i][j] = 1
-                    adjacency_matrix[j][i] = 1
-                    graph[i].append(j)
-                    number_of_edges += 1
-        return graph, adjacency_matrix, number_of_edges
-
-    def form_graph_with_euclidian_distances(self, distances, nodes_data):
-        graph = {}
-        number_of_edges = 0
-        adjacency_matrix = np.zeros(distances.shape)
-        different = np.zeros((distances.shape[0], distances.shape[0], nodes_data.shape[1]))
-        for i in range(len(distances)):
-            print(f'Process node {i}/{len(distances)}')
-            graph[i] = []
-            different[i] = -1 * different[:, i]
-            for j in range(i, len(distances)):
-                different[i][j] = nodes_data[i] - nodes_data[j]
-                if i == j:
-                    continue
-                if distances[i][j] / np.max(distances) <= self.epsilon_neighborhood:
-                    adjacency_matrix[i][j] = 1
-                    adjacency_matrix[j][i] = 1
-                    graph[i].append(j)
-                    number_of_edges += 1
-            distances = np.array(distances)
-        return graph, adjacency_matrix, number_of_edges
-
-    def find_edges(self, nodes_data, use_kernel=True):
-        euclid_dists = euclidean_distances(nodes_data, nodes_data)
-        matrix_connect = euclid_dists / np.max(euclid_dists)
-
-        if use_kernel:
-            print('Form graph (laplassian method)')
-            kernel = tp.tpgraph.Kernel(n_neighbors=self.n_neighbors, n_jobs=1, metric='cosine', fuzzy=True,
-                                       verbose=True)
-            kernel.fit(nodes_data)
-            lapl = kernel.L.todense()
-            graph, adjacency_matrix, number_of_edges = self.form_graph_with_laplassian(euclid_dists, lapl)
-
-        else:
-            print('Form graph (euclidian distances)')
-            graph, adjacency_matrix, number_of_edges = self.form_graph_with_euclidian_distances(euclid_dists,
-                                                                                                nodes_data)
-
-        self.graph = graph
-        self.adjacency_matrix = adjacency_matrix
-        self.matrix_connect = matrix_connect
-        self.number_of_edges = number_of_edges
-
-    def add_edge(self, from_node: int, to_node: int):
-        """
-        Method for adding new edges.
-        :param from_node:  start node of the edge
-        :param to_node: end node of the edge
-        """
-        self.graph[from_node].append(to_node)
-        self.number_of_edges += 1
-
-    def remove_edge(self, from_node: int, to_node: int):
-        """
-        Method for removing edges.
-        :param from_node:  start node of the edge
-        :param to_node: end node of the edge
-        """
-        try:
-            self.graph[from_node].remove(to_node)
-        except:
-            self.graph[to_node].remove(from_node)
-        self.number_of_edges -= 1
-
-    def twist_node(self, current_node: int):
-        """
-        Method for changing current node to another one from whole search space (source_data)
-        :param current_node:  index of node to replace
-        """
-        all_nodes_indeces = np.arange(self.source_data.shape[0])
-        available_nodes = np.delete(all_nodes_indeces, self.basis)
-        new_node = available_nodes[np.random.choice(np.arange(available_nodes.shape[0]), size=1)[0]]
-        self.basis[current_node] = new_node
-        # recalculate distance between nodes
-        euclid_dists = euclidean_distances(self.source_data[self.basis], self.source_data[self.basis])
-        matrix_connect = euclid_dists / np.max(euclid_dists)
-        self.matrix_connect = matrix_connect
-
-    def get_start_node(self):
-        """
-        Method for searching node with maximum number of neighbours.
-        The found node will be used as the starting point when filtering neighbors.
-        :return  choose_index: int - index of the found node
-        """
-        choose_index = None
-        for i, node in self.graph.items():
-            try:
-                if len(self.graph[choose_index]) < len(node):
-                    choose_index = i
-            except Exception:
-                choose_index = i
-        return choose_index
-
-    def remove_edges(self, edges_list: list):
-        """
-        Method for removing multiple edges from the list.
-        :param edges_list : list - tuples with start and end nodes of edges.
-        """
-        for edge in edges_list:
-            if edge[0] not in self.graph[edge[1]] and edge[1] not in self.graph[edge[0]]:
-                continue
-            try:
-                self.graph[edge[0]].remove(edge[1])
-            except Exception:
-                self.graph[edge[1]].remove(edge[0])
-            self.number_of_edges -= 1
-
-    def replace_subgraph(self, node: int, new_edges: list):
-        """
-        Method for replace some part of graph.
-        :param node: int - index of the node whose connections with neighbours will be changed
-        :param new_edges : list -  index of new neighbours for the node
-        """
-        self.number_of_edges -= len(self.graph[node])
-        self.graph[node] = []
-        for elem in new_edges:
-            self.add_edge(node, elem)
-
-    def check_vn_part(self, source_data: np.ndarray, node1: int, node2: int):
-        """
-        Method for check visible neighbours in new edge in graph added using crossover/evolution
-        :param source_data : matrix n * m, where n - number of nodes, m - number of features. Keeping values of nodes by fields.
-        :param node1 : one of nodes in the new edge
-        :param node2 : one of nodes in the new edge
-        """
-        general_neighbours = []
-        del_list = []
-        gr1 = self.graph[node1]
-        gr2 = self.graph[node2]
-        for neigh in gr1:
-            if neigh in gr2:
-                general_neighbours.append(neigh)
-
-        data_neigh = source_data[general_neighbours]
-        dif_n1 = source_data[node1] - data_neigh
-        dif_n2 = source_data[node1] - source_data[node2]
-
-        result = np.diag(np.dot(dif_n1, dif_n2.T))
-        for i, res in enumerate(result[result < 0]):
-            del_list.append((node1, general_neighbours[i]))
-
-        dif_n1 = source_data[node2] - data_neigh
-        dif_n2 = source_data[node2] - source_data[node1]
-
-        result = np.diag(np.dot(dif_n1, dif_n2.T))
-        for i, res in enumerate(result[result < 0]):
-            del_list.append((node2, general_neighbours[i]))
-
-        self.remove_edges(del_list)
-
-    @property
-    def laplassian(self):
-        laplassian = np.zeros_like(self.matrix_connect)
-        temp = 1 - self.matrix_connect
-        for key in self.graph:
-            laplassian[[key], [self.graph[key]]] = temp[[key], [self.graph[key]]]
-        return laplassian
-
-    def calc_fullness(self):
-        """
-        Method for calculation the percentage of completion of the graph.
-        """
-        self.fullness = (len(list(filter(lambda elem: elem == 0, self.laplassian.reshape(-1)))) / 2 * 100) // len(
-            self.laplassian.reshape(-1))
-
-    def filter_graph(self, data: np.ndarray):
-        """
-        Method for filter the graph from unvisible neighbours.
-        :param data: matrix n * m, where n - number of nodes, m - number of features. Keeping values of nodes by fields.
-        """
-        print('Filtering graph base')
-        start_node_index = self.get_start_node()
-        delete_edges = get_indices_to_del(data, self.adjacency_matrix, self.matrix_connect, start_node_index)
-        self.remove_edges(delete_edges)
-
-
-@njit
-def get_indices_to_del(source_data, adjacency_matrix, eds, start_node):
-    """
-    Function for parallel calculation of unnecessary indices based on adjacency_matrix
-    and euclidian distances between nodes
-
-    :param source_data: list of nodes
-    :param adjacency_matrix: adjacency matrix of graph
-    :param eds: list with euclidian distances between nodes
-    :param start_node: index of node to start filtering
-    :return:
-    """
-    selects = np.zeros((len(source_data)))
-    rem_edges = []
-    start_nodes = [start_node]
-    while len(start_nodes) > 0:
-        current_node = start_nodes.pop(0)
-        selects[current_node] = 1
-        if sum(adjacency_matrix[current_node]) == 0:
-            continue
-        neigh_indexs = np.where(adjacency_matrix[current_node] == 1)[0]
-        args = np.argsort(eds[current_node, neigh_indexs])
-        neigh_indexs = neigh_indexs[args[::-1]]
-
-        add_params = source_data[neigh_indexs]
-        neighbours = source_data[current_node] - add_params
-
-        for i, elem in enumerate(neigh_indexs):
-            if selects[elem] == 1:
-                continue
-            check_this = source_data[elem]
-            neigh_2 = check_this - add_params
-            result = np.diag(np.dot(neighbours, neigh_2.T))
-            if len(result[result < 0]) > 0:
-                adjacency_matrix[current_node][elem] = 0
-                adjacency_matrix[elem][current_node] = 0
-                rem_edges.append((current_node, elem))
-            else:
-                start_nodes.append(elem)
-
-    return rem_edges

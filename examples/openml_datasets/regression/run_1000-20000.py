@@ -1,0 +1,184 @@
+import os
+from datetime import datetime
+
+import openml
+import pandas as pd
+from matplotlib import pyplot as plt
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import LabelEncoder
+
+from evolution.Evolution import Evolution
+from evolution.IndividStructures import DataStructureGraph
+from regularizator.ModuleNN import ModelNN
+
+def split_train_test(dataset, target_name, split_ratio: float = 0.2):
+    y = dataset[target_name].to_numpy()
+    X = dataset[dataset.columns.drop(target_name)].to_numpy()
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=split_ratio, random_state=0)
+    return X_train, y_train, X_test, y_test
+
+
+def run_openml_regression(n_runs=5):
+    start_time = datetime.now().strftime('%Y_%m_%d-%H_%M_%S_%p')
+    exp_folder = f'results/1000_20000_{start_time}'
+    os.mkdir(exp_folder)
+    log_file = f'{exp_folder}/log.txt'
+
+
+    datalist = openml.datasets.list_datasets(output_format="dataframe")
+    datalist['ValidInstNum'] = datalist['NumberOfInstances'] - datalist['NumberOfInstancesWithMissingValues']
+    datasets_list = datalist[(datalist['NumberOfClasses'] == 0)
+                             & (datalist['ValidInstNum'] < 20000)
+                             & (datalist['ValidInstNum'] > 1000)
+                             & (datalist['NumberOfNumericFeatures'] >= 3)]
+
+    for id in datasets_list['did']:
+        try:
+            dataset = openml.datasets.get_dataset(id)
+            dataset_name = dataset.name
+            target_name = dataset.default_target_attribute
+            dataset_df = dataset.get_data()[0]
+            dataset_df = dataset_df.dropna()
+            for column in dataset_df.columns:
+                if column != target_name:
+                    if dataset_df[column].dtype.name in ['object', 'category']:
+                        try:
+                            dataset_df[column] = dataset_df[column].astype(int)
+                        except Exception as e:
+                            try:
+                                encoder = LabelEncoder()
+                                encoder.fit_transform(dataset_df[column].to_frame())
+                                dataset_df[column] = encoder.transform(dataset_df[column].to_frame())
+                            except Exception as e:
+                                pass
+            dataset_df = dataset_df.apply(pd.to_numeric, errors='coerce')
+            dataset_df = dataset_df.dropna()
+
+            with open(log_file, 'a') as file:
+                file.write(f"######\n\n"
+                           f"dataset_num {id}\n"
+                           f"dataset_name {dataset_name}\n"
+                           f"rows_num {dataset_df.shape[0]}\n"
+                           f"cols_num {dataset_df.shape[1]}\n\n")
+
+            X_train, y_train, X_test, y_test = split_train_test(dataset_df, target_name)
+
+            ds_folder = f'{exp_folder}/{id}_{dataset_name}'
+            if not os.path.exists(ds_folder):
+                os.makedirs(ds_folder)
+
+            dataset_df.to_csv(f'{ds_folder}/{dataset_name}.csv')
+            metrics_file = f'{ds_folder}/metrics.csv'
+            with open(metrics_file, 'a') as file:
+                file.write(f"run,base_train_loss,with_graph_train_loss,with_evolution_train_loss,"
+                           f"base_test_loss,with_graph_test_loss,with_evolution_test_loss\n")
+
+            base_individ = DataStructureGraph(data=X_train,
+                                              cash_folder=ds_folder)
+            base_individ.show_2d(y_train, save_path=f'{ds_folder}/base_graph.png')
+
+            with open(log_file, 'a') as file:
+                file.write(f"base_graph_nodes {base_individ.number_of_nodes}\n"
+                           f"base_graph_edges {base_individ.number_of_edges}\n\n")
+
+            for n in range(n_runs):
+                try:
+                    r = str(n)
+                    if not os.path.exists(f'{ds_folder}/{r}'):
+                        os.makedirs(f'{ds_folder}/{r}')
+                    with open(log_file, 'a') as file:
+                        file.write(f"run_number {r}\n\n")
+                    base_individ = DataStructureGraph(data=X_train,
+                                                      cash_folder=ds_folder,
+                                                      graph_file='base_graph.pkl')
+                    base_individ.cash_folder = f'{ds_folder}/{r}'
+
+                    base_model = ModelNN(X_train[base_individ.basis], y_train[base_individ.basis],
+                                         num_epochs=50,
+                                         batch_size=300,
+                                         problem='regres',
+                                         cash_folder=f'{ds_folder}/{r}',
+                                         model_name='base_model')
+                    base_model.train()
+                    base_train_loss = base_model.get_loss_on_train()
+                    base_test_loss = base_model.get_loss_on_test(X_test, y_test)
+
+                    with open(log_file, 'a') as file:
+                        file.write(f"{datetime.now().strftime('%Y_%m_%d-%H_%M_%S_%p')}\n"
+                                   f"base_train_loss {base_train_loss}\n"
+                                   f"base_test_loss {base_test_loss}\n")
+
+                    with_graph_model = ModelNN(X_train[base_individ.basis], y_train[base_individ.basis],
+                                               num_epochs=50,
+                                               batch_size=300,
+                                               problem='regres',
+                                               cash_folder=f'{ds_folder}/{r}',
+                                               model_name='with_graph'
+                                               )
+                    with_graph_model.train(base_individ)
+                    with_graph_train_loss = with_graph_model.get_loss_on_train()
+                    with_graph_test_loss = with_graph_model.get_loss_on_test(X_test, y_test)
+
+                    with open(log_file, 'a') as file:
+                        file.write(f"{datetime.now().strftime('%Y_%m_%d-%H_%M_%S_%p')}\n"
+                                   f"with_graph_train_loss {with_graph_train_loss}\n"
+                                   f"with_graph_test_loss {with_graph_test_loss}\n")
+
+
+                    with_evolution_model = ModelNN(X_train[base_individ.basis], y_train[base_individ.basis],
+                                                   num_epochs=50,
+                                                   batch_size=300,
+                                                   problem='regres',
+                                                   cash_folder=f'{ds_folder}/{r}',
+                                                   model_name='with_evolution'
+                                                   )
+
+                    evolution = Evolution(base_individ=base_individ,
+                                          iterations=50,
+                                          population_size=10,
+                                          model_to_optimize=with_evolution_model)
+                    evolution.run()
+                    evolution.base_individ.show_2d(y_train, save_path=f'{ds_folder}/{r}/final_graph.png')
+                    evolution.plot_evolution_fitnesses(save_path=f'{ds_folder}/{r}/evolution_conv.png')
+
+                    with_evolution_train_loss = with_evolution_model.get_loss_on_train()
+                    with_evolution_test_loss = with_evolution_model.get_loss_on_test(X_test, y_test)
+
+                    with open(log_file, 'a') as file:
+                        file.write(f"{datetime.now().strftime('%Y_%m_%d-%H_%M_%S_%p')}\n"
+                                   f"with_evolution_train_loss {with_evolution_train_loss}\n"
+                                   f"with_evolution_test_loss {with_evolution_test_loss}\n\n")
+
+                    fig, axs = plt.subplots(1, 2, figsize=(8, 4))
+                    axs[0].bar(['base', 'with graph', 'with evolution'],
+                            [base_train_loss, with_graph_train_loss, with_evolution_train_loss])
+                    axs[0].set_title('MSE on train set')
+                    axs[1].bar(['base', 'with graph', 'with evolution'],
+                            [base_test_loss, with_graph_test_loss, with_evolution_test_loss])
+                    axs[1].set_title('MSE on test set')
+                    plt.savefig(f'{ds_folder}/{r}/metrics_bar.png')
+                    plt.close()
+
+                    with open(metrics_file, 'a') as file:
+                        file.write(f"{r},{base_train_loss},{with_graph_train_loss},{with_evolution_train_loss},"
+                                   f"{base_test_loss},{with_graph_test_loss},{with_evolution_test_loss}\n")
+
+                except Exception as e:
+                    with open(log_file, 'a') as file:
+                        file.write(f"{datetime.now().strftime('%Y_%m_%d-%H_%M_%S_%p')}\n"
+                                   f"{e}\n")
+                    continue
+
+        except Exception as e:
+            with open(log_file, 'a') as file:
+                file.write(f"{datetime.now().strftime('%Y_%m_%d-%H_%M_%S_%p')}\n"
+                           f"{e}\n")
+            continue
+
+run_openml_regression()
+
+
+
+
+
+

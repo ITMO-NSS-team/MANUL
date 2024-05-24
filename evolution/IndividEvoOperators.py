@@ -1,5 +1,4 @@
 import math
-from copy import deepcopy
 
 import numpy as np
 
@@ -7,16 +6,25 @@ from evolution.IndividStructures import DataStructureGraph
 
 
 class IndividEvoOperators:
-    def __init__(self, individs: list[DataStructureGraph]):
+    def __init__(self, individs: list[DataStructureGraph],
+                 base_mutation: bool = True,
+                 edges_mutation: bool = True,
+                 edges_weight_mutation: bool = True,
+                 ):
         """
         Class for applying available evolutionary operators to individs
         :param individs: list with graph individs for changing
         """
         self.individs = individs
+        self.base_mutation = base_mutation
+        self.edges_mutation = edges_mutation
+        self.edges_weight_mutation = edges_weight_mutation
 
-    def mutate(self, nodes_mutation_prob: float = None):
-        if nodes_mutation_prob is None:
-            nodes_mutation_prob = 0.5
+    def mutate(self,
+               nodes_mutation_prob: float = 0.1,
+               edges_len_mutation_prob: float = 0.3,
+               edges_existence_mutation_prob: float = 0.2,
+               ):
         if nodes_mutation_prob >= 1:
             raise Exception(
                 f'IndividEvoOperators.mutate nodes_mutation_prob={nodes_mutation_prob} should be from 0 to 1')
@@ -24,69 +32,50 @@ class IndividEvoOperators:
         for individ in self.individs:
             individ.elitism = False
             individ.fitness = None
-            fullness_individ = individ.fullness
             num_nodes = individ.number_of_nodes
-            number_of_nodes_to_mutate = int(num_nodes * nodes_mutation_prob)
-            eds = individ.matrix_connect
-            graph = individ.graph
+            number_of_nodes_to_mutate = int(math.ceil(num_nodes * nodes_mutation_prob))
+            number_of_edges_to_mutate = int(math.ceil(individ.adjacency_matrix.size * edges_existence_mutation_prob))
 
-            if len(individ.basis) != individ.source_data.shape[0]:
-                # nodes mutation runs only when base is not equal to full graph
-                nodes_mutation_flags = np.random.choice(np.arange(2), size=number_of_nodes_to_mutate)
-                for flag in nodes_mutation_flags:
-                    if flag:
-                        mean_dist_from_neighbours = []
-                        for node in graph:
-                            dist_from_neighbours = []
-                            for neighbour in graph[node]:
-                                dist_from_neighbours.append(eds[node, neighbour])
-                            if len(dist_from_neighbours) == 0:
-                                mean_dist_from_neighbours.append(np.nan)
-                            else:
-                                mean_dist_from_neighbours.append(np.nanmean(np.array(dist_from_neighbours)))
+            # GRAPH BASE MUTATION
+            if self.base_mutation:
+                if len(individ.basis) != individ.source_data.shape[0]:
+                    # nodes mutation runs only when base is not equal to full graph
+                    nodes_indices_to_change = np.random.randint(num_nodes, size=number_of_nodes_to_mutate)
+                    individ.twist_nodes(nodes_indices_to_change)
 
-                        mean_dist = float(np.nanmean(mean_dist_from_neighbours))
-                        mean_dist_from_neighbours = np.nan_to_num(mean_dist_from_neighbours, nan=mean_dist)
-                        mean_dist_from_neighbours = max(mean_dist_from_neighbours) - mean_dist_from_neighbours
-                        probability = mean_dist_from_neighbours / np.sum(mean_dist_from_neighbours)
-                        # чем ближе узел к соседям, тем ниже вероятность его выбрать
-                        try:
-                            node_index = np.random.choice(np.arange(individ.number_of_nodes),
-                                                          size=1,
-                                                          p=probability.astype(np.float64))[0]
-                        except Exception as e:
-                            node_index = np.random.choice(np.arange(individ.number_of_nodes),
-                                                          size=1)[0]
-                        individ.twist_node(node_index)
+            # GRAPH EDGES MUTATION
+            if self.edges_mutation:
+                nodes_indices_to_change_edge = np.random.randint(num_nodes, size=(2, number_of_edges_to_mutate))
+                # remove circular edges
+                nodes_indices_to_change_edge = nodes_indices_to_change_edge[:, nodes_indices_to_change_edge[0] != nodes_indices_to_change_edge[1]]
+                edges_values = individ.adjacency_matrix[nodes_indices_to_change_edge[0], nodes_indices_to_change_edge[1]]
 
-            edges_mutation_flags = np.random.choice(np.arange(2), size=number_of_nodes_to_mutate,
-                                                    p=[fullness_individ / 100, 1 - (fullness_individ / 100)])
-            for flag in edges_mutation_flags:
-                if flag:
-                    # добавление ребра
-                    current_laplassian = individ.laplassian
-                    nodes = np.random.choice(np.arange(num_nodes), size=2, replace=False)
-                    while current_laplassian[nodes[0]][nodes[1]] != 0:
-                        nodes = np.random.choice(np.arange(num_nodes), size=2, replace=False)
-                    individ.add_edge(nodes[0], nodes[1])
-                    individ.check_vn_part(individ.source_data[individ.basis], nodes[0], nodes[1])
-                else:
-                    # удаление ребра
-                    if individ.number_of_edges == 0:
-                        continue
-                    probability = []
-                    edges = []
-                    for node in graph:
-                        probability.extend(eds[node, graph[node]])  # типа длина каждого ребра с соседями
+                inds_to_add_edge = nodes_indices_to_change_edge[:, edges_values == 0]
+                inds_to_remove_edge = nodes_indices_to_change_edge[:, edges_values == 1]
 
-                        elements = [[node, i] for i in graph[node]]
-                        edges.extend(elements)
-                    probability = probability / np.sum(probability)
-                    edge_index = np.random.choice(np.arange(individ.number_of_edges),
-                                                  size=1,
-                                                  p=probability.astype(np.float64))[0]
-                    edge = edges[edge_index]
-                    individ.remove_edge(edge[0], edge[1])
+                # fixing number of edges to add and to remove to close values
+                min_num = np.min([inds_to_remove_edge.shape[1], inds_to_add_edge.shape[1]])
+                min_num_with_disturbance = np.random.randint(-min_num, min_num) + min_num
+                #min_num_with_disturbance = min_num
+
+                if inds_to_add_edge.shape[1] != min_num:
+                    inds_to_add_edge = inds_to_add_edge[:, :min_num_with_disturbance]
+                if inds_to_remove_edge.shape[1] != min_num:
+                    inds_to_remove_edge = inds_to_remove_edge[:, :min_num_with_disturbance]
+
+                individ.add_edges(inds_to_add_edge)
+                individ.remove_edges(inds_to_remove_edge)
+
+            # mutate edges length
+            if self.edges_weight_mutation:
+                num_of_edges_to_mutate = int(num_nodes * edges_len_mutation_prob)
+                mask_matrix = np.tril(np.full(individ.adjacency_matrix.shape, 1), -1)
+                one_way_adj_matrix = mask_matrix * individ.adjacency_matrix
+                edges = np.array(np.where(one_way_adj_matrix == 1))
+
+                edges_to_mutate_indices = edges[:, np.random.randint(edges.shape[1], size=num_of_edges_to_mutate)]
+                individ.change_edges_length(edges_to_mutate_indices, mutate_intensity=0.2)
+
         return self.individs
 
     def crossover_individs(self):
@@ -105,20 +94,17 @@ class IndividEvoOperators:
         individ1.fitness = None
         individ2.fitness = None
 
-        probability = np.array(
-            [abs(len(individ1.graph[i]) - len(individ2.graph[i])) for i in range(individ1.number_of_nodes)])
+        # chose nodes with max difference in number of edges
+        #nodes_edges_num = np.sum(individ1.adjacency_matrix, axis=0) - np.sum(individ2.adjacency_matrix, axis=0)
+        #selected_node_index = np.where(nodes_edges_num == np.max(nodes_edges_num))[0][0]
 
-        if probability.sum() == 0:
-            start_node_index = np.random.choice(np.arange(individ1.number_of_nodes), size=1)[0]
-        else:
-            probability = probability / probability.sum()
-            start_node_index = np.random.choice(np.arange(individ1.number_of_nodes), size=1, p=probability)[0]
+        selected_node_index = np.random.randint(individ1.number_of_nodes)
 
-        subgraph1 = individ1.graph[start_node_index].copy()
-        subgraph2 = individ2.graph[start_node_index].copy()
+        subgraph1 = np.array(np.where(individ1.adjacency_matrix[selected_node_index] == 1))
+        subgraph2 = np.array(np.where(individ2.adjacency_matrix[selected_node_index] == 1))
 
-        individ1.replace_subgraph(start_node_index, subgraph2)
-        individ2.replace_subgraph(start_node_index, subgraph1)
+        individ1.replace_subgraph(selected_node_index, subgraph2)
+        individ2.replace_subgraph(selected_node_index, subgraph1)
 
         self.individs = [individ1, individ2]
 

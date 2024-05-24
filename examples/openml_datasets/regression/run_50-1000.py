@@ -1,29 +1,16 @@
 import os
 from datetime import datetime
 
-import numpy as np
 import openml
 import pandas as pd
 from matplotlib import pyplot as plt
 from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import LabelEncoder
 
 from evolution.Evolution import Evolution
 from evolution.IndividStructures import DataStructureGraph
 from regularizator.ModuleNN import ModelNN
 
-
-def init_datasets_ids(task):
-    """
-    :param task: available tasks: regression, binary_class, multiclass
-    """
-    datalist = openml.datasets.list_datasets(output_format="dataframe")
-    if task == 'regression':
-        datasets_list = datalist[datalist['NumberOfClasses'] == 0]
-    if task == 'binary_class':
-        datasets_list = datalist[datalist['NumberOfClasses'] == 2]
-    if task == 'multiclass':
-        datasets_list = datalist[datalist['NumberOfClasses'] > 2]
-    return datasets_list['did']
 
 
 def split_train_test(dataset, target_name, split_ratio: float = 0.2):
@@ -35,20 +22,38 @@ def split_train_test(dataset, target_name, split_ratio: float = 0.2):
 
 def run_openml_regression(n_runs=5):
     start_time = datetime.now().strftime('%Y_%m_%d-%H_%M_%S_%p')
-    exp_folder = f'C:/Users/Julia/Documents/NSS_lab/fastnet/examples/openml_log/regression/{start_time}'
+    exp_folder = f'C:/Users/Julia/Documents/NSS_lab/fastnet/examples/openml_paper_statement/regression/results/50_1000_{start_time}'
     os.mkdir(exp_folder)
     log_file = f'{exp_folder}/log.txt'
 
 
     datalist = openml.datasets.list_datasets(output_format="dataframe")
     datalist['ValidInstNum'] = datalist['NumberOfInstances'] - datalist['NumberOfInstancesWithMissingValues']
-    datasets_list = datalist[(datalist['NumberOfClasses'] == 0) & (datalist['ValidInstNum'] < 20000) & (datalist['ValidInstNum'] > 50)]
-    for id in datasets_list['did'][19:]:
+    datasets_list = datalist[(datalist['NumberOfClasses'] == 0)
+                             & (datalist['ValidInstNum'] < 1000)
+                             & (datalist['ValidInstNum'] > 50)
+                             & (datalist['NumberOfNumericFeatures'] >= 3)]
+
+    for id in datasets_list['did']:
         try:
             dataset = openml.datasets.get_dataset(id)
             dataset_name = dataset.name
             target_name = dataset.default_target_attribute
             dataset_df = dataset.get_data()[0]
+            #dataset_df = dataset_df.apply(pd.to_numeric, errors='coerce')
+            dataset_df = dataset_df.dropna()
+            for column in dataset_df.columns:
+                if column != target_name:
+                    if dataset_df[column].dtype.name in ['object', 'category']:
+                        try:
+                            dataset_df[column] = dataset_df[column].astype(int)
+                        except Exception as e:
+                            try:
+                                encoder = LabelEncoder()
+                                encoder.fit_transform(dataset_df[column].to_frame())
+                                dataset_df[column] = encoder.transform(dataset_df[column].to_frame())
+                            except Exception as e:
+                                pass
             dataset_df = dataset_df.apply(pd.to_numeric, errors='coerce')
             dataset_df = dataset_df.dropna()
 
@@ -65,6 +70,7 @@ def run_openml_regression(n_runs=5):
             if not os.path.exists(ds_folder):
                 os.makedirs(ds_folder)
 
+            dataset_df.to_csv(f'{ds_folder}/{dataset_name}.csv')
             metrics_file = f'{ds_folder}/metrics.csv'
             with open(metrics_file, 'a') as file:
                 file.write(f"run,base_train_loss,with_graph_train_loss,with_evolution_train_loss,"
@@ -91,7 +97,7 @@ def run_openml_regression(n_runs=5):
                     base_individ.cash_folder = f'{ds_folder}/{r}'
 
                     base_model = ModelNN(X_train[base_individ.basis], y_train[base_individ.basis],
-                                         num_epochs=100,
+                                         num_epochs=50,
                                          batch_size=300,
                                          problem='regres',
                                          cash_folder=f'{ds_folder}/{r}',
@@ -106,7 +112,7 @@ def run_openml_regression(n_runs=5):
                                    f"base_test_loss {base_test_loss}\n")
 
                     with_graph_model = ModelNN(X_train[base_individ.basis], y_train[base_individ.basis],
-                                               num_epochs=100,
+                                               num_epochs=50,
                                                batch_size=300,
                                                problem='regres',
                                                cash_folder=f'{ds_folder}/{r}',
@@ -114,17 +120,15 @@ def run_openml_regression(n_runs=5):
                                                )
                     with_graph_model.train(base_individ)
                     with_graph_train_loss = with_graph_model.get_loss_on_train()
-                    with_graph_test_loss = base_model.get_loss_on_test(X_test, y_test)
+                    with_graph_test_loss = with_graph_model.get_loss_on_test(X_test, y_test)
 
                     with open(log_file, 'a') as file:
                         file.write(f"{datetime.now().strftime('%Y_%m_%d-%H_%M_%S_%p')}\n"
                                    f"with_graph_train_loss {with_graph_train_loss}\n"
                                    f"with_graph_test_loss {with_graph_test_loss}\n")
 
-
-                    # считаем для кучи нейронок для каждого индивида в популяции с выбором лучшей модели
                     with_evolution_model = ModelNN(X_train[base_individ.basis], y_train[base_individ.basis],
-                                                   num_epochs=100,
+                                                   num_epochs=50,
                                                    batch_size=300,
                                                    problem='regres',
                                                    cash_folder=f'{ds_folder}/{r}',
@@ -132,7 +136,7 @@ def run_openml_regression(n_runs=5):
                                                    )
 
                     evolution = Evolution(base_individ=base_individ,
-                                          iterations=30,
+                                          iterations=50,
                                           population_size=10,
                                           model_to_optimize=with_evolution_model)
                     evolution.run()
