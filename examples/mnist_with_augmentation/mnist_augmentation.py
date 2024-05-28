@@ -42,6 +42,6 @@ new_train_dataX = np.array(new_train_dataX)
 new_train_dataY = np.array(new_train_dataY)
 new_train_dataAng = np.array(new_train_dataAng)
 
-np.save("feature_mnist.npy", new_train_dataX)
-np.save("target_mnist.npy", new_train_dataY)
+np.save("../data/feature_mnist.npy", new_train_dataX)
+np.save("../data/target_mnist.npy", new_train_dataY)
 np.save("../data/angle_mnist.npy", new_train_dataAng)
