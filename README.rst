@@ -1,10 +1,8 @@
-=====
+=============================
 Manifold Und Learning - MANUL
-=====
+=============================
 
-**MANUL** - tool for extracting topology from data as a graph structure 
-and associated model regularization. Application employs novel approach
-to build the neighborhood graph in the initial feature space.
+**MANUL** - tool for extracting topology from data as a graph structure and associated model regularization. Application employs novel approach to build the neighborhood graph in the initial feature space.
 
 Evolutionary algorithm extracts geometry and topology from the data, using the specific machine learning model. It is used as alternative 
 to Euclidean metric for graph building with further graph distillation to avoid unnecessarily complex structures.
@@ -17,14 +15,15 @@ Background
 
 In that tool data represents as the graph :math:`G_n = (X, W)`, where vertices :math:`X = (x_1, ..., x_n)` are the data records (points) and :math:`W_{ij}` is the distance between two data points.
 
-.. image::docs/img/ds_to_graph_scheme.png
+.. image:: docs/img/ds_to_graph_scheme.png
     :alt: The scheme with transition from data points with features to topologies structure data
 
 As background for our method, we will use manifold regularization. It allows one to train a smooth machine-learning model on a found manifold.
 To formulate the neighborhood graph learning problem, the manifold regularization formulation could be extended to:
 
-.. image::docs/img/opt_problem.png
+.. image:: docs/img/opt_problem.png
     :alt: Manifold regularization formulation
+    :align: center
 
 
 How to use
