@@ -21,10 +21,11 @@ In that tool data represents as the graph :math:`G_n = (X, W)`, where vertices :
 As background for our method, we will use manifold regularization. It allows one to train a smooth machine-learning model on a found manifold.
 To formulate the neighborhood graph learning problem, the manifold regularization formulation could be extended to:
 
-.. image:: docs/img/opt_problem.png
-    :alt: Manifold regularization formulation
+.. image:: docs/img/problem2.jpg
     :align: center
 
+
+.. L^* = \min_{G_n \in \mathcal{G}} \left[\min_{f \in H_k} \mathcal{L}(f)+\lambda(f^T l(G_n) f) \right]
 
 How to use
 ===========
