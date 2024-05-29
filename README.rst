@@ -1,16 +1,31 @@
-.. image:: docs/logo2.png
-    :alt: Logo of MANUL tools
+=====
+Manifold Und Learning - MANUL
+=====
 
 **MANUL** - tool for extracting topology from data as a graph structure 
 and associated model regularization. Application employs novel approach
 to build the neighborhood graph in the initial feature space.
 
+Evolutionary algorithm extracts geometry and topology from the data, using the specific machine learning model. It is used as alternative 
+to Euclidean metric for graph building with further graph distillation to avoid unnecessarily complex structures.
+
+.. image:: docs/logo2.png
+    :alt: Logo of MANUL tools
+
+Background
+==========
+
+In that tool data represents as the graph :math:`G_n = (X, W)`, where vertices :math:`X = (x_1, ..., x_n)` are the data records (points) and :math:`W_{ij}` is the distance between two data points.
+
 .. image::docs/img/ds_to_graph_scheme.png
     :alt: The scheme with transition from data points with features to topologies structure data
 
-Evolutionary algorithm extracts geometry and topology from the data, using the specific machine learning model. It is used as alternative 
-to Euclidean metric for graph building with further graph distillation to avoid 
-unnecessarily complex structures.
+As background for our method, we will use manifold regularization. It allows one to train a smooth machine-learning model on a found manifold.
+To formulate the neighborhood graph learning problem, the manifold regularization formulation could be extended to:
+
+.. image::docs/img/opt_problem.png
+    :alt: Manifold regularization formulation
+
 
 How to use
 ===========
@@ -74,7 +89,7 @@ How to use
 
     .. code-block:: python
 
-        evolution.base_individ.show_3d(train_target, title=f'After evolution')
+        evolution.base_individ.show_3d(train_target, title='After evolution')
         evolution.base_individ.show_2d(train_target, euclidean=True)
 
 
@@ -83,5 +98,6 @@ Examples
 
 Folder ``examples`` contains:
     - ``examples/mammonth``: example data, that have shape of mammoth in 3d space, problem - regression;
-    - ``examples/mnist_with_augmentation``: examples for MNIST datasets with augmentation (different angle of rotation), problems - binary and multi-class classifications, for getting of augmentation MNIST dataset on locale you need to run ``examples/mnist_with_augmentation/mnist_augmentation.py``;
+    - ``examples/mnist_with_augmentation``: examples for MNIST datasets with augmentation (different angle of rotation), problems - binary and multi-class classifications
+        for getting of augmentation MNIST dataset on locale you need to run ``examples/mnist_with_augmentation/mnist_augmentation.py``;
     - ``examples/openml``: experiments with all data from OpenML resource by kind of problem (regression, multi-class or binary classification).
