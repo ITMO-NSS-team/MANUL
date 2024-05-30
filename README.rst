@@ -1,6 +1,6 @@
-=============================
+#############################
 Manifold Und Learning - MANUL
-=============================
+#############################
 
 **MANUL** - tool for extracting topology from data as a graph structure and associated model regularization. Application employs novel approach to build the neighborhood graph in the initial feature space.
 
@@ -23,9 +23,23 @@ To formulate the neighborhood graph learning problem, the manifold regularizatio
 
 .. image:: docs/img/problem2.jpg
     :align: center
-
-
 .. L^* = \min_{G_n \in \mathcal{G}} \left[\min_{f \in H_k} \mathcal{L}(f)+\lambda(f^T l(G_n) f) \right]
+
+Evolution
+^^^^^^^^^
+
+Population consists from graphs with different structures. 
+The formation of the initial population occurs through multiple applications of the mutation operator to the base individual.
+Thus, the initial population consists of a given number o individuals and already has the diversity for cross-over.
+For each epoch individs select and apply mutation's operators. We use next kind of mutation.
+
+- **Topo base mutation** - if graph have a large set with points, we resuce count of points with saving data's topology. The mutation over nodes is a choice of the new graph base by replacing nodes while preserving edges from the current base with nodes from the initial data are not included in it.
+
+- **Topo connectivity mutation** - that type of mutation edge removal or adding with a given probability.
+
+- **Geometry mutation** - changing weight with the given amplitude for random chosed edges.
+
+The ``crossover`` is a subgraph exchange. Since the vertices set remain the same for every graph in the population, we exchange only edges between two graphs. Two random vertices are chosen for exchange; for every point at most k-nearest neighbors based on weights, those are subgraphs for exchange.
 
 How to use
 ===========
@@ -97,7 +111,9 @@ Examples
 ========
 
 Folder ``examples`` contains:
+
     - ``examples/mammonth``: example data, that have shape of mammoth in 3d space, problem - regression;
-    - ``examples/mnist_with_augmentation``: examples for MNIST datasets with augmentation (different angle of rotation), problems - binary and multi-class classifications
-        for getting of augmentation MNIST dataset on locale you need to run ``examples/mnist_with_augmentation/mnist_augmentation.py``;
+
+    - ``examples/mnist_with_augmentation``: examples for MNIST datasets with augmentation (different angle of rotation), problems - binary and multi-class classifications for getting of augmentation MNIST dataset on locale you need to run ``examples/mnist_with_augmentation/mnist_augmentation.py``;
+
     - ``examples/openml``: experiments with all data from OpenML resource by kind of problem (regression, multi-class or binary classification).
