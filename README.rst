@@ -21,17 +21,17 @@ In that tool data represents as the graph :math:`G_n = (X, W)`, where vertices :
 As background for our method, we will use manifold regularization. It allows one to train a smooth machine-learning model on a found manifold.
 To formulate the neighborhood graph learning problem, the manifold regularization formulation could be extended to:
 
-.. image:: docs/img/problem2.jpg
-    :align: center
-.. L^* = \min_{G_n \in \mathcal{G}} \left[\min_{f \in H_k} \mathcal{L}(f)+\lambda(f^T l(G_n) f) \right]
+
+.. math::
+    L^* = \min \limits_{G_n \in \mathcal{G}} \left[\min \limits_{f \in H_k} \mathcal{L}(f)+\lambda(f^T l(G_n) f) \right]
 
 Evolution
 ^^^^^^^^^
 
-Population consists from graphs with different structures. 
+Population consists of graphs with different structures. 
 The formation of the initial population occurs through multiple applications of the mutation operator to the base individual.
-Thus, the initial population consists of a given number o individuals and already has the diversity for cross-over.
-For each epoch individs select and apply mutation's operators. We use next kind of mutation.
+Thus, the initial population consists of a given number of individuals and already has the diversity for cross-over.
+For each epoch individs are selected, and mutation operators are applied. Tool have the following kinds of mutation.
 
 - **Topo base mutation** - if graph have a large set with points, we resuce count of points with saving data's topology. The mutation over nodes is a choice of the new graph base by replacing nodes while preserving edges from the current base with nodes from the initial data are not included in it.
 
@@ -39,7 +39,7 @@ For each epoch individs select and apply mutation's operators. We use next kind 
 
 - **Geometry mutation** - changing weight with the given amplitude for random chosed edges.
 
-The ``crossover`` is a subgraph exchange. Since the vertices set remain the same for every graph in the population, we exchange only edges between two graphs. Two random vertices are chosen for exchange; for every point at most k-nearest neighbors based on weights, those are subgraphs for exchange.
+The ``cross-over`` is a subgraph exchange operation. Since the vertices set remains the same for every graph in the population, we exchange only edges between two graphs. Two random vertices are chosen for exchange; for every point at most k-nearest neighbors based on weights, those are subgraphs for exchange.
 
 How to use
 ===========
