@@ -226,8 +226,9 @@ class DataStructureGraph:
             euclidean_distances(self.source_data[self.basis], self.source_data[self.basis]))
         all_nodes_source_indeces = np.arange(self.source_data.shape[0])
         available_nodes = np.delete(all_nodes_source_indeces, self.basis)
+        current_nodes_indices = current_nodes_indices[:available_nodes.shape[0]]
         new_nodes_source_indices = available_nodes[np.random.choice(np.arange(available_nodes.shape[0]),
-                                                                    size=current_nodes_indices.shape[0])]
+                                                                    size=current_nodes_indices.shape[0], replace=False)]
         self.basis[current_nodes_indices] = new_nodes_source_indices
         new_nodes_source_matrix = self.source_data[self.basis[current_nodes_indices]]
         new_nodes_distances = euclidean_distances(new_nodes_source_matrix, new_nodes_source_matrix)

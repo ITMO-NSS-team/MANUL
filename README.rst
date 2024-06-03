@@ -112,8 +112,8 @@ Examples
 
 Folder ``examples`` contains:
 
-    - ``examples/mammonth``: example data, that have shape of mammoth in 3d space, problem - regression;
+- ``examples/mammonth``: example data, that have shape of mammoth in 3d space, problem - regression;
 
-    - ``examples/mnist_with_augmentation``: examples for MNIST datasets with augmentation (different angle of rotation), problems - binary and multi-class classifications for getting of augmentation MNIST dataset on locale you need to run ``examples/mnist_with_augmentation/mnist_augmentation.py``;
+- ``examples/mnist_with_augmentation``: examples for MNIST datasets with augmentation (different angle of rotation), problems - binary and multi-class classifications for getting of augmentation MNIST dataset on locale you need to run ``examples/mnist_with_augmentation/mnist_augmentation.py``;
 
-    - ``examples/openml``: experiments with all data from OpenML resource by kind of problem (regression, multi-class or binary classification).
+- ``examples/openml``: experiments with all data from OpenML resource by kind of problem (regression, multi-class or binary classification).
