@@ -40,7 +40,7 @@ class IndividEvoOperators:
             if self.base_mutation:
                 if len(individ.basis) != individ.source_data.shape[0]:
                     # nodes mutation runs only when base is not equal to full graph
-                    nodes_indices_to_change = np.random.choice(num_nodes, size=number_of_nodes_to_mutate, replacee=False)
+                    nodes_indices_to_change = np.random.choice(num_nodes, size=number_of_nodes_to_mutate, replace=False)
                     individ.twist_nodes(nodes_indices_to_change)
 
             # GRAPH EDGES MUTATION
