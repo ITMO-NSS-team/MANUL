@@ -1,9 +1,9 @@
-import os
-import sys
+# import os
+# import sys
 from itertools import combinations
 
-root_dir = '/'.join(os.getcwd().split("/")[:-1])
-sys.path.append(root_dir)
+# root_dir = '/'.join(os.getcwd().split("/")[:-1])
+# sys.path.append(root_dir)
 
 import numpy as np
 from matplotlib import pyplot as plt
