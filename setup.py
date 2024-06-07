@@ -26,7 +26,6 @@ def _get_requirements(req_name: str):
 setuptools.setup(
     name=NAME,
     version=VERSION,
-    long_description=README,
     python_requires=REQ_PYTHON,
     packages=setuptools.find_packages(exclude=['test*']),
     include_package_data=True,
