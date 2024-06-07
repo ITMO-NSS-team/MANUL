@@ -5,8 +5,6 @@
 # sys.path.append(root_dir)
 
 import numpy as np
-from matplotlib import pyplot as plt
-from sklearn.metrics.pairwise import euclidean_distances
 from copy import deepcopy
 
 from evolution.IndividStructures import DataStructureGraph
@@ -16,7 +14,13 @@ def create_base_individ():
     source_data_array = np.random.randint(0, 10, size=(8, 2))
     adj = np.zeros((5, 5))
     edges = np.array([[0, 1], [0, 4], [1, 2], [2, 3], [3, 4]]).T
-    matrix = euclidean_distances(source_data_array[:5], source_data_array[:5])
+    matrix = []
+    for elem in source_data_array[:5]:
+        temp = []
+        for elem2 in source_data_array[:5]:
+            temp.append(np.sqrt(np.sum(np.power(elem - elem2, 2))))
+        matrix.append(temp)
+    matrix = np.array(matrix)
     matrix = matrix / np.max(matrix)
     adj[edges[0], edges[1]] = 1
     adj[edges[1], edges[0]] = 1
@@ -60,8 +64,6 @@ def test_edge_len_mutation():
     # change 6 edges
     edges_to_mutate_indices = np.random.randint(n, size=(6, 2))
     individ_shell.change_edges_length(edges_inds=edges_to_mutate_indices, mutate_intensity=0.3)
-    # plt.imshow(individ_shell.matrix_connect)
-    # plt.show()
     assert individ_shell.matrix_connect.diagonal().all() == 0
     assert np.all(np.abs(individ_shell.matrix_connect-individ_shell.matrix_connect.T) < 1e-8)
     assert individ_shell.matrix_connect[individ_shell.matrix_connect < 0].shape[0] == 0
@@ -70,8 +72,6 @@ def test_edge_len_mutation():
 
 def test_subgraph_replacing():
     matrix = np.full((10, 10), 1)
-    # plt.imshow(matrix)
-    # plt.show()
 
     individ_shell = DataStructureGraph()
     individ_shell.adjacency_matrix = matrix
@@ -79,8 +79,6 @@ def test_subgraph_replacing():
 
     individ_shell.replace_subgraph(5, np.array([1, 2, 3]))
     edges_after = individ_shell.number_of_edges
-    # plt.imshow(individ_shell.adjacency_matrix)
-    # plt.show()
 
     assert edges_before - edges_after == 7
 
@@ -88,7 +86,13 @@ def test_twist_nodes():
     source_data_array = np.random.randint(0, 10, size=(8, 2))
     adj = np.zeros((5, 5))
     edges = np.array([[0, 1], [0, 4], [1, 2], [2, 3], [3, 4]]).T
-    matrix = euclidean_distances(source_data_array[:5], source_data_array[:5]) 
+    matrix = []
+    for elem in source_data_array[:5]:
+        temp = []
+        for elem2 in source_data_array[:5]:
+            temp.append(np.sqrt(np.sum(np.power(elem - elem2, 2))))
+        matrix.append(temp)
+    matrix = np.array(matrix) 
     adj[edges[0], edges[1]] = 1
     adj[edges[1], edges[0]] = 1
 
