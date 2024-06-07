@@ -4,7 +4,7 @@ from typing import List
 import setuptools
 
 LOCATION = Path(__file__).parent.resolve()
-NAME = 'MANUL'
+NAME = 'manul'
 VERSION = 1
 README = Path(LOCATION, 'README.rst').read_text(encoding='utf-8')
 REQ_PYTHON = '>=3.8'
@@ -31,6 +31,6 @@ setuptools.setup(
     python_requires=REQ_PYTHON,
     extras_require={
         key: _get_requirements(Path('other_requirements', f'{key}.txt'))
-        for key in ('evo_test')
+        for key in ('evo_test',)
     },
 )
