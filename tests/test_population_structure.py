@@ -6,8 +6,6 @@ from itertools import combinations
 # sys.path.append(root_dir)
 
 import numpy as np
-from matplotlib import pyplot as plt
-from sklearn.metrics.pairwise import euclidean_distances
 from copy import deepcopy
 
 from evolution.IndividStructures import DataStructureGraph
@@ -18,8 +16,14 @@ def create_base_individ():
     source_data_array = np.random.randint(0, 10, size=(8, 2))
     adj = np.zeros((5, 5))
     edges = np.array([[0, 1], [0, 4], [1, 2], [2, 3], [3, 4]]).T
-    matrix = euclidean_distances(source_data_array[:5], source_data_array[:5])
-    matrix / np.max(matrix)
+    matrix = []
+    for elem in source_data_array[:5]:
+        temp = []
+        for elem2 in source_data_array[:5]:
+            temp.append(np.sqrt(np.sum(np.power(elem - elem2, 2))))
+        matrix.append(temp)
+    matrix = np.array(matrix)
+    matrix = matrix / np.max(matrix)
     adj[edges[0], edges[1]] = 1
     adj[edges[1], edges[0]] = 1
 
