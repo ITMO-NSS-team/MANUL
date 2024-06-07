@@ -27,8 +27,9 @@ setuptools.setup(
     name=NAME,
     version=VERSION,
     long_description=README,
-    long_description_content_type='text/x-rst',
     python_requires=REQ_PYTHON,
+    packages=setuptools.find_packages(exclude=['test*']),
+    include_package_data=True,
     extras_require={
         key: _get_requirements(Path('other_requirements', f'{key}.txt'))
         for key in ('evo_test',)
