@@ -14,7 +14,8 @@ author = 'NSSLab'
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
 
 extensions = [
-    'sphinx_rtd_theme',
+    'myst-parser'
+    'sphinx_rtd_,theme',
     'sphinx.ext.autodoc',
     'sphinx.ext.coverage',
     'sphinx.ext.mathjax'
