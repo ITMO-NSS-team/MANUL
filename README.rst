@@ -13,7 +13,7 @@ to Euclidean metric for graph building with further graph distillation to avoid 
 Background
 ==========
 
-In that tool data represents as the graph :math:`$$ G_n = (X, W) $$`, where vertices :math:`$$ X = (x_1, ..., x_n) $$` are the data records (points) and :math:`$$ W_{ij}$$` is the distance between two data points.
+In that tool data represents as the graph :math:`$G_n = (X, W)$`, where vertices :math:`$X = (x_1, ..., x_n)$` are the data records (points) and :math:`$W_{ij}$` is the distance between two data points.
 
 .. image:: docs/img/ds_to_graph_scheme.png
     :alt: The scheme with transition from data points with features to topologies structure data
