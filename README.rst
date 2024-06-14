@@ -76,7 +76,7 @@ How to use
 
     The variable ``model`` has the following base methods:
         - ``model.train()`` to run NN-model training with or without graph;
-        - ``model.get_loss_on_train()`` for getting loss on the train data;
+        - ``model.get_metric_on_train()`` for getting loss on the train data;
         - ``model.get_loss_on_test(test_features, test_target)`` for getting loss in test data.
 
 4.  Create evolution's object with constructed initial graph and model for searching best structure of data.

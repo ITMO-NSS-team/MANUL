@@ -445,7 +445,7 @@ class ModelNN:
             output = output.cpu().detach().numpy()[:, 0]
             output[output > 0.5] = 1
             output[output <= 0.5] = 0
-            target_y = self.target.astype(int)
+            target_y = test_target.astype(int)
         if self.problem == 'regres':
             output = output.cpu().detach().numpy()[:, 0]
             target_y = test_target.astype(float)

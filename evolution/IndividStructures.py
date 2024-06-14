@@ -8,7 +8,6 @@ from typing import Optional
 import networkx as nx
 import numpy as np
 from matplotlib import pyplot as plt
-from numba import njit
 from datetime import datetime
 
 

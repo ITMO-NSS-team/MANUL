@@ -1,13 +1,11 @@
-import tensorflow as tf
 import numpy as np
 import cv2
+import torchvision
 
-mnist = tf.keras.datasets.mnist
-result = mnist.load_data()
 
-train, test = result
-X_train, Y_train = train
-X_test, Y_test = test
+mnist = torchvision.datasets.MNIST('../data/', download=True)
+X_train = mnist.train_data.numpy()
+Y_train = mnist.train_labels.numpy()
 
 unique_classes = np.unique(Y_train)
 
