@@ -28,7 +28,7 @@ def generate_ds():
 
     # test set
     np.random.seed(1)
-    x = np.random.randint(1000, size=100, )
+    x = np.random.randint(1000, size=100)
     y = np.random.randint(1000, size=100)
     test_colors = np.sqrt(x ** 2 + y ** 2)
     test_features = [np.ravel(x), np.ravel(y)]
@@ -68,7 +68,7 @@ with_evolution_model = ModelNN(train_features[base_individ.basis], train_colors[
                                batch_size=10, problem='regres', num_epochs=50)
 
 evolution = Evolution(base_individ=base_individ,
-                      iterations=5,
+                      iterations=30,
                       population_size=10,
                       model_to_optimize=with_evolution_model
                       )
