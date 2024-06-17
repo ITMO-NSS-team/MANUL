@@ -1,10 +1,9 @@
-import networkx as nx
 import numpy as np
 from matplotlib import pyplot as plt
 
 from evolution.Evolution import Evolution
 from evolution.IndividStructures import DataStructureGraph
-from regularizator.ModuleSimple import ModelSimple
+from regularizator.ModuleNN import ModelNN
 
 
 def generate_ds():
@@ -29,7 +28,7 @@ def generate_ds():
 
     # test set
     np.random.seed(1)
-    x = np.random.randint(1000, size=100, )
+    x = np.random.randint(1000, size=100)
     y = np.random.randint(1000, size=100)
     test_colors = np.sqrt(x ** 2 + y ** 2)
     test_features = [np.ravel(x), np.ravel(y)]
@@ -51,22 +50,25 @@ base_individ = DataStructureGraph(data=train_features,
 
 base_individ.show_2d(train_colors, cmap_name='Blues', euclidean=True)
 
-base_model = ModelSimple(train_features[base_individ.basis], train_colors[base_individ.basis],
+base_model = ModelNN(train_feature=train_features[base_individ.basis],
+                     train_target=train_colors[base_individ.basis],
+                     batch_size=10,
                      problem='regres')
-base_model.train()
+base_model.train(plot_convergence=True, num_epochs=50)
 base_train_loss = base_model.get_metric_on_train()
 base_test_loss = base_model.get_metric_on_test(test_features, test_colors)
 
-with_graph_model = ModelSimple(train_features[base_individ.basis], train_colors[base_individ.basis], problem='regres')
-with_graph_model.train(base_individ)
+with_graph_model = ModelNN(train_features[base_individ.basis], train_colors[base_individ.basis],
+                           batch_size=10, problem='regres')
+with_graph_model.train(graph=base_individ, num_epochs=50, plot_convergence=True)
 with_graph_train_loss = with_graph_model.get_metric_on_train()
 with_graph_test_loss = with_graph_model.get_metric_on_test(test_features, test_colors)
 
-with_evolution_model = ModelSimple(train_features[base_individ.basis], train_colors[base_individ.basis],
-                               problem='regres')
+with_evolution_model = ModelNN(train_features[base_individ.basis], train_colors[base_individ.basis],
+                               batch_size=10, problem='regres', num_epochs=50)
 
 evolution = Evolution(base_individ=base_individ,
-                      iterations=200,
+                      iterations=30,
                       population_size=10,
                       model_to_optimize=with_evolution_model
                       )
@@ -75,17 +77,10 @@ evolution.run()
 with_evolution_train_loss = with_evolution_model.get_metric_on_train()
 with_evolution_test_loss = with_evolution_model.get_metric_on_test(test_features, test_colors)
 
-b1 = plt.bar(['base', 'with graph', 'with evolution'], [base_train_loss, with_graph_train_loss, with_evolution_train_loss])
-for b in b1:
-    height = b.get_height()
-    plt.text(b.get_x() + b.get_width() / 2.0, height, f'{height:.5f}', ha='center', va='bottom')
+plt.bar(['base', 'with graph', 'with evolution'], [base_train_loss, with_graph_train_loss, with_evolution_train_loss])
 plt.title('MSE on train set')
 plt.show()
-b2 = plt.bar(['base', 'with graph', 'with evolution'], [base_test_loss, with_graph_test_loss, with_evolution_test_loss])
-for b in b2:
-    height = b.get_height()
-    plt.text(b.get_x() + b.get_width() / 2.0, height, f'{height:.5f}', ha='center', va='bottom')
-
+plt.bar(['base', 'with graph', 'with evolution'], [base_test_loss, with_graph_test_loss, with_evolution_test_loss])
 plt.title('MSE on test set')
 plt.show()
 
