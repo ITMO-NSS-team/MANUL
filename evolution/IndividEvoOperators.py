@@ -55,7 +55,7 @@ class IndividEvoOperators:
 
                 # fixing number of edges to add and to remove to close values
                 min_num = np.min([inds_to_remove_edge.shape[1], inds_to_add_edge.shape[1]])
-                min_num_with_disturbance = np.random.randint(-min_num, min_num) + min_num
+                min_num_with_disturbance = np.random.randint(-min_num, min_num+1) + min_num
                 #min_num_with_disturbance = min_num
 
                 if inds_to_add_edge.shape[1] != min_num:
@@ -73,8 +73,9 @@ class IndividEvoOperators:
                 one_way_adj_matrix = mask_matrix * individ.adjacency_matrix
                 edges = np.array(np.where(one_way_adj_matrix == 1))
 
-                edges_to_mutate_indices = edges[:, np.random.randint(edges.shape[1], size=num_of_edges_to_mutate)]
-                individ.change_edges_length(edges_to_mutate_indices, mutate_intensity=0.2)
+                if edges.shape[1] > 0:
+                    edges_to_mutate_indices = edges[:, np.random.randint(edges.shape[1], size=num_of_edges_to_mutate)]
+                    individ.change_edges_length(edges_to_mutate_indices, mutate_intensity=0.2)
 
         return self.individs
 

@@ -100,8 +100,8 @@ def run_openml_regression(n_runs=5):
                                          cash_folder=f'{ds_folder}/{r}',
                                          model_name='base_model')
                     base_model.train()
-                    base_train_loss = base_model.get_loss_on_train()
-                    base_test_loss = base_model.get_loss_on_test(X_test, y_test)
+                    base_train_loss = base_model.get_metric_on_train()
+                    base_test_loss = base_model.get_metric_on_test(X_test, y_test)
 
                     with open(log_file, 'a') as file:
                         file.write(f"{datetime.now().strftime('%Y_%m_%d-%H_%M_%S_%p')}\n"
@@ -116,8 +116,8 @@ def run_openml_regression(n_runs=5):
                                                model_name='with_graph'
                                                )
                     with_graph_model.train(base_individ)
-                    with_graph_train_loss = with_graph_model.get_loss_on_train()
-                    with_graph_test_loss = with_graph_model.get_loss_on_test(X_test, y_test)
+                    with_graph_train_loss = with_graph_model.get_metric_on_train()
+                    with_graph_test_loss = with_graph_model.get_metric_on_test(X_test, y_test)
 
                     with open(log_file, 'a') as file:
                         file.write(f"{datetime.now().strftime('%Y_%m_%d-%H_%M_%S_%p')}\n"
@@ -141,8 +141,8 @@ def run_openml_regression(n_runs=5):
                     evolution.base_individ.show_2d(y_train, save_path=f'{ds_folder}/{r}/final_graph.png')
                     evolution.plot_evolution_fitnesses(save_path=f'{ds_folder}/{r}/evolution_conv.png')
 
-                    with_evolution_train_loss = with_evolution_model.get_loss_on_train()
-                    with_evolution_test_loss = with_evolution_model.get_loss_on_test(X_test, y_test)
+                    with_evolution_train_loss = with_evolution_model.get_metric_on_train()
+                    with_evolution_test_loss = with_evolution_model.get_metric_on_test(X_test, y_test)
 
                     with open(log_file, 'a') as file:
                         file.write(f"{datetime.now().strftime('%Y_%m_%d-%H_%M_%S_%p')}\n"

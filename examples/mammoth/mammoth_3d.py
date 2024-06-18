@@ -63,8 +63,8 @@ def run_example():
                          batch_size=300,
                          problem='regres')
     base_model.train()
-    base_train_loss = base_model.get_loss_on_train()
-    base_test_loss = base_model.get_loss_on_test(test_features, test_target)
+    base_train_loss = base_model.get_metric_on_train()
+    base_test_loss = base_model.get_metric_on_test(test_features, test_target)
 
     # raw model with base individ graph
     with_graph_model = ModelNN(train_features[base_individ.basis], train_target[base_individ.basis],
@@ -72,8 +72,8 @@ def run_example():
                                batch_size=300,
                                problem='regres')
     with_graph_model.train(base_individ, plot_convergence=True)
-    with_graph_train_loss = with_graph_model.get_loss_on_train()
-    with_graph_test_loss = base_model.get_loss_on_test(test_features, test_target)
+    with_graph_train_loss = with_graph_model.get_metric_on_train()
+    with_graph_test_loss = base_model.get_metric_on_test(test_features, test_target)
 
     # check evolution convergence by 5 runs
     for i in range(5):
@@ -95,8 +95,8 @@ def run_example():
         evolution.base_individ.show_2d(train_target, euclidean=True)
         evolution.base_individ.show_3d(train_target, title=f'After evolution {i}')
 
-        with_evolution_train_loss = with_evolution_model.get_loss_on_train()
-        with_evolution_test_loss = with_evolution_model.get_loss_on_test(test_features, test_target)
+        with_evolution_train_loss = with_evolution_model.get_metric_on_train()
+        with_evolution_test_loss = with_evolution_model.get_metric_on_test(test_features, test_target)
 
         # plot on train set
         b1 = plt.bar(['base', 'with graph', 'with evolution'],
