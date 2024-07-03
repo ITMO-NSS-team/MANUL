@@ -6,4 +6,4 @@ plotly==5.20.0
 topo==0.1.1
 numba==0.59.1
 tqdm==4.64.1
-torch==2.0.1+cu117
+torch==2.0.1
