@@ -5,3 +5,5 @@ networkx==3.2.1
 plotly==5.20.0
 topo==0.1.1
 numba==0.59.1
+tqdm==4.64.1
+torch~=2.2.2+cu118
