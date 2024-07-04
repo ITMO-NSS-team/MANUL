@@ -78,7 +78,7 @@ def test_edge_len_mutation():
     individ_shell.matrix_connect = matrix
 
     # change 6 edges
-    edges_to_mutate_indices = np.random.randint(n, size=(6, 2))
+    edges_to_mutate_indices = np.random.randint(n, size=(2, 6))
     individ_shell.change_edges_length(edges_inds=edges_to_mutate_indices, mutate_intensity=0.3)
     assert individ_shell.matrix_connect.diagonal().all() == 0
     assert np.all(np.abs(individ_shell.matrix_connect-individ_shell.matrix_connect.T) < 1e-8)
