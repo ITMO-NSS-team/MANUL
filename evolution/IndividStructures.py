@@ -241,10 +241,10 @@ class DataStructureGraph:
         :param edges_inds: np array with integer indices of chosen edges
         :param mutate_intensity: float that shows the range of distance values changing
         """
-        lengths_add = np.random.uniform(-mutate_intensity, mutate_intensity, edges_inds.shape[0])
-        new_lengths = self.matrix_connect[edges_inds[:, 0], edges_inds[:, 1]] + lengths_add
-        self.matrix_connect[edges_inds[:, 0], edges_inds[:, 1]] = new_lengths
-        self.matrix_connect[edges_inds[:, 1], edges_inds[:, 0]] = new_lengths
+        lengths_add = np.random.uniform(-mutate_intensity, mutate_intensity, edges_inds.shape[1])
+        new_lengths = self.matrix_connect[edges_inds[0], edges_inds[1]] + lengths_add
+        self.matrix_connect[edges_inds[0], edges_inds[1]] = new_lengths
+        self.matrix_connect[edges_inds[1], edges_inds[0]] = new_lengths
         np.fill_diagonal(self.matrix_connect, 0)
         self.matrix_connect[self.matrix_connect > 1] = 1 - (self.matrix_connect[self.matrix_connect > 1] - 1)
         self.matrix_connect[self.matrix_connect < 0] = -self.matrix_connect[self.matrix_connect < 0]
