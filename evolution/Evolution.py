@@ -117,7 +117,7 @@ class Evolution:
             self.evaluate_fitness()
 
             print('Filter population')
-            pop_operators.fiter_population(self.population_size)
+            pop_operators.filter_population(self.population_size)
             for individ in self.population.individs_pool:
                 individ.selected = False
                 individ.elitism = False

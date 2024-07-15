@@ -129,3 +129,24 @@ def test_filter_population():
     assert len(elite_individs) == 1 and elite_individs[0].fitness == 5
     assert len(np.unique(fitness_ind)) == 5
     assert 1 not in fitness_ind
+
+
+def test_roulette_wheel_selection():
+    base_individ = create_base_individ()
+    population_shell = Population(size=5, base_individ=base_individ)
+    population_shell = population_shell.generate()
+    population_shell.individs_pool.append(deepcopy(base_individ))
+    fitness = [1, 2, 1, 5, 1, 1.5]
+    elitism = [False, False, False, True, False, False]
+
+    for index in range(6):
+        population_shell.individs_pool[index].fitness = fitness[index]
+        population_shell.individs_pool[index].elitism = elitism[index]
+
+    operator = PopulationEvoOperators(population=population_shell)
+    operator.roulette_wheel_selection(winners_size=1)
+
+    select_inds = [ind for ind in population_shell.individs_pool if ind.selected == True]
+
+    assert len(select_inds) == 1
+    assert select_inds[0].fitness == 5

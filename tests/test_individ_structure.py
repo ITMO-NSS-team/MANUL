@@ -1,6 +1,7 @@
 import numpy as np
 from sklearn.metrics.pairwise import euclidean_distances
 from copy import deepcopy
+import pickle as pkl
 
 from evolution.IndividStructures import DataStructureGraph
 from evolution.IndividEvoOperators import IndividEvoOperators
@@ -54,7 +55,7 @@ def test_manipulation_edge():
     n = 10
     matrix = np.zeros((n, n), dtype=float)
     individ_shell = create_base_individ()
-    individ_shell.adjacency_matrix = matrix
+    individ_shell.adjacency_matrix = matrix 
     init_eu_matrix = deepcopy(individ_shell.matrix_connect)
     edges = np.array([[0, 1], [0, 4], [1, 2], [2, 3], [3, 4]]).T
 
@@ -180,4 +181,13 @@ def test_crossover_inidvids():
     assert np.all(individ_shell.adjacency_matrix[i] == new_individs[1].adjacency_matrix[i])
     assert np.all(individ_shell1.adjacency_matrix[i] == new_individs[0].adjacency_matrix[i])
 
-test_crossover_inidvids()
+
+# def test_create_graph():
+#     individ_shell = DataStructureGraph()
+#     with open('points_circle.pkl', 'rb') as f:
+#         points = pkl.load(f)
+
+#     individ_shell.create_graph(points)
+
+
+# test_create_graph()
