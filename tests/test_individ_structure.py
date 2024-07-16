@@ -82,7 +82,7 @@ def test_edge_len_mutation():
     edges_to_mutate_indices = np.random.randint(n, size=(2, 6))
     individ_shell.change_edges_length(edges_inds=edges_to_mutate_indices, mutate_intensity=0.3)
     assert individ_shell.matrix_connect.diagonal().all() == 0
-    assert np.all(np.abs(individ_shell.matrix_connect-individ_shell.matrix_connect.T) < 1e-8)
+    assert np.sum(individ_shell.matrix_connect-individ_shell.matrix_connect.T) == 0
     assert individ_shell.matrix_connect[individ_shell.matrix_connect < 0].shape[0] == 0
     assert individ_shell.matrix_connect[individ_shell.matrix_connect > 1].shape[0] == 0
 
@@ -182,12 +182,13 @@ def test_crossover_inidvids():
     assert np.all(individ_shell1.adjacency_matrix[i] == new_individs[0].adjacency_matrix[i])
 
 
-# def test_create_graph():
-#     individ_shell = DataStructureGraph()
-#     with open('points_circle.pkl', 'rb') as f:
-#         points = pkl.load(f)
+def test_create_graph():
+    individ_shell = DataStructureGraph()
+    with open('tests/points_circle.pkl', 'rb') as f:
+        points = pkl.load(f)
 
-#     individ_shell.create_graph(points)
+    individ_shell.create_graph(points)
 
-
-# test_create_graph()
+    assert len(np.unique(individ_shell.basis)) == len(individ_shell.basis)
+    assert individ_shell.adjacency_matrix.shape == individ_shell.matrix_connect.shape == (len(individ_shell.basis), len(individ_shell.basis))
+    assert individ_shell.matrix_connect.max() <= 1 and individ_shell.matrix_connect.min() >= 0

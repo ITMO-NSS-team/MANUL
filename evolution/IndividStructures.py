@@ -124,9 +124,8 @@ class DataStructureGraph:
             filtered_lapl = kernel.L.todense()
 
         # filtering edges by filtered laplacian
-        # self.adjacency_matrix = np.zeros(euclid_dists.shape)
-        # self.adjacency_matrix[filtered_lapl != 0] = 1
-        self.adjacency_matrix = filtered_lapl
+        self.adjacency_matrix = np.zeros(euclid_dists.shape)
+        self.adjacency_matrix[filtered_lapl != 0] = 1
         np.fill_diagonal(self.adjacency_matrix, 0)
 
         # get nodes pairs for edges

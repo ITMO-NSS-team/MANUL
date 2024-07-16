@@ -53,6 +53,7 @@ def test_genearte_evolution():
     assert np.all([evolution.base_mutation, evolution.edges_mutation, evolution.edges_weight_mutation] == [True, False, True])
 
 def test_evaluate_fitness():
+    np.random.seed(8)
     base_individ = create_base_individ()
     model = ModelNN(base_individ.source_data[base_individ.basis], np.random.randint(0, 2, size=len(base_individ.basis)),
                                num_epochs=10,
