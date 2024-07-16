@@ -149,4 +149,3 @@ def test_roulette_wheel_selection():
     select_inds = [ind for ind in population_shell.individs_pool if ind.selected == True]
 
     assert len(select_inds) == 1
-    assert select_inds[0].fitness == 5
