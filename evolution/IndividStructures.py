@@ -240,10 +240,8 @@ class DataStructureGraph:
         """
         lengths_add = np.random.uniform(-mutate_intensity, mutate_intensity, edges_inds.shape[1])
         new_lengths = self.matrix_connect[edges_inds[0], edges_inds[1]] + lengths_add
-        print("before", self.matrix_connect[edges_inds[0], edges_inds[1]])
         self.matrix_connect[edges_inds[0], edges_inds[1]] = new_lengths
         self.matrix_connect[edges_inds[1], edges_inds[0]] = new_lengths
-        print(self.matrix_connect[edges_inds[0], edges_inds[1]])
         np.fill_diagonal(self.matrix_connect, 0)
         self.matrix_connect[self.matrix_connect > 1] = 1 - (self.matrix_connect[self.matrix_connect > 1] - 1)
         self.matrix_connect[self.matrix_connect < 0] = -self.matrix_connect[self.matrix_connect < 0]
