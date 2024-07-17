@@ -192,3 +192,5 @@ def test_create_graph():
     assert len(np.unique(individ_shell.basis)) == len(individ_shell.basis)
     assert individ_shell.adjacency_matrix.shape == individ_shell.matrix_connect.shape == (len(individ_shell.basis), len(individ_shell.basis))
     assert individ_shell.matrix_connect.max() <= 1 and individ_shell.matrix_connect.min() >= 0
+
+test_mutate_lenght()

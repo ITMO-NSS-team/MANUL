@@ -3,7 +3,7 @@ sklearn==0.0
 matplotlib==3.8.3
 networkx==3.2.1
 plotly==5.20.0
-topometry==0.1.1
+topometry==0.2.1.1
 numba==0.59.1
 tqdm==4.64.1
 torch==2.0.1
