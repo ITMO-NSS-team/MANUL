@@ -65,8 +65,8 @@ class PopulationEvoOperators:
                                               size=(crossover_size, 2))]
 
         for individ1, individ2 in selected_individs:
-            individ1 = deepcopy(individ1)
-            individ2 = deepcopy(individ2)
+            # individ1 = deepcopy(individ1)
+            # individ2 = deepcopy(individ2)
             mutator = IndividEvoOperators([individ1, individ2])
             new_individs = mutator.crossover_individs()
             self.population.individs_pool.extend(new_individs)
@@ -81,7 +81,7 @@ class PopulationEvoOperators:
         number_of_individs_to_mutate = int(len(selected_population) * mutation_prob)
 
         selected_individs = np.random.choice(selected_population, replace=False, size=number_of_individs_to_mutate).tolist()
-        selected_individs = [deepcopy(ind) for ind in selected_individs]
+        # selected_individs = [deepcopy(ind) for ind in selected_individs]
 
         mutator = IndividEvoOperators(selected_individs, base_mutation, edges_mutation, edges_weight_mutation)
         # TODO throw mutation parameters to upper layers
@@ -89,7 +89,7 @@ class PopulationEvoOperators:
         self.population.individs_pool.extend(mutated_individs)
 
 
-    def fiter_population(self, size_to_save):
+    def filter_population(self, size_to_save):
         elite_inds = [ind.elitism for ind in self.population.individs_pool]
         elite_inds = [i for i, x in enumerate(elite_inds) if x]
         elite = [self.population.individs_pool[i] for i in elite_inds]

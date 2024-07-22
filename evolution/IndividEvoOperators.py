@@ -1,6 +1,7 @@
 import math
 
 import numpy as np
+from copy import deepcopy
 
 from evolution.IndividStructures import DataStructureGraph
 
@@ -15,7 +16,7 @@ class IndividEvoOperators:
         Class for applying available evolutionary operators to individs
         :param individs: list with graph individs for changing
         """
-        self.individs = individs
+        self.individs = [deepcopy(ind) for ind in individs]
         self.base_mutation = base_mutation
         self.edges_mutation = edges_mutation
         self.edges_weight_mutation = edges_weight_mutation
@@ -74,7 +75,7 @@ class IndividEvoOperators:
                 edges = np.array(np.where(one_way_adj_matrix == 1))
 
                 if edges.shape[1] > 0:
-                    edges_to_mutate_indices = edges[:, np.random.randint(edges.shape[1], size=num_of_edges_to_mutate)]
+                    edges_to_mutate_indices = edges[:, np.random.choice(edges.shape[1], size=num_of_edges_to_mutate, replace=False)]
                     individ.change_edges_length(edges_to_mutate_indices, mutate_intensity=0.2)
 
         return self.individs

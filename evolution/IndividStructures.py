@@ -94,8 +94,8 @@ class DataStructureGraph:
         return loss.reshape(-1)[0]
 
     def create_graph(self, nodes_data: np.ndarray,
-                     n_neighbors: int,
-                     epsilon_neighborhood: float):
+                     n_neighbors: int = None,
+                     epsilon_neighborhood: float = None):
         """
         Method to create graph from table data
         :param epsilon_neighborhood: normalized to max distance threshold for long edges filtering
@@ -118,7 +118,7 @@ class DataStructureGraph:
                 n_neighbors = 10
             kernel = tp.tpgraph.Kernel(n_neighbors=n_neighbors, n_jobs=1, metric='cosine', fuzzy=True,
                                        verbose=True)
-            print(f'Fit kernel, n_neighbors={n_neighbors} ')
+            print(f'Fit kernel, n_neighbors={n_neighbors}')
             kernel.fit(nodes_data)
             print(f'Laplacian calculation')
             filtered_lapl = kernel.L.todense()
@@ -137,11 +137,9 @@ class DataStructureGraph:
             for n in range(matrix_connect.shape[0]):
                 neigs = np.where(self.adjacency_matrix[n] != 0)[0]
                 neig_pairs = itertools.combinations(neigs, 2)
-                for pair in neig_pairs:
-                    neig1 = pair[0]
-                    neig2 = pair[1]
-                    cos = (matrix_connect[n][neig1]**2 - matrix_connect[n][neig2]**2 - matrix_connect[neig1, neig2]**2) / \
-                          (-2*matrix_connect[n][neig1]*matrix_connect[n][neig1])
+                for neig1, neig2 in neig_pairs:
+                    cos = (matrix_connect[neig1, neig2]**2 - matrix_connect[n][neig2]**2 - matrix_connect[n][neig1]**2) / \
+                          (-2*matrix_connect[n][neig1]*matrix_connect[n][neig2])
                     if cos < 0 or np.isnan(cos):
                         matrix_connect[n] = None
                         matrix_connect[:, n] = None
@@ -241,9 +239,9 @@ class DataStructureGraph:
         :param mutate_intensity: float that shows the range of distance values changing
         """
         lengths_add = np.random.uniform(-mutate_intensity, mutate_intensity, edges_inds.shape[1])
-        new_lengths = self.matrix_connect[edges_inds[0, :], edges_inds[1, :]] + lengths_add
-        self.matrix_connect[edges_inds[0, :], edges_inds[1, :]] = new_lengths
-        self.matrix_connect[edges_inds[1, :], edges_inds[0, :]] = new_lengths
+        new_lengths = self.matrix_connect[edges_inds[0], edges_inds[1]] + lengths_add
+        self.matrix_connect[edges_inds[0], edges_inds[1]] = new_lengths
+        self.matrix_connect[edges_inds[1], edges_inds[0]] = new_lengths
         np.fill_diagonal(self.matrix_connect, 0)
         self.matrix_connect[self.matrix_connect > 1] = 1 - (self.matrix_connect[self.matrix_connect > 1] - 1)
         self.matrix_connect[self.matrix_connect < 0] = -self.matrix_connect[self.matrix_connect < 0]
