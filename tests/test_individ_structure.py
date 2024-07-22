@@ -3,29 +3,12 @@ from sklearn.metrics.pairwise import euclidean_distances
 from copy import deepcopy
 import pickle as pkl
 
+from tests.utils import create_connected_graph_individ
 from evolution.IndividStructures import DataStructureGraph
 from evolution.IndividEvoOperators import IndividEvoOperators
 
-def create_base_individ(source_data_array=None):
-    if source_data_array is None:
-        source_data_array = np.random.randint(0, 10, size=(8, 2))
-    adj = np.zeros((5, 5))
-    edges = np.array([[0, 1], [0, 4], [1, 2], [2, 3], [3, 4]]).T
-    matrix = euclidean_distances(source_data_array[:5], source_data_array[:5])
-    matrix = matrix / np.max(matrix)
-    adj[edges[0], edges[1]] = 1
-    adj[edges[1], edges[0]] = 1
-
-    individ_shell = DataStructureGraph()
-    individ_shell.source_data = source_data_array
-    individ_shell.adjacency_matrix = deepcopy(adj)
-    individ_shell.matrix_connect = deepcopy(matrix)
-    individ_shell.basis = np.arange(5)
-
-    return individ_shell
-
-def test_propertys():
-    individ_shell = create_base_individ(source_data_array=np.array([[4, 0], [0, 0], [3, 9], [4, 2], [7, 7], [8, 2], [9, 0], [9, 9]]))
+def test_properties():
+    individ_shell = create_connected_graph_individ(source_data_array=np.array([[4, 0], [0, 0], [3, 9], [4, 2], [7, 7], [8, 2], [9, 0], [9, 9]]))
 
     res_laplacian = np.array([[ 1.17337028, -0.40406102,  0.        ,  0.        , -0.76930926],
        [-0.40406102,  1.36237587, -0.95831485,  0.        ,  0.        ],
@@ -33,28 +16,29 @@ def test_propertys():
        [ 0.        ,  0.        , -0.71428571,  1.3033008 , -0.58901509],
        [-0.76930926,  0.        ,  0.        , -0.58901509,  1.35832435]])
     
-    assert np.all(np.abs(individ_shell.laplacian-res_laplacian) < 1e-8)
-    # assert np.all(individ_shell.laplacian == res_laplacian)
+    assert np.all(np.isclose(individ_shell.laplacian, res_laplacian, atol=1e-8))
     assert individ_shell.number_of_nodes == 5
     assert individ_shell.number_of_edges == 5
     
 
 
 def test_loss_function():
-    individ_shell = create_base_individ(source_data_array=np.array([[4, 0], [0, 0], [3, 9], [4, 2], [7, 7], [8, 2], [9, 0], [9, 9]]))
+    individ_shell = create_connected_graph_individ(source_data_array=np.array([[4, 0], [0, 0], [3, 9], [4, 2], [7, 7], [8, 2], [9, 0], [9, 9]]))
     temp_target = np.array([1, 1, 1, 0, 0])
+    check_loss = np.dot(temp_target.T, individ_shell.laplacian)
+    check_loss = np.dot(check_loss, temp_target)
 
     res_loss = individ_shell.loss_function(temp_target)
 
     assert isinstance(res_loss, float)
-    assert res_loss - 1.48359497 < 1e-8
+    assert res_loss - check_loss < 1e-8
     
 
 
 def test_manipulation_edge():
     n = 10
     matrix = np.zeros((n, n), dtype=float)
-    individ_shell = create_base_individ()
+    individ_shell = create_connected_graph_individ()
     individ_shell.adjacency_matrix = matrix 
     init_eu_matrix = deepcopy(individ_shell.matrix_connect)
     edges = np.array([[0, 1], [0, 4], [1, 2], [2, 3], [3, 4]]).T
@@ -100,27 +84,18 @@ def test_subgraph_replacing():
     assert edges_before - edges_after == 7
 
 def test_twist_nodes():
-    source_data_array = np.random.randint(0, 10, size=(8, 2))
-    adj = np.zeros((5, 5))
-    edges = np.array([[0, 1], [0, 4], [1, 2], [2, 3], [3, 4]]).T
-    matrix = euclidean_distances(source_data_array[:5], source_data_array[:5])
-    matrix = matrix / np.max(matrix)
-    adj[edges[0], edges[1]] = 1
-    adj[edges[1], edges[0]] = 1
+    individ_shell = create_connected_graph_individ()
+    adj = deepcopy(individ_shell.adjacency_matrix)
+    matrix = deepcopy(individ_shell.matrix_connect)
+    inds = np.array([0, 1, 2])
 
-    individ_shell = DataStructureGraph()
-    individ_shell.source_data = source_data_array
-    individ_shell.adjacency_matrix = deepcopy(adj)
-    individ_shell.matrix_connect = deepcopy(matrix)
-    individ_shell.basis = np.arange(5)
-
-    individ_shell.twist_nodes(np.array([0, 1, 2]))
+    individ_shell.twist_nodes(inds)
     assert np.all(np.sort(individ_shell.basis[:3]) == np.array([5, 6, 7]))
     assert np.all(individ_shell.adjacency_matrix == adj)
-    assert int(np.sum(individ_shell.matrix_connect != matrix) / 2) <= 3
+    assert int(np.sum(individ_shell.matrix_connect != matrix) / 2) <= len(inds)
 
 def test_mutate_base():
-    individ_shell = create_base_individ()
+    individ_shell = create_connected_graph_individ()
     operator = IndividEvoOperators(individs=[individ_shell], base_mutation=True, edges_mutation=False, edges_weight_mutation=False)
     individs = operator.mutate(nodes_mutation_prob=0.1) # change 1 node
 
@@ -133,7 +108,7 @@ def test_mutate_base():
     assert np.all(individs[0].matrix_connect == individ_shell.matrix_connect)
 
 def test_mutate_edge():
-    individ_shell = create_base_individ()
+    individ_shell = create_connected_graph_individ()
     operator = IndividEvoOperators(individs=[individ_shell], base_mutation=False, edges_mutation=True, edges_weight_mutation=False)
     individs = operator.mutate(edges_existence_mutation_prob=0.3) 
 
@@ -145,7 +120,7 @@ def test_mutate_edge():
     assert np.all(individs[0].matrix_connect == individ_shell.matrix_connect)
 
 def test_mutate_lenght():
-    individ_shell = create_base_individ()
+    individ_shell = create_connected_graph_individ()
     operator = IndividEvoOperators(individs=[individ_shell], base_mutation=False, edges_mutation=False, edges_weight_mutation=True)
     individs = operator.mutate(edges_len_mutation_prob=0.4) # change 2 edges
 
@@ -157,26 +132,26 @@ def test_mutate_lenght():
     assert np.all(individs[0].adjacency_matrix == individ_shell.adjacency_matrix)
 
 def test_crossover_inidvids():
-    individ_shell = create_base_individ()
-    individ_shell1 = create_base_individ()
+    individ_shell = create_connected_graph_individ()
+    individ_shell1 = create_connected_graph_individ()
     individ_shell1.adjacency_matrix = np.zeros_like(individ_shell1.adjacency_matrix)
 
     operator_crossover = IndividEvoOperators(individs=[individ_shell, individ_shell1])
+
     new_individs = operator_crossover.crossover_individs()
 
     assert len(new_individs) == 2
-    i = 0
+    j = 0
 
-    while i <= 4:
+    for i in range(5):
         base_part0 = np.all(np.delete(np.delete(individ_shell.adjacency_matrix, i, axis=0), i, axis=1) == np.delete(np.delete(new_individs[0].adjacency_matrix, i, axis=0), i, axis=1))
 
         if base_part0:
             base_part1 = np.all(np.delete(np.delete(individ_shell1.adjacency_matrix, i, axis=0), i, axis=1) == np.delete(np.delete(new_individs[1].adjacency_matrix, i, axis=0), i, axis=1))
             break
+        j += 1
 
-        i += 1
-
-    assert i < 5
+    assert j < 5
     assert base_part0 and base_part1
     assert np.all(individ_shell.adjacency_matrix[i] == new_individs[1].adjacency_matrix[i])
     assert np.all(individ_shell1.adjacency_matrix[i] == new_individs[0].adjacency_matrix[i])

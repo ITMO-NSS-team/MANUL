@@ -1,32 +1,15 @@
 from itertools import combinations
 
 import numpy as np
-from sklearn.metrics.pairwise import euclidean_distances
 from copy import deepcopy
 
-from evolution.IndividStructures import DataStructureGraph
+from tests.utils import create_connected_graph_individ
 from evolution.PopulationEvoOperators import PopulationEvoOperators
 from evolution.PopulationStructures import Population
 
-def create_base_individ():
-    source_data_array = np.random.randint(0, 10, size=(8, 2))
-    adj = np.zeros((5, 5))
-    edges = np.array([[0, 1], [0, 4], [1, 2], [2, 3], [3, 4]]).T
-    matrix = euclidean_distances(source_data_array[:5], source_data_array[:5])
-    matrix = matrix / np.max(matrix)
-    adj[edges[0], edges[1]] = 1
-    adj[edges[1], edges[0]] = 1
-
-    individ_shell = DataStructureGraph()
-    individ_shell.source_data = source_data_array
-    individ_shell.adjacency_matrix = deepcopy(adj)
-    individ_shell.matrix_connect = deepcopy(matrix)
-    individ_shell.basis = np.arange(5)
-
-    return individ_shell
 
 def test_generate():
-    base_individ = create_base_individ()
+    base_individ = create_connected_graph_individ()
     population_shell = Population(size=5, base_individ=base_individ)
     population_shell = population_shell.generate()
 
@@ -43,7 +26,7 @@ def test_generate():
 
 
 def test_elitism():
-    base_individ = create_base_individ()
+    base_individ = create_connected_graph_individ()
     population_shell = Population(size=5, base_individ=base_individ)
     population_shell = population_shell.generate()
     fitness = [2, 1, 3, 5, 4]
@@ -63,10 +46,10 @@ def test_elitism():
 
 
 def test_crossover_population():
-    base_individ = create_base_individ()
+    base_individ = create_connected_graph_individ()
     population_shell = Population(size=5, base_individ=base_individ).generate()
     selected = [True, True, False, False, False]
-    for i in range(len(population_shell.individs_pool)):
+    for i in range(5):
         population_shell.individs_pool[i].selected = selected[i]
 
     population_shell.individs_pool[1].adjacency_matrix = np.zeros_like(base_individ.adjacency_matrix)
@@ -79,9 +62,9 @@ def test_crossover_population():
     individs = np.array(population_shell.individs_pool)[[0,1,5,6]]
     index_for0 = 0
     index_for1 = 0
-    i = 0
+    j = 0
 
-    while i <= 4:
+    for i in range(5):
         test1 = np.all(np.delete(np.delete(individs[0].adjacency_matrix, i, axis=0), i, axis=1) == np.delete(np.delete(individs[2].adjacency_matrix, i, axis=0), i, axis=1))
         test2 = np.all(np.delete(np.delete(individs[0].adjacency_matrix, i, axis=0), i, axis=1) == np.delete(np.delete(individs[3].adjacency_matrix, i, axis=0), i, axis=1))
 
@@ -95,9 +78,9 @@ def test_crossover_population():
             index_for1 = 2
             break
 
-        i += 1
+        j += 1
 
-    assert i < 5
+    assert j < 5
 
     base_part0 = np.all(np.delete(np.delete(individs[0].adjacency_matrix, i, axis=0), i, axis=1) == np.delete(np.delete(individs[index_for0].adjacency_matrix, i, axis=0), i, axis=1))
     base_part1 = np.all(np.delete(np.delete(individs[1].adjacency_matrix, i, axis=0), i, axis=1) == np.delete(np.delete(individs[index_for1].adjacency_matrix, i, axis=0), i, axis=1))
@@ -108,7 +91,7 @@ def test_crossover_population():
 
 
 def test_filter_population():
-    base_individ = create_base_individ()
+    base_individ = create_connected_graph_individ()
     population_shell = Population(size=5, base_individ=base_individ)
     population_shell = population_shell.generate()
     population_shell.individs_pool.append(deepcopy(base_individ))
@@ -132,7 +115,7 @@ def test_filter_population():
 
 
 def test_roulette_wheel_selection():
-    base_individ = create_base_individ()
+    base_individ = create_connected_graph_individ()
     population_shell = Population(size=5, base_individ=base_individ)
     population_shell = population_shell.generate()
     population_shell.individs_pool.append(deepcopy(base_individ))
