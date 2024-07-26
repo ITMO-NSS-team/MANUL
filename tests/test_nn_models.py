@@ -3,8 +3,10 @@ from torch import float64 as fl64
 import numpy as np
 import pandas as pd
 from torch import nn
+import pickle as pkl
 
 from regularizator.ModuleNN import ModelNN
+from evolution.IndividStructures import DataStructureGraph
 
 
 def simple_nn(inp_dims):
@@ -173,5 +175,38 @@ def test_cash_folder():
 
 def test_models_with_graph():
     # TODO create graph sample and run models
-    pass
+    # pass
 
+    individ_shell = DataStructureGraph()
+    # with open('tests/points_circle.pkl', 'rb') as f:
+    with open('points_circle.pkl', 'rb') as f:
+        features = pkl.load(f)
+
+    features = np.array(sorted(features, key=lambda parameters: parameters[2]))
+    features = features
+
+    target = np.linspace(0, 0.9, features.shape[0])
+
+    train_features, test_features = split_dataset(features)
+    train_target, test_target = split_dataset(target)
+
+    individ_shell.create_graph(train_features)
+    individ_shell.source_data = train_features
+
+    model_structure = simple_nn(train_features[individ_shell.basis].shape[1])
+
+    model = ModelNN(model_structure=model_structure,
+                    train_feature=train_features,
+                    train_target=train_target,
+                    criterion=nn.L1Loss(),
+                    target_metric=fake_loss
+                    )
+    
+    model.train(graph=individ_shell)
+    metric_train = model.get_metric_on_train()
+    metric_test = model.get_metric_on_test(train_features, train_target)
+    # assert metric_test, metric_train
+
+    prediction = model.predict(test_features)
+
+test_models_with_graph()
