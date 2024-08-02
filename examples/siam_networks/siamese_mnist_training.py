@@ -45,7 +45,7 @@ siam_individ.source_data = base_individ.source_data
 siam_individ.show_2d(train_labels, save_path=f'{cash_folder}/siam_graph1.png')
 siam_individ.show_3d(train_labels, title='Siamese network')
 
-siam_model = ModelNN(train_data[base_individ.basis], train_labels[base_individ.basis],
+siam_model = ModelNN(train_data, train_labels,
                      num_epochs=200,
                      batch_size=300,
                      problem='multiclass',
@@ -75,7 +75,7 @@ siam_individ.source_data = base_individ.source_data
 siam_individ.show_2d(train_labels, save_path=f'{cash_folder}/siam_graph2.png')
 siam_individ.show_3d(train_labels, title='Siamese network')
 
-siam_model = ModelNN(train_data[base_individ.basis], train_labels[base_individ.basis],
+siam_model = ModelNN(train_data, train_labels,
                      num_epochs=200,
                      batch_size=300,
                      problem='multiclass',

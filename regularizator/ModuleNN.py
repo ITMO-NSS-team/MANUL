@@ -227,6 +227,7 @@ class ModelNN:
         if np.isnan(lam_nn) or np.isnan(lam_graph):
             print(f'Lambda search failed: nn_disp={lam_nn}, graph_disp={lam_graph}')
             return [1, 1]
+        
         return [lam_nn / (np.nanmax([lam_nn, lam_graph])), lam_graph / (np.nanmax([lam_nn, lam_graph]))]
 
     def preprocess_target(self, nn_output, target_y: np.ndarray):
@@ -261,6 +262,10 @@ class ModelNN:
 
         if lmds is None:
             lmds = [1, 1]
+
+        if graph is not None:
+            self.features = self.features[graph.basis]
+            self.target = self.target[graph.basis]
 
         self.model.train()
 
@@ -298,10 +303,10 @@ class ModelNN:
 
                     if adaptive_lambda:
                         lmds_epochs = int(self.num_epochs * 0.1)
-                        if epoch < lmds_epochs:  # 10% of epochs used to find lambdas
+                        if epoch <= lmds_epochs:  # 10% of epochs used to find lambdas
                             loss = lmds[0] * loss + lmds[1] * tensor(add_loss)
                         if epoch > lmds_epochs:  # then lambdas are used as new constants
-                            lmds = self._get_adaptive_lambda(losses, graph_losses, nn_losses)
+                            lmds = self._get_adaptive_lambda(losses, nn_losses, graph_losses)
                             info_bar['nn_lmd'] = np.round(lmds[0], 5)
                             info_bar['graph_lmd'] = np.round(lmds[1], 5)
                             adaptive_lambda = False

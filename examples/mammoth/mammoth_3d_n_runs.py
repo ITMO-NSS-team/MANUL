@@ -118,7 +118,7 @@ def run_example(n_runs, mut):
         base_train_loss = base_model.get_metric_on_train()
         base_test_loss = base_model.get_metric_on_test(test_features, test_target)
 
-        with_graph_model = ModelNN(train_features[base_individ.basis], train_target[base_individ.basis],
+        with_graph_model = ModelNN(train_features, train_target,
                                    num_epochs=50,
                                    batch_size=300,
                                    problem='regres')
@@ -126,7 +126,7 @@ def run_example(n_runs, mut):
         with_graph_train_loss = with_graph_model.get_metric_on_train()
         with_graph_test_loss = with_graph_model.get_metric_on_test(test_features, test_target)
 
-        with_evolution_model = ModelNN(train_features[base_individ.basis], train_target[base_individ.basis],
+        with_evolution_model = ModelNN(train_features, train_target,
                                        num_epochs=50,
                                        batch_size=300,
                                        problem='regres')

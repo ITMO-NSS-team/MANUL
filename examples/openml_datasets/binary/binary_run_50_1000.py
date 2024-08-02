@@ -106,7 +106,7 @@ def run_openml_binary_classification(n_runs=5):
                                    f"base_train_loss {base_train_loss}\n"
                                    f"base_test_loss {base_test_loss}\n")
 
-                    with_graph_model = ModelNN(X_train[base_individ.basis], y_train[base_individ.basis],
+                    with_graph_model = ModelNN(X_train, y_train,
                                                num_epochs=150,
                                                batch_size=300,
                                                problem='binary_class',
@@ -122,7 +122,7 @@ def run_openml_binary_classification(n_runs=5):
                                    f"with_graph_train_loss {with_graph_train_loss}\n"
                                    f"with_graph_test_loss {with_graph_test_loss}\n")
 
-                    with_evolution_model = ModelNN(X_train[base_individ.basis], y_train[base_individ.basis],
+                    with_evolution_model = ModelNN(X_train, y_train,
                                                    num_epochs=150,
                                                    batch_size=300,
                                                    problem='binary_class',

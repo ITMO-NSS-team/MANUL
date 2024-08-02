@@ -93,11 +93,17 @@ print(model.get_metric_on_test(test_features.astype(float), test_target.astype(f
 
 base_individ = DataStructureGraph(data=train_features.reshape(train_features.shape[0], 28 * 28),
                                   cash_folder='mnist_custom_nn',
+                                  graph_file='base_graph.pkl',
                                   n_neighbors=20,
                                   )
 #base_individ.show_2d(train_target)
-model.features = train_features[base_individ.basis].astype(float)
-model.target = train_target[base_individ.basis].astype(float)
-model.train(num_epochs=200, graph=base_individ, plot_convergence=True)
-print(model.get_metric_on_train())
-print(model.get_metric_on_test(test_features, test_target))
+model_with_graph = ModelNN(model_structure=model_structure,
+                train_feature=train_features.astype(float),
+                train_target=train_target.astype(float),
+                problem="multiclass",
+                target_metric=f1_loss)
+# model.features = train_features[base_individ.basis].astype(float)
+# model.target = train_target[base_individ.basis].astype(float)
+model_with_graph.train(num_epochs=200, graph=base_individ, plot_convergence=True)
+print(model_with_graph.get_metric_on_train())
+print(model_with_graph.get_metric_on_test(test_features, test_target))

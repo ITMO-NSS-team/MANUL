@@ -36,7 +36,7 @@ def test_genearte_evolution():
 
 def test_evaluate_fitness():
     base_individ = create_connected_graph_individ()
-    model = ModelNN(base_individ.source_data[base_individ.basis], np.random.randint(0, 2, size=len(base_individ.basis)),
+    model = ModelNN(base_individ.source_data, np.random.randint(0, 2, size=base_individ.source_data.shape[0]),
                                num_epochs=10,
                                batch_size=10,
                                problem='binary_class')

@@ -71,10 +71,12 @@ class DataStructureGraph:
         if os.path.isfile(path):
             with open(path, 'rb') as inp:
                 tmp_dict = pickle.load(inp)
+                tmp_dict['cash_folder'] = self.cash_folder
                 self.__dict__.update(tmp_dict)
         elif os.path.isfile(f'{self.cash_folder}/{path}'):
             with open(f'{self.cash_folder}/{path}', 'rb') as inp:
                 tmp_dict = pickle.load(inp)
+                tmp_dict['cash_folder'] = self.cash_folder
                 self.__dict__.update(tmp_dict)
         else:
             raise Exception(f'Failed to load graph object, no such file {path}')

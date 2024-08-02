@@ -20,7 +20,7 @@ base_individ = DataStructureGraph(data=train_data,
                                   graph_file='base_graph.pkl')
 
 # GRAPH MODEL
-graph_model = ModelNN(train_data[base_individ.basis], train_labels[base_individ.basis],
+graph_model = ModelNN(train_data, train_labels,
                       num_epochs=200,
                       batch_size=300,
                       problem='multiclass',
@@ -28,7 +28,7 @@ graph_model = ModelNN(train_data[base_individ.basis], train_labels[base_individ.
                       model_name='graph_model')
 graph_model.train(base_individ)
 
-with_evolution_model = ModelNN(train_data[base_individ.basis], train_labels[base_individ.basis],
+with_evolution_model = ModelNN(train_data, train_labels,
                                num_epochs=200,
                                batch_size=300,
                                problem='multiclass',
