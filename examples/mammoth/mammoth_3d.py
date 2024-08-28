@@ -58,7 +58,7 @@ def run_example():
     base_individ.show_2d(labels=train_target, euclidean=True)
 
     # raw model without graph
-    base_model = ModelNN(train_features[base_individ.basis], train_target[base_individ.basis],
+    base_model = ModelNN(train_features, train_target,
                          num_epochs=50,
                          batch_size=300,
                          problem='regres')

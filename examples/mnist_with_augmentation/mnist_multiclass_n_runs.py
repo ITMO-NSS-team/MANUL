@@ -112,7 +112,7 @@ def run_example(n_runs, mut):
                                           n_neighbors=20
                                           )
 
-        base_model = ModelNN(train_features[base_individ.basis], train_target[base_individ.basis],
+        base_model = ModelNN(train_features, train_target,
                              num_epochs=200,
                              batch_size=300, problem='multiclass')
         base_model.train()

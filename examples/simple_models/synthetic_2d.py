@@ -50,8 +50,8 @@ base_individ = DataStructureGraph(data=train_features,
 
 base_individ.show_2d(train_colors, cmap_name='Blues', euclidean=True)
 
-base_model = ModelNN(train_feature=train_features[base_individ.basis],
-                     train_target=train_colors[base_individ.basis],
+base_model = ModelNN(train_feature=train_features,
+                     train_target=train_colors,
                      batch_size=10,
                      problem='regres')
 base_model.train(plot_convergence=True, num_epochs=50)

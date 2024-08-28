@@ -67,8 +67,8 @@ def plot_mammoth(with_weights_path, no_weights_path, save_path):
         'test_with_evolution': 'Evolution graph'}, axis='columns')
 
     fig, ax = plt.subplots(1, 2, figsize=(8, 4))
-    weight_df.boxplot(showfliers=False, ax=ax[1])
-    no_weight_test_df.boxplot(showfliers=False, ax=ax[0])
+    weight_df.boxplot(showfliers=False, ax=ax[0])
+    no_weight_test_df.boxplot(showfliers=False, ax=ax[1])
 
     ax[0].set_ylim(0, 0.008)
     ax[1].set_ylim(0, 0.008)
@@ -110,7 +110,7 @@ def run_example(n_runs, mut):
                                           n_neighbors=10,
                                           epsilon_neighborhood=0.18, )
 
-        base_model = ModelNN(train_features[base_individ.basis], train_target[base_individ.basis],
+        base_model = ModelNN(train_features, train_target,
                              num_epochs=50,
                              batch_size=300,
                              problem='regres')

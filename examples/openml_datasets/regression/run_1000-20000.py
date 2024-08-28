@@ -93,7 +93,7 @@ def run_openml_regression(n_runs=5):
                                                       graph_file='base_graph.pkl')
                     base_individ.cash_folder = f'{ds_folder}/{r}'
 
-                    base_model = ModelNN(X_train[base_individ.basis], y_train[base_individ.basis],
+                    base_model = ModelNN(X_train, y_train,
                                          num_epochs=50,
                                          batch_size=300,
                                          problem='regres',
