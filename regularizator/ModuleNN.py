@@ -263,9 +263,9 @@ class ModelNN:
         if lmds is None:
             lmds = [1, 1]
 
-        if graph is not None:
-            self.features = self.features[graph.basis]
-            self.target = self.target[graph.basis]
+        # if graph is not None:
+        #     self.features = self.features[graph.basis]
+        #     self.target = self.target[graph.basis]
 
         self.model.train()
 
@@ -298,7 +298,10 @@ class ModelNN:
                 nn_loss_list = np.append(nn_loss_list, loss.item())
 
                 if graph is not None:
-                    add_loss = graph.loss_function(output.cpu().detach().numpy(), indices)
+                    add_loss = 0
+                    mask = np.isin(indices, graph.basis)
+                    add_loss = graph.loss_function(output.cpu().detach().numpy()[mask], np.where(np.isin(graph.basis, indices[mask]))[0])
+                    # add_loss = graph.loss_function(output.cpu().detach().numpy(), indices)
                     graph_loss_list = np.append(graph_loss_list, add_loss)
 
                     if adaptive_lambda:
