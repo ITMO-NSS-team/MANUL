@@ -92,7 +92,7 @@ print(model.get_metric_on_train())
 print(model.get_metric_on_test(test_features.astype(float), test_target.astype(float)))
 
 base_individ = DataStructureGraph(data=train_features.reshape(train_features.shape[0], 28 * 28),
-                                  cash_folder='mnist_custom_nn',
+                                  cach_folder='mnist_custom_nn',
                                   graph_file='base_graph.pkl',
                                   n_neighbors=20,
                                   )

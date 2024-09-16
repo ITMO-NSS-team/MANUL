@@ -13,10 +13,10 @@ train_labels = train_labels[:30000]
 train_data = train_data[:30000, :]
 
 
-cash_folder = 'cash_siam'
+cach_folder = 'cach_siam'
 
 base_individ = DataStructureGraph(data=train_data,
-                                  cash_folder='cash',
+                                  cach_folder='cach',
                                   n_neighbors=20,
                                   graph_file='base_graph.pkl')
 
@@ -36,20 +36,20 @@ siam_adj_matrix1 = np.ones(siam_matrix_connect1.shape)
 np.fill_diagonal(siam_adj_matrix1, 0)
 siam_adj_matrix1[siam_matrix_connect1==0] = 0
 
-siam_individ = DataStructureGraph(cash_folder=cash_folder)
+siam_individ = DataStructureGraph(cach_folder=cach_folder)
 siam_individ.basis = base_individ.basis
 siam_individ.matrix_connect = siam_matrix_connect1[siam_individ.basis][:, siam_individ.basis]
 siam_individ.adjacency_matrix = siam_adj_matrix1[siam_individ.basis][:, siam_individ.basis]
 
 siam_individ.source_data = base_individ.source_data
-siam_individ.show_2d(train_labels, save_path=f'{cash_folder}/siam_graph1.png')
+siam_individ.show_2d(train_labels, save_path=f'{cach_folder}/siam_graph1.png')
 siam_individ.show_3d(train_labels, title='Siamese network')
 
 siam_model = ModelNN(train_data, train_labels,
                      num_epochs=200,
                      batch_size=300,
                      problem='multiclass',
-                     cash_folder=cash_folder,
+                     cach_folder=cach_folder,
                      model_name='siam1'
                      )
 siam_model.train(siam_individ)
@@ -66,20 +66,20 @@ siam_adj_matrix2 = np.ones(siam_matrix_connect2.shape)
 np.fill_diagonal(siam_adj_matrix2, 0)
 siam_adj_matrix2[siam_matrix_connect2 == 0] = 0
 
-siam_individ = DataStructureGraph(cash_folder=cash_folder)
+siam_individ = DataStructureGraph(cach_folder=cach_folder)
 siam_individ.basis = base_individ.basis
 siam_individ.matrix_connect = siam_matrix_connect2[siam_individ.basis][:, siam_individ.basis]
 siam_individ.adjacency_matrix = siam_adj_matrix2[siam_individ.basis][:, siam_individ.basis]
 
 siam_individ.source_data = base_individ.source_data
-siam_individ.show_2d(train_labels, save_path=f'{cash_folder}/siam_graph2.png')
+siam_individ.show_2d(train_labels, save_path=f'{cach_folder}/siam_graph2.png')
 siam_individ.show_3d(train_labels, title='Siamese network')
 
 siam_model = ModelNN(train_data, train_labels,
                      num_epochs=200,
                      batch_size=300,
                      problem='multiclass',
-                     cash_folder=cash_folder,
+                     cach_folder=cach_folder,
                      model_name='siam2'
                      )
 siam_model.train(siam_individ)

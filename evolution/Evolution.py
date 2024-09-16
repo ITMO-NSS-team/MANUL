@@ -135,4 +135,4 @@ class Evolution:
             max([ind.fitness for ind in self.population.individs_pool]))
         self.base_individ = self.population.individs_pool[best_individ_index]
         self.base_model = self.base_model.train(self.base_individ)
-        self.base_individ.save_cash_object(name='final_graph')
+        self.base_individ.save_cach_object(name='final_graph')

@@ -46,7 +46,7 @@ colors_image, train_features, train_colors, test_features, test_colors = generat
 
 base_individ = DataStructureGraph(data=train_features,
                                   n_neighbors=10,
-                                  cash_folder='sin_test')
+                                  cach_folder='sin_test')
 
 base_individ.show_2d(train_colors, cmap_name='Blues', euclidean=True)
 

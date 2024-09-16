@@ -23,60 +23,60 @@ class DataStructureGraph:
                  n_neighbors: int = None,
                  epsilon_neighborhood: float = None,
                  graph_file: str = None,
-                 cash_folder: str = None):
+                 cach_folder: str = None):
         """
         Class for initialization individ  for evolution as complex graph structure with graph properties
         :param data: features table for graph structure creation
         :param n_neighbors:  number of neighbors for kernel fit (filtered laplacian)
         :param epsilon_neighborhood: epsilon distance between neighbors to decrease the closest
         :param graph_file: str - path to file .pkl with DataStructureGraph object
-        :param cash_folder: str - path to save cash
+        :param cach_folder: str - path to save cach
         """
         self.elitism = False
         self.selected = False
         self.fitness = None
 
-        if cash_folder is None:
-            self.cash_folder = f"cash/{datetime.now().strftime('%Y_%m_%d-%I_%M_%S_%p')}"
+        if cach_folder is None:
+            self.cach_folder = f"cach/{datetime.now().strftime('%Y_%m_%d-%I_%M_%S_%p')}"
         else:
-            self.cash_folder = cash_folder
-        if not os.path.exists(self.cash_folder):
-            os.makedirs(self.cash_folder)
-        print(f'Cash folder set as {self.cash_folder}')
+            self.cach_folder = cach_folder
+        if not os.path.exists(self.cach_folder):
+            os.makedirs(self.cach_folder)
+        print(f'cach folder set as {self.cach_folder}')
 
         if graph_file is not None:
-            self.load_cash_object(graph_file)
+            self.load_cach_object(graph_file)
 
         if graph_file is None and data is not None:
             self.source_data = data.astype(float)
             self.create_graph(data, n_neighbors, epsilon_neighborhood)
-            self.save_cash_object('base_graph')
+            self.save_cach_object('base_graph')
 
-    def save_cash_object(self, name: str = None):
+    def save_cach_object(self, name: str = None):
         """
         Function to save  self object as pickle file
-        :param name: string with name without .pkl to save in cash folder
+        :param name: string with name without .pkl to save in cach folder
         """
         if name is None:
             name = 'graph_obj'
-        with open(f'{self.cash_folder}/{name}.pkl', 'wb') as outp:
+        with open(f'{self.cach_folder}/{name}.pkl', 'wb') as outp:
             pickle.dump(self.__dict__, outp, pickle.HIGHEST_PROTOCOL)
-            print(f'Graph object saved to {self.cash_folder}/{name}.pkl')
+            print(f'Graph object saved to {self.cach_folder}/{name}.pkl')
 
-    def load_cash_object(self, path: str):
+    def load_cach_object(self, path: str):
         """
         Function to load self object from pickle file
-        :param path: name of file with graph object .pkl to load in cash folder or absolute path
+        :param path: name of file with graph object .pkl to load in cach folder or absolute path
         """
         if os.path.isfile(path):
             with open(path, 'rb') as inp:
                 tmp_dict = pickle.load(inp)
-                tmp_dict['cash_folder'] = self.cash_folder
+                tmp_dict['cach_folder'] = self.cach_folder
                 self.__dict__.update(tmp_dict)
-        elif os.path.isfile(f'{self.cash_folder}/{path}'):
-            with open(f'{self.cash_folder}/{path}', 'rb') as inp:
+        elif os.path.isfile(f'{self.cach_folder}/{path}'):
+            with open(f'{self.cach_folder}/{path}', 'rb') as inp:
                 tmp_dict = pickle.load(inp)
-                tmp_dict['cash_folder'] = self.cash_folder
+                tmp_dict['cach_folder'] = self.cach_folder
                 self.__dict__.update(tmp_dict)
         else:
             raise Exception(f'Failed to load graph object, no such file {path}')
@@ -436,5 +436,5 @@ class DataStructureGraph:
         if not save_path:
             if title is None:
                 title = '3d_graph'
-            save_path = f'{self.cash_folder}/{title}.html'
+            save_path = f'{self.cach_folder}/{title}.html'
         plotly.offline.plot(fig, filename=save_path)

@@ -1,6 +1,7 @@
 **/__pycache__/
 .coverage
 .vscode
+**cach**
 **cash**
 mammoth_n_runs_results/
 examples/mnist_custom_nn/

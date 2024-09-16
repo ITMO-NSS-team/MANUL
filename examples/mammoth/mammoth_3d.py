@@ -50,7 +50,7 @@ def run_example():
     train_target, test_target = split_dataset(target)
 
     base_individ = DataStructureGraph(data=train_features,
-                                      cash_folder='mammoth_cash',
+                                      cach_folder='mammoth_cach',
                                       n_neighbors=10,
                                       epsilon_neighborhood=0.18)
 

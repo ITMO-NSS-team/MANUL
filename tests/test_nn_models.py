@@ -130,7 +130,7 @@ def test_custom_model_run():
     assert (new_prediction == prediction).all()
 
 
-def test_cash_folder():
+def test_cach_folder():
     data = get_synthetic_data('regression')
     train_features, test_features = split_dataset(data[:, :-1])
     train_target, test_target = split_dataset(data[:, -1])
@@ -142,16 +142,16 @@ def test_cash_folder():
                     train_target=train_target,
                     criterion=nn.L1Loss(),
                     target_metric=fake_loss,
-                    cash_folder='test_cash',
+                    cach_folder='test_cach',
                     model_name='test_name'
                     )
     model.train(plot_convergence=True)
     model.save_weights()
-    assert os.path.exists('test_cash/test_name_conv_plot.png')
-    assert os.path.exists('test_cash/test_name.pt')
-    os.remove('test_cash/test_name_conv_plot.png')
-    os.remove('test_cash/test_name.pt')
-    os.removedirs('test_cash')
+    assert os.path.exists('test_cach/test_name_conv_plot.png')
+    assert os.path.exists('test_cach/test_name.pt')
+    os.remove('test_cach/test_name_conv_plot.png')
+    os.remove('test_cach/test_name.pt')
+    os.removedirs('test_cach')
 
 
 def test_model_with_graph():
