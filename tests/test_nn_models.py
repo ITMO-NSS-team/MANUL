@@ -1,5 +1,4 @@
 import os.path
-# from torch import float64 as fl64
 import numpy as np
 import pandas as pd
 from torch import nn
@@ -8,7 +7,6 @@ import pickle as pkl
 from tests.utils import create_model_circle_withoutgraph, create_model_circle_withgraph
 from tests.utils import simple_nn, split_dataset, fake_loss
 from regularizator.ModuleNN import ModelNN
-from evolution.IndividStructures import DataStructureGraph
 from evolution.Evolution import Evolution
 
 
@@ -158,8 +156,7 @@ def test_model_with_graph():
     model, individ_shell, train_features = create_model_circle_withgraph()
 
     model.train(graph=individ_shell, adaptive_lambda=False)
-    assert model.features.shape[0] == individ_shell.basis.shape[0]
-    assert np.all(model.features == train_features[individ_shell.basis])
+    assert np.all(model.features == train_features)
     assert len(model.trained_loss_values.keys()) == 3
     assert np.isclose(model.trained_loss_values['graph_loss'] + model.trained_loss_values['model_loss'], model.trained_loss_values['combined_loss'], atol=1e-4)
 
@@ -176,8 +173,7 @@ def test_model_with_evol():
     
     assert id(evolution.base_model) == id(model)
     evolution.run()
-    assert model.features.shape[0] == evolution.base_individ.basis.shape[0]
-    assert np.all(model.features == train_features[evolution.base_individ.basis]) and  np.all(model.features == evolution.base_individ.source_data[evolution.base_individ.basis])
+    assert np.all(model.features == train_features) and  np.all(model.features == evolution.base_individ.source_data)
 
 
 def test_check_stop_criteria():

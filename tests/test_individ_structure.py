@@ -24,11 +24,13 @@ def test_properties():
 
 def test_loss_function():
     individ_shell = create_connected_graph_individ(source_data_array=np.array([[4, 0], [0, 0], [3, 9], [4, 2], [7, 7], [8, 2], [9, 0], [9, 9]]))
-    temp_target = np.array([1, 1, 1, 0, 0])
-    check_loss = np.dot(temp_target.T, individ_shell.laplacian)
-    check_loss = np.dot(check_loss, temp_target)
+    temp_target = np.array([1, 1, 1, 0, 0, 1, 1, 0])
+    # took that indexes, because that indexs are existed in individ_shell.basis
+    indexs_for_count = np.array([0, 1, 2])
+    check_loss = np.dot(temp_target[indexs_for_count].T, individ_shell.laplacian[indexs_for_count][:, indexs_for_count])
+    check_loss = np.dot(check_loss, temp_target[indexs_for_count])
 
-    res_loss = individ_shell.loss_function(temp_target)
+    res_loss = individ_shell.loss_function(temp_target, np.append(indexs_for_count, 7))
 
     assert isinstance(res_loss, float)
     assert res_loss - check_loss < 1e-8

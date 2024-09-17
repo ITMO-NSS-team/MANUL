@@ -18,9 +18,9 @@ from regularizator.ModuleNN import ModelNN
 
 
 def get_data():
-    features = np.load("data/feature_mnist.npy")
-    target = np.load("data/target_mnist.npy")
-    angles = np.load("data/angle_mnist.npy")
+    features = np.load("examples/data/feature_mnist.npy")
+    target = np.load("examples/data/target_mnist.npy")
+    angles = np.load("examples/data/angle_mnist.npy")
     # data is already shuffled for class balance
     new_features = features.reshape((features.shape[0], features.shape[1] * features.shape[2]))
     new_feature = []
@@ -61,9 +61,6 @@ def get_cnn_model():
 
 
 def f1_loss(target, model_output):
-    # output = model_output
-    # max_possible_labels = np.argmax(output, axis=1)
-    # output = max_possible_labels
     return f1_score(target, model_output, average='weighted')
 
 
@@ -92,18 +89,16 @@ print(model.get_metric_on_train())
 print(model.get_metric_on_test(test_features.astype(float), test_target.astype(float)))
 
 base_individ = DataStructureGraph(data=train_features.reshape(train_features.shape[0], 28 * 28),
-                                  cach_folder='mnist_custom_nn',
+                                  cach_folder='examples/mnist_custom_nn',
                                   graph_file='base_graph.pkl',
                                   n_neighbors=20,
                                   )
-#base_individ.show_2d(train_target)
+
 model_with_graph = ModelNN(model_structure=model_structure,
                 train_feature=train_features.astype(float),
                 train_target=train_target.astype(float),
                 problem="multiclass",
                 target_metric=f1_loss)
-# model.features = train_features[base_individ.basis].astype(float)
-# model.target = train_target[base_individ.basis].astype(float)
 model_with_graph.train(num_epochs=200, graph=base_individ, plot_convergence=True)
 print(model_with_graph.get_metric_on_train())
 print(model_with_graph.get_metric_on_test(test_features, test_target))

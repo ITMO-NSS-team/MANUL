@@ -89,8 +89,17 @@ class DataStructureGraph:
         :return: float - value of loss function
         """
         laplacian = self.laplacian
-        if indices is not None:
-            laplacian = laplacian[indices][:, indices]
+        if indices is not None: 
+            # loss calculates only on graph base points to save laplacian dimensionality
+            real_indices_in_base = np.intersect1d(indices, self.basis)  # find batch indices which are in base
+            # find valid indices for data cut
+            indices_in_batch_indices = np.argwhere(np.in1d(indices, real_indices_in_base))[:, 0]
+            f_x = f_x[indices_in_batch_indices]
+
+            # find valid indices to cut laplacian with base dimensionality
+            indices_in_base = np.argwhere(np.in1d(self.basis, real_indices_in_base))[:, 0]
+            laplacian = laplacian[indices_in_base][:, indices_in_base]
+
         part_1 = np.dot(f_x.T, laplacian)
         loss = np.dot(part_1, f_x)
         return loss.reshape(-1)[0]

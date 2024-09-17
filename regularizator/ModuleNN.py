@@ -35,7 +35,7 @@ class ModelNN:
                  criterion=None,
                  optimizer=None,
                  target_metric: Callable = None,
-                 cash_folder: str = None,
+                 cach_folder: str = None,
                  model_name: str = None):
         """
         :param train_feature: array with features for model training
@@ -48,7 +48,7 @@ class ModelNN:
         :param optimizer: torch optimizer (for custom training)
         :param target_metric: function to calculate metric on prediction and target
                                           (default regres - mse, binary class - roc_auc, multiclass - accuracy)
-        :param cash_folder: string with cash folder to save convergence plots (if empty plots doesn't save)
+        :param cach_folder: string with cach folder to save convergence plots (if empty plots doesn't save)
         :param model_name: string with model name to save on plot
         """
         self.model_name = model_name
@@ -73,10 +73,10 @@ class ModelNN:
         self._init_target_metric(target_metric)
 
         self.stop_criteria_count = stop_criteria_count
-        if cash_folder is not None:
-            if not os.path.exists(cash_folder):
-                os.mkdir(cash_folder)
-        self.cash_folder = cash_folder
+        if cach_folder is not None:
+            if not os.path.exists(cach_folder):
+                os.mkdir(cach_folder)
+        self.cach_folder = cach_folder
         self.model_name = model_name
 
     def init_device(self, device: str = None):
@@ -135,8 +135,8 @@ class ModelNN:
         """
         if path is not None:
             torch.save(self.model.state_dict(), path)
-        elif self.cash_folder is not None:
-            torch.save(self.model.state_dict(), f'{self.cash_folder}/{self.model_name}.pt')
+        elif self.cach_folder is not None:
+            torch.save(self.model.state_dict(), f'{self.cach_folder}/{self.model_name}.pt')
         else:
             torch.save(self.model.state_dict(), f'{self.model_name}.pt')
 
@@ -263,10 +263,6 @@ class ModelNN:
         if lmds is None:
             lmds = [1, 1]
 
-        # if graph is not None:
-        #     self.features = self.features[graph.basis]
-        #     self.target = self.target[graph.basis]
-
         self.model.train()
 
         epoch = 0
@@ -298,10 +294,7 @@ class ModelNN:
                 nn_loss_list = np.append(nn_loss_list, loss.item())
 
                 if graph is not None:
-                    add_loss = 0
-                    mask = np.isin(indices, graph.basis)
-                    add_loss = graph.loss_function(output.cpu().detach().numpy()[mask], np.where(np.isin(graph.basis, indices[mask]))[0])
-                    # add_loss = graph.loss_function(output.cpu().detach().numpy(), indices)
+                    add_loss = graph.loss_function(output.cpu().detach().numpy(), indices)
                     graph_loss_list = np.append(graph_loss_list, add_loss)
 
                     if adaptive_lambda:
@@ -404,8 +397,8 @@ class ModelNN:
 
         fig.suptitle(f'Convergence plot')
         plt.tight_layout()
-        if self.cash_folder is not None:
-            plt.savefig(f'{self.cash_folder}/{self.model_name}_conv_plot.png')
+        if self.cach_folder is not None:
+            plt.savefig(f'{self.cach_folder}/{self.model_name}_conv_plot.png')
             plt.close()
         plt.show()
 

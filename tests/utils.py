@@ -48,12 +48,9 @@ def create_connected_graph_individ(source_data_array=None):
 
 def create_model_circle_withoutgraph():
     with open('tests/points_circle.pkl', 'rb') as f:
-    # with open('points_circle.pkl', 'rb') as f:
         features = pkl.load(f)
 
     features = np.array(sorted(features, key=lambda parameters: parameters[2]))
-    features = features
-
     target = np.linspace(0, 0.9, features.shape[0])
 
     model_structure = simple_nn(features.shape[1])
@@ -68,30 +65,21 @@ def create_model_circle_withoutgraph():
     return model
 
 def create_model_circle_withgraph():
-    individ_shell = DataStructureGraph(graph_file='tests/graph_circle_train_data.pkl')
-    # individ_shell = DataStructureGraph(graph_file='graph_circle_train_data.pkl')
+    individ_shell = DataStructureGraph(graph_file='tests/graph_circle.pkl')
 
     with open('tests/points_circle.pkl', 'rb') as f:
-    # with open('points_circle.pkl', 'rb') as f:
         features = pkl.load(f)
 
     features = np.array(sorted(features, key=lambda parameters: parameters[2]))
-    features = features
-
     target = np.linspace(0, 0.9, features.shape[0])
 
-    train_features, test_features = split_dataset(features)
-    train_target, test_target = split_dataset(target)
-
-    # num_epoch = 30
-
-    model_structure = simple_nn(train_features[individ_shell.basis].shape[1])
+    model_structure = simple_nn(features.shape[1])
 
     model = ModelNN(model_structure=model_structure,
-                    train_feature=train_features,
-                    train_target=train_target,
+                    train_feature=features,
+                    train_target=target,
                     criterion=nn.L1Loss(),
                     target_metric=fake_loss
                     )
     
-    return model, individ_shell, train_features
+    return model, individ_shell, features
