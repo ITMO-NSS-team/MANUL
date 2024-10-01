@@ -23,60 +23,60 @@ class DataStructureGraph:
                  n_neighbors: int = None,
                  epsilon_neighborhood: float = None,
                  graph_file: str = None,
-                 cach_folder: str = None):
+                 cache_folder: str = None):
         """
         Class for initialization individ  for evolution as complex graph structure with graph properties
         :param data: features table for graph structure creation
         :param n_neighbors:  number of neighbors for kernel fit (filtered laplacian)
         :param epsilon_neighborhood: epsilon distance between neighbors to decrease the closest
         :param graph_file: str - path to file .pkl with DataStructureGraph object
-        :param cach_folder: str - path to save cach
+        :param cache_folder: str - path to save cache
         """
         self.elitism = False
         self.selected = False
         self.fitness = None
 
-        if cach_folder is None:
-            self.cach_folder = f"cach/{datetime.now().strftime('%Y_%m_%d-%I_%M_%S_%p')}"
+        if cache_folder is None:
+            self.cache_folder = f"cache/{datetime.now().strftime('%Y_%m_%d-%I_%M_%S_%p')}"
         else:
-            self.cach_folder = cach_folder
-        if not os.path.exists(self.cach_folder):
-            os.makedirs(self.cach_folder)
-        print(f'cach folder set as {self.cach_folder}')
+            self.cache_folder = cache_folder
+        if not os.path.exists(self.cache_folder):
+            os.makedirs(self.cache_folder)
+        print(f'cache folder set as {self.cache_folder}')
 
         if graph_file is not None:
-            self.load_cach_object(graph_file)
+            self.load_cache_object(graph_file)
 
         if graph_file is None and data is not None:
             self.source_data = data.astype(float)
             self.create_graph(data, n_neighbors, epsilon_neighborhood)
-            self.save_cach_object('base_graph')
+            self.save_cache_object('base_graph')
 
-    def save_cach_object(self, name: str = None):
+    def save_cache_object(self, name: str = None):
         """
         Function to save  self object as pickle file
-        :param name: string with name without .pkl to save in cach folder
+        :param name: string with name without .pkl to save in cache folder
         """
         if name is None:
             name = 'graph_obj'
-        with open(f'{self.cach_folder}/{name}.pkl', 'wb') as outp:
+        with open(f'{self.cache_folder}/{name}.pkl', 'wb') as outp:
             pickle.dump(self.__dict__, outp, pickle.HIGHEST_PROTOCOL)
-            print(f'Graph object saved to {self.cach_folder}/{name}.pkl')
+            print(f'Graph object saved to {self.cache_folder}/{name}.pkl')
 
-    def load_cach_object(self, path: str):
+    def load_cache_object(self, path: str):
         """
         Function to load self object from pickle file
-        :param path: name of file with graph object .pkl to load in cach folder or absolute path
+        :param path: name of file with graph object .pkl to load in cache folder or absolute path
         """
         if os.path.isfile(path):
             with open(path, 'rb') as inp:
                 tmp_dict = pickle.load(inp)
-                tmp_dict['cach_folder'] = self.cach_folder
+                tmp_dict['cache_folder'] = self.cache_folder
                 self.__dict__.update(tmp_dict)
-        elif os.path.isfile(f'{self.cach_folder}/{path}'):
-            with open(f'{self.cach_folder}/{path}', 'rb') as inp:
+        elif os.path.isfile(f'{self.cache_folder}/{path}'):
+            with open(f'{self.cache_folder}/{path}', 'rb') as inp:
                 tmp_dict = pickle.load(inp)
-                tmp_dict['cach_folder'] = self.cach_folder
+                tmp_dict['cache_folder'] = self.cache_folder
                 self.__dict__.update(tmp_dict)
         else:
             raise Exception(f'Failed to load graph object, no such file {path}')
@@ -445,5 +445,5 @@ class DataStructureGraph:
         if not save_path:
             if title is None:
                 title = '3d_graph'
-            save_path = f'{self.cach_folder}/{title}.html'
+            save_path = f'{self.cache_folder}/{title}.html'
         plotly.offline.plot(fig, filename=save_path)

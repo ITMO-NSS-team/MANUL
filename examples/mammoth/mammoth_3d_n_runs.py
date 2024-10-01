@@ -103,10 +103,10 @@ def run_example(n_runs, mut):
 
     for run in range(n_runs):
         start_time = datetime.now().strftime('%Y_%m_%d-%H_%M_%S_%p')
-        cach_folder = f'{f_folder}/{start_time}'
+        cache_folder = f'{f_folder}/{start_time}'
 
         base_individ = DataStructureGraph(data=train_features,
-                                          cach_folder=cach_folder,
+                                          cache_folder=cache_folder,
                                           n_neighbors=10,
                                           epsilon_neighborhood=0.18, )
 
@@ -138,8 +138,8 @@ def run_example(n_runs, mut):
                               edges_weight_mutation=mut)
         evolution.run()
         evolution.plot_evolution_fitnesses()
-        evolution.base_individ.show_2d(train_target, save_path=f'{cach_folder}/final_graph.png')
-        evolution.plot_evolution_fitnesses(save_path=f'{cach_folder}/evolution_conv.png')
+        evolution.base_individ.show_2d(train_target, save_path=f'{cache_folder}/final_graph.png')
+        evolution.plot_evolution_fitnesses(save_path=f'{cache_folder}/evolution_conv.png')
 
         with_evolution_train_loss = with_evolution_model.get_metric_on_train()
         with_evolution_test_loss = with_evolution_model.get_metric_on_test(test_features, test_target)

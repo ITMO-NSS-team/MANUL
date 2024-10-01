@@ -35,7 +35,7 @@ class ModelNN:
                  criterion=None,
                  optimizer=None,
                  target_metric: Callable = None,
-                 cach_folder: str = None,
+                 cache_folder: str = None,
                  model_name: str = None):
         """
         :param train_feature: array with features for model training
@@ -48,7 +48,7 @@ class ModelNN:
         :param optimizer: torch optimizer (for custom training)
         :param target_metric: function to calculate metric on prediction and target
                                           (default regres - mse, binary class - roc_auc, multiclass - accuracy)
-        :param cach_folder: string with cach folder to save convergence plots (if empty plots doesn't save)
+        :param cache_folder: string with cache folder to save convergence plots (if empty plots doesn't save)
         :param model_name: string with model name to save on plot
         """
         self.model_name = model_name
@@ -73,10 +73,10 @@ class ModelNN:
         self._init_target_metric(target_metric)
 
         self.stop_criteria_count = stop_criteria_count
-        if cach_folder is not None:
-            if not os.path.exists(cach_folder):
-                os.mkdir(cach_folder)
-        self.cach_folder = cach_folder
+        if cache_folder is not None:
+            if not os.path.exists(cache_folder):
+                os.mkdir(cache_folder)
+        self.cache_folder = cache_folder
         self.model_name = model_name
 
     def init_device(self, device: str = None):
@@ -135,8 +135,8 @@ class ModelNN:
         """
         if path is not None:
             torch.save(self.model.state_dict(), path)
-        elif self.cach_folder is not None:
-            torch.save(self.model.state_dict(), f'{self.cach_folder}/{self.model_name}.pt')
+        elif self.cache_folder is not None:
+            torch.save(self.model.state_dict(), f'{self.cache_folder}/{self.model_name}.pt')
         else:
             torch.save(self.model.state_dict(), f'{self.model_name}.pt')
 
@@ -397,8 +397,8 @@ class ModelNN:
 
         fig.suptitle(f'Convergence plot')
         plt.tight_layout()
-        if self.cach_folder is not None:
-            plt.savefig(f'{self.cach_folder}/{self.model_name}_conv_plot.png')
+        if self.cache_folder is not None:
+            plt.savefig(f'{self.cache_folder}/{self.model_name}_conv_plot.png')
             plt.close()
         plt.show()
 

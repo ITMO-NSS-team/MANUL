@@ -91,7 +91,7 @@ def run_example(n_runs):
     else:
         nam = 'noweightmut'
 
-    f_folder = f'cach_mnist_n_runs/{nam}_{iterations}_{pop_size}_mnist_2class'
+    f_folder = f'cache_mnist_n_runs/{nam}_{iterations}_{pop_size}_mnist_2class'
 
     feature, target, angles = get_data()
     train_features, test_features = split_dataset(feature)
@@ -110,9 +110,9 @@ def run_example(n_runs):
 
     for run in range(n_runs):
         start_time = datetime.now().strftime('%Y_%m_%d-%H_%M_%S_%p')
-        cach_folder = f'{f_folder}/{start_time}'
+        cache_folder = f'{f_folder}/{start_time}'
         base_individ = DataStructureGraph(data=train_features,
-                                          cach_folder=cach_folder,
+                                          cache_folder=cache_folder,
                                           n_neighbors=20
                                           )
 
@@ -140,8 +140,8 @@ def run_example(n_runs):
                               model_to_optimize=with_evolution_model,
                               edges_weight_mutation=True)
         evolution.run()
-        evolution.base_individ.show_2d(train_target, save_path=f'{cach_folder}/final_graph.png')
-        evolution.plot_evolution_fitnesses(save_path=f'{cach_folder}/evolution_conv.png')
+        evolution.base_individ.show_2d(train_target, save_path=f'{cache_folder}/final_graph.png')
+        evolution.plot_evolution_fitnesses(save_path=f'{cache_folder}/evolution_conv.png')
 
         with_evolution_train_loss = with_evolution_model.get_metric_on_train()
         with_evolution_test_loss = with_evolution_model.get_metric_on_test(test_features, test_target)
