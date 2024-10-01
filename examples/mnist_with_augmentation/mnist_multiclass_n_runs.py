@@ -175,9 +175,9 @@ def run_example(n_runs, mut):
         df['test_with_evolution'] = test_with_evolution
         df.to_csv(f'{f_folder}/{n_runs}_mnist_8_class_aug.csv')
 
-
-run_example(n_runs=10, mut=True)
-run_example(n_runs=10, mut=False)
-plot_mnist('mnist_n_runs_results/_50_5_mnist_8class/10_mnist_8_class_aug.csv',
-           'mnist_n_runs_results/noweightmut_50_5_mnist_8class/10_mnist_8_class_aug.csv',
-           'mnist_n_runs_results/with_without_weights_mutation_comparison.png')
+if __name__ == "__main__":
+    run_example(n_runs=10, mut=True)
+    run_example(n_runs=10, mut=False)
+    plot_mnist('mnist_n_runs_results/_50_5_mnist_8class/10_mnist_8_class_aug.csv',
+            'mnist_n_runs_results/noweightmut_50_5_mnist_8class/10_mnist_8_class_aug.csv',
+            'mnist_n_runs_results/with_without_weights_mutation_comparison.png')

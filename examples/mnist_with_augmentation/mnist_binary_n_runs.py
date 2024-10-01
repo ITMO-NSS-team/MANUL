@@ -178,5 +178,5 @@ def run_example(n_runs):
         df['test_with_evolution'] = test_with_evolution
         df.to_csv(f'{f_folder}/{n_runs}_mnist_2_class_aug.csv')
 
-
-run_example(n_runs=10)
+if __name__ == "__main__":
+    run_example(n_runs=10)
