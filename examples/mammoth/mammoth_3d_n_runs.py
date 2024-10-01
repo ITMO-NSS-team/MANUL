@@ -178,8 +178,9 @@ def run_example(n_runs, mut):
             f'{f_folder}/{n_runs}_mammoth.csv')
 
 
-run_example(10, True)
-run_example(10, False)
-plot_mammoth('mammoth_n_runs_results/_50_5/10_mammoth.csv',
-             'mammoth_n_runs_results/noweightmut_50_5/10_mammoth.csv',
-             'mammoth_n_runs_results/with_without_weights_mutation_comparison.png')
+if __name__ == "__main__":
+    run_example(10, True)
+    run_example(10, False)
+    plot_mammoth('mammoth_n_runs_results/_50_5/10_mammoth.csv',
+                'mammoth_n_runs_results/noweightmut_50_5/10_mammoth.csv',
+                'mammoth_n_runs_results/with_without_weights_mutation_comparison.png')

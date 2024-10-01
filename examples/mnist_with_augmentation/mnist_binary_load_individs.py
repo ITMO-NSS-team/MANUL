@@ -11,13 +11,13 @@ if __name__ == "__main__":
     train_target, test_target = split_dataset(target)
     train_angle, test_angle = split_dataset(angle)
 
-    f_folder = "../../cash_mnist_n_runs/_30_10_mnist_2class" # path to directory with results
+    f_folder = "../../cache_mnist_n_runs/_30_10_mnist_2class" # path to directory with results
 
     for directory in os.listdir(f_folder):
         path_to_file = f"{f_folder}/{directory}/best_individs_by_iterations.pkl" # name of file with best individs
         if not os.path.isfile(path_to_file): continue
         instance_graph = DataStructureGraph(data=train_features, 
-                                            cash_folder=f"{f_folder}/{directory}",
+                                            cache_folder=f"{f_folder}/{directory}",
                                             graph_file='base_graph.pkl')
 
         pop_inidivids = Population(size=1, base_individ=instance_graph)
