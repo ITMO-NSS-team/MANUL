@@ -52,15 +52,27 @@ class DataStructureGraph:
             self.create_graph(data, n_neighbors, epsilon_neighborhood)
             self.save_cache_object('base_graph')
 
-    def save_cache_object(self, name: str = None):
+    def save_cache_object(self, name: str = None, fields: list = None):
         """
         Function to save  self object as pickle file
         :param name: string with name without .pkl to save in cache folder
+        :param fields: list with names of selective fields for saving 
         """
         if name is None:
             name = 'graph_obj'
+
+        save_dict = {}
+        if fields is not None:
+            for field in fields:
+                if field not in self.__dict__:
+                    print(f"The field {field} isn't exist in DataSrtucutre object")
+                    continue
+                save_dict[field] = self.__dict__[field]
+        else:
+            save_dict = self.__dict__
+        
         with open(f'{self.cache_folder}/{name}.pkl', 'wb') as outp:
-            pickle.dump(self.__dict__, outp, pickle.HIGHEST_PROTOCOL)
+            pickle.dump(save_dict, outp, pickle.HIGHEST_PROTOCOL)
             print(f'Graph object saved to {self.cache_folder}/{name}.pkl')
 
     def load_cache_object(self, path: str):

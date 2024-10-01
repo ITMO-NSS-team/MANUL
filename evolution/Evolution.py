@@ -79,6 +79,7 @@ class Evolution:
 
     def run(self):
         evolution_history = {}
+        best_individs_history = {}
         self.evaluate_fitness()
 
         individ_parameters_dict = {}
@@ -119,6 +120,11 @@ class Evolution:
             print('Filter population')
             pop_operators.filter_population(self.population_size)
             for individ in self.population.individs_pool:
+                if individ.elitism: best_individs_history[i] = {"adjacency_matrix": individ.adjacency_matrix,
+                                                                "matrix_connect": individ.matrix_connect, 
+                                                                "basis": individ.basis,
+                                                                "fitness": individ.fitness,
+                                                                "trained_loss_values": individ.trained_loss_values}
                 individ.selected = False
                 individ.elitism = False
 
@@ -136,3 +142,13 @@ class Evolution:
         self.base_individ = self.population.individs_pool[best_individ_index]
         self.base_model = self.base_model.train(self.base_individ)
         self.base_individ.save_cache_object(name='final_graph')
+        self.save_history(best_individs_history, name='best_individs_by_iterations')
+
+    def save_history(self, history: dict, name: str = None):
+        import pickle
+        if name is None:
+            name = "history_from_evolution"
+
+        with open(f'{self.base_individ.cache_folder}/{name}.pkl', 'wb') as outp:
+            pickle.dump(history, outp, pickle.HIGHEST_PROTOCOL)
+            print(f'History evolution saved to {self.base_individ.cache_folder}/{name}.pkl')

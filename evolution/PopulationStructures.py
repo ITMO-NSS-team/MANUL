@@ -1,4 +1,6 @@
 from copy import deepcopy
+import os
+import pickle
 
 from evolution.PopulationEvoOperators import IndividEvoOperators
 
@@ -52,5 +54,26 @@ class Population:
                 fitness = individ_model.trained_loss_values['combined_loss']
                 fitness = 1 / fitness
                 individ.fitness = fitness
+                individ.trained_loss_values = individ_model.trained_loss_values
         return self
+    
+    def load_individs_pool(self, path):
+        """
+        Function to load self object from pickle file
+        :param path: name of file with graph objects .pkl to load in cache folder if individ or absolute path
+        """
+        if os.path.isfile(path):
+            with open(path, 'rb') as inp:
+                tmp_dict = pickle.load(inp)
+        elif os.path.isfile(f'{self.base_individ.cache_folder}/{path}'):
+            with open(f'{self.base_individ.cache_folder}/{path}', 'rb') as inp:
+                tmp_dict = pickle.load(inp)
+        else:
+            raise Exception(f'Failed to load graph object, no such file {path}')
+
+        for key in tmp_dict:
+            new_individ = deepcopy(self.base_individ)
+            properties = tmp_dict[key]
+            new_individ.__dict__.update(properties)
+            self.individs_pool.append(new_individ)
 
