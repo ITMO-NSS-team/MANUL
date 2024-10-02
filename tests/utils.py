@@ -37,7 +37,7 @@ def create_connected_graph_individ(source_data_array=None):
     adj[edges[0], edges[1]] = 1
     adj[edges[1], edges[0]] = 1
 
-    individ_shell = DataStructureGraph()
+    individ_shell = DataStructureGraph(cache_folder="individ_cache")
     individ_shell.source_data = source_data_array
     individ_shell.adjacency_matrix = deepcopy(adj)
     individ_shell.matrix_connect = deepcopy(matrix)

@@ -59,6 +59,3 @@ if __name__ == "__main__":
 
         df = pd.DataFrame(losses)
         plot_loss(df)
-
-
-        # pop_inidivids.individs_pool[-1].show_2d(labels=train_target, euclidean=True)

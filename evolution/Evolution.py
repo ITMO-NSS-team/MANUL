@@ -1,4 +1,5 @@
 import numpy as np
+import pickle
 from matplotlib import pyplot as plt
 
 from evolution.PopulationEvoOperators import PopulationEvoOperators
@@ -145,7 +146,6 @@ class Evolution:
         self.save_history(best_individs_history, name='best_individs_by_iterations')
 
     def save_history(self, history: dict, name: str = None):
-        import pickle
         if name is None:
             name = "history_from_evolution"
 

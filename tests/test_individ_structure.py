@@ -1,3 +1,4 @@
+import os
 import numpy as np
 from sklearn.metrics.pairwise import euclidean_distances
 from copy import deepcopy
@@ -169,3 +170,35 @@ def test_create_graph():
     assert len(np.unique(individ_shell.basis)) == len(individ_shell.basis)
     assert individ_shell.adjacency_matrix.shape == individ_shell.matrix_connect.shape == (len(individ_shell.basis), len(individ_shell.basis))
     assert individ_shell.matrix_connect.max() <= 1 and individ_shell.matrix_connect.min() >= 0
+
+def test_individ_cache():
+    # creating individ with connected graph and checking saving in cache
+    base_individ = create_connected_graph_individ()
+    base_individ.save_cache_object()
+    assert os.path.exists(f"{base_individ.cache_folder}/graph_obj.pkl")
+
+    # creation empty individ
+    individ_shell = DataStructureGraph(cache_folder="new_cache_individ")
+    individ_shell.adjacency_matrix = None
+    individ_shell.basis = None
+    assert base_individ.adjacency_matrix is not None and base_individ.basis is not None
+
+    # loading fields from first individ to second and checking that information had written
+    individ_shell.load_cache_object(f"{base_individ.cache_folder}/graph_obj.pkl")
+    assert np.all(individ_shell.adjacency_matrix == base_individ.adjacency_matrix) and np.all(individ_shell.basis == base_individ.basis)
+    assert individ_shell.cache_folder != base_individ.cache_folder
+
+    # updating information in second individ and saving only one field
+    individ_shell.adjacency_matrix = None
+    individ_shell.basis = None
+    individ_shell.fitness = 5
+    individ_shell.save_cache_object(name="another_cache", fields=["fitness"])
+    assert os.path.exists(f"{individ_shell.cache_folder}/another_cache.pkl")
+
+    # loading saved fields above to first individ and checking that other fields didn't change
+    base_individ.load_cache_object(f"{individ_shell.cache_folder}/another_cache.pkl")
+    assert base_individ.adjacency_matrix is not None and base_individ.basis is not None
+    assert base_individ.fitness == individ_shell.fitness
+
+    os.remove(f"{base_individ.cache_folder}/graph_obj.pkl")
+    os.remove(f"{individ_shell.cache_folder}/another_cache.pkl")
