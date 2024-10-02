@@ -31,9 +31,9 @@ train_data = train_data[:15000, :]
 test_labels = test_labels[:3000]
 test_data = test_data[:3000, :]
 
-######
+
 outfeatures_num = 10
-#тут хотя бы 2,5,10
+# 2,5,10
 
 
 embedding = LocallyLinearEmbedding(n_components=outfeatures_num)

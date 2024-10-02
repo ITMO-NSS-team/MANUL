@@ -113,7 +113,7 @@ def test_mutate_base():
 def test_mutate_edge():
     individ_shell = create_connected_graph_individ()
     operator = IndividEvoOperators(individs=[individ_shell], base_mutation=False, edges_mutation=True, edges_weight_mutation=False)
-    individs = operator.mutate(edges_existence_mutation_prob=0.3) 
+    individs = operator.mutate(edges_existence_mutation_prob=0.5) 
 
     assert len(individs) == 1
     assert id(individs[0]) != id(individ_shell)
