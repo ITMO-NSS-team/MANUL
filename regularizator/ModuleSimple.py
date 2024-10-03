@@ -30,7 +30,7 @@ class ModelSimple:
                  train_target: np.ndarray,
                  problem: str,
                  target_metric: Callable = None,
-                 cash_folder: str = None,
+                 cache_folder: str = None,
                  model_name: str = None):
         """
         :param train_feature: array with features for model training
@@ -38,7 +38,7 @@ class ModelSimple:
         :param problem: "regres","binary_class", "multiclass" are available
         :param target_metric: function to calculate metric on prediction and target
                                           (default regres - mse, binary class - roc_auc, multiclass - accuracy)
-        :param cash_folder: string with cash folder to save convergence plots (if empty plots doesn't save)
+        :param cache_folder: string with cache folder to save convergence plots (if empty plots doesn't save)
         :param model_name: string with model name to save on plot
         """
         self.trained_loss_values = {'model_loss': None,
@@ -53,7 +53,7 @@ class ModelSimple:
         self.target_metric = self._init_target_metric(target_metric)
 
         self.threshold = None  # parameter for classification problem
-        self.cash_folder = cash_folder
+        self.cache_folder = cache_folder
         self.model_name = model_name
 
     def _init_target_metric(self, target_metric: [Callable, None]):

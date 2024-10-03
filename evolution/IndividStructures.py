@@ -23,58 +23,72 @@ class DataStructureGraph:
                  n_neighbors: int = None,
                  epsilon_neighborhood: float = None,
                  graph_file: str = None,
-                 cash_folder: str = None):
+                 cache_folder: str = None):
         """
         Class for initialization individ  for evolution as complex graph structure with graph properties
         :param data: features table for graph structure creation
         :param n_neighbors:  number of neighbors for kernel fit (filtered laplacian)
         :param epsilon_neighborhood: epsilon distance between neighbors to decrease the closest
         :param graph_file: str - path to file .pkl with DataStructureGraph object
-        :param cash_folder: str - path to save cash
+        :param cache_folder: str - path to save cache
         """
         self.elitism = False
         self.selected = False
         self.fitness = None
 
-        if cash_folder is None:
-            self.cash_folder = f"cash/{datetime.now().strftime('%Y_%m_%d-%I_%M_%S_%p')}"
+        if cache_folder is None:
+            self.cache_folder = f"cache/{datetime.now().strftime('%Y_%m_%d-%I_%M_%S_%p')}"
         else:
-            self.cash_folder = cash_folder
-        if not os.path.exists(self.cash_folder):
-            os.makedirs(self.cash_folder)
-        print(f'Cash folder set as {self.cash_folder}')
+            self.cache_folder = cache_folder
+        if not os.path.exists(self.cache_folder):
+            os.makedirs(self.cache_folder)
+        print(f'cache folder set as {self.cache_folder}')
 
         if graph_file is not None:
-            self.load_cash_object(graph_file)
+            self.load_cache_object(graph_file)
 
         if graph_file is None and data is not None:
             self.source_data = data.astype(float)
             self.create_graph(data, n_neighbors, epsilon_neighborhood)
-            self.save_cash_object('base_graph')
+            self.save_cache_object('base_graph')
 
-    def save_cash_object(self, name: str = None):
+    def save_cache_object(self, name: str = None, fields: list = None):
         """
         Function to save  self object as pickle file
-        :param name: string with name without .pkl to save in cash folder
+        :param name: string with name without .pkl to save in cache folder
+        :param fields: list with names of selective fields for saving 
         """
         if name is None:
             name = 'graph_obj'
-        with open(f'{self.cash_folder}/{name}.pkl', 'wb') as outp:
-            pickle.dump(self.__dict__, outp, pickle.HIGHEST_PROTOCOL)
-            print(f'Graph object saved to {self.cash_folder}/{name}.pkl')
 
-    def load_cash_object(self, path: str):
+        save_dict = {}
+        if fields is not None:
+            for field in fields:
+                if field not in self.__dict__:
+                    print(f"The field {field} isn't exist in DataSrtucutre object")
+                    continue
+                save_dict[field] = self.__dict__[field]
+        else:
+            save_dict = self.__dict__
+        
+        with open(f'{self.cache_folder}/{name}.pkl', 'wb') as outp:
+            pickle.dump(save_dict, outp, pickle.HIGHEST_PROTOCOL)
+            print(f'Graph object saved to {self.cache_folder}/{name}.pkl')
+
+    def load_cache_object(self, path: str):
         """
         Function to load self object from pickle file
-        :param path: name of file with graph object .pkl to load in cash folder or absolute path
+        :param path: name of file with graph object .pkl to load in cache folder or absolute path
         """
         if os.path.isfile(path):
             with open(path, 'rb') as inp:
                 tmp_dict = pickle.load(inp)
+                tmp_dict['cache_folder'] = self.cache_folder
                 self.__dict__.update(tmp_dict)
-        elif os.path.isfile(f'{self.cash_folder}/{path}'):
-            with open(f'{self.cash_folder}/{path}', 'rb') as inp:
+        elif os.path.isfile(f'{self.cache_folder}/{path}'):
+            with open(f'{self.cache_folder}/{path}', 'rb') as inp:
                 tmp_dict = pickle.load(inp)
+                tmp_dict['cache_folder'] = self.cache_folder
                 self.__dict__.update(tmp_dict)
         else:
             raise Exception(f'Failed to load graph object, no such file {path}')
@@ -87,8 +101,17 @@ class DataStructureGraph:
         :return: float - value of loss function
         """
         laplacian = self.laplacian
-        if indices is not None:
-            laplacian = laplacian[indices][:, indices]
+        if indices is not None: 
+            # loss calculates only on graph base points to save laplacian dimensionality
+            real_indices_in_base = np.intersect1d(indices, self.basis)  # find batch indices which are in base
+            # find valid indices for data cut
+            indices_in_batch_indices = np.argwhere(np.in1d(indices, real_indices_in_base))[:, 0]
+            f_x = f_x[indices_in_batch_indices]
+
+            # find valid indices to cut laplacian with base dimensionality
+            indices_in_base = np.argwhere(np.in1d(self.basis, real_indices_in_base))[:, 0]
+            laplacian = laplacian[indices_in_base][:, indices_in_base]
+
         part_1 = np.dot(f_x.T, laplacian)
         loss = np.dot(part_1, f_x)
         return loss.reshape(-1)[0]
@@ -434,5 +457,5 @@ class DataStructureGraph:
         if not save_path:
             if title is None:
                 title = '3d_graph'
-            save_path = f'{self.cash_folder}/{title}.html'
+            save_path = f'{self.cache_folder}/{title}.html'
         plotly.offline.plot(fig, filename=save_path)

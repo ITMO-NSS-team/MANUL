@@ -69,7 +69,7 @@ class IndividEvoOperators:
 
             # mutate edges length
             if self.edges_weight_mutation:
-                num_of_edges_to_mutate = int(num_nodes * edges_len_mutation_prob)
+                num_of_edges_to_mutate = int(individ.number_of_edges * edges_len_mutation_prob)
                 mask_matrix = np.tril(np.full(individ.adjacency_matrix.shape, 1), -1)
                 one_way_adj_matrix = mask_matrix * individ.adjacency_matrix
                 edges = np.array(np.where(one_way_adj_matrix == 1))

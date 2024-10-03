@@ -77,7 +77,7 @@ def run_openml_regression(n_runs=5):
                            f"base_test_loss,with_graph_test_loss,with_evolution_test_loss\n")
 
             base_individ = DataStructureGraph(data=X_train,
-                                              cash_folder=ds_folder)
+                                              cache_folder=ds_folder)
             base_individ.show_2d(y_train, save_path=f'{ds_folder}/base_graph.png')
 
             with open(log_file, 'a') as file:
@@ -92,15 +92,15 @@ def run_openml_regression(n_runs=5):
                     with open(log_file, 'a') as file:
                         file.write(f"run_number {r}\n\n")
                     base_individ = DataStructureGraph(data=X_train,
-                                                      cash_folder=ds_folder,
+                                                      cache_folder=ds_folder,
                                                       graph_file='base_graph.pkl')
-                    base_individ.cash_folder = f'{ds_folder}/{r}'
+                    base_individ.cache_folder = f'{ds_folder}/{r}'
 
-                    base_model = ModelNN(X_train[base_individ.basis], y_train[base_individ.basis],
+                    base_model = ModelNN(X_train, y_train,
                                          num_epochs=50,
                                          batch_size=300,
                                          problem='regres',
-                                         cash_folder=f'{ds_folder}/{r}',
+                                         cache_folder=f'{ds_folder}/{r}',
                                          model_name='base_model')
                     base_model.train()
                     base_train_loss = base_model.get_metric_on_train()
@@ -111,11 +111,11 @@ def run_openml_regression(n_runs=5):
                                    f"base_train_loss {base_train_loss}\n"
                                    f"base_test_loss {base_test_loss}\n")
 
-                    with_graph_model = ModelNN(X_train[base_individ.basis], y_train[base_individ.basis],
+                    with_graph_model = ModelNN(X_train, y_train,
                                                num_epochs=50,
                                                batch_size=300,
                                                problem='regres',
-                                               cash_folder=f'{ds_folder}/{r}',
+                                               cache_folder=f'{ds_folder}/{r}',
                                                model_name='with_graph'
                                                )
                     with_graph_model.train(base_individ)
@@ -127,11 +127,11 @@ def run_openml_regression(n_runs=5):
                                    f"with_graph_train_loss {with_graph_train_loss}\n"
                                    f"with_graph_test_loss {with_graph_test_loss}\n")
 
-                    with_evolution_model = ModelNN(X_train[base_individ.basis], y_train[base_individ.basis],
+                    with_evolution_model = ModelNN(X_train, y_train,
                                                    num_epochs=50,
                                                    batch_size=300,
                                                    problem='regres',
-                                                   cash_folder=f'{ds_folder}/{r}',
+                                                   cache_folder=f'{ds_folder}/{r}',
                                                    model_name='with_evolution'
                                                    )
 

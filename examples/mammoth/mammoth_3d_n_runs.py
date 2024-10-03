@@ -67,8 +67,8 @@ def plot_mammoth(with_weights_path, no_weights_path, save_path):
         'test_with_evolution': 'Evolution graph'}, axis='columns')
 
     fig, ax = plt.subplots(1, 2, figsize=(8, 4))
-    weight_df.boxplot(showfliers=False, ax=ax[1])
-    no_weight_test_df.boxplot(showfliers=False, ax=ax[0])
+    weight_df.boxplot(showfliers=False, ax=ax[0])
+    no_weight_test_df.boxplot(showfliers=False, ax=ax[1])
 
     ax[0].set_ylim(0, 0.008)
     ax[1].set_ylim(0, 0.008)
@@ -83,12 +83,12 @@ def plot_mammoth(with_weights_path, no_weights_path, save_path):
 
 def run_example(n_runs, mut):
     pop_size = 5
-    iterations = 50
+    iterations = 100
     if mut:
         nam = ''
     else:
         nam = 'noweightmut'
-    f_folder = f'mammoth_n_runs_results/{nam}_{iterations}_{pop_size}'
+    f_folder = f'mammoth_n_runs_results_new/{nam}_{iterations}_{pop_size}'
 
     feature, target = form_dataset()
     train_features, test_features = split_dataset(feature)
@@ -103,14 +103,14 @@ def run_example(n_runs, mut):
 
     for run in range(n_runs):
         start_time = datetime.now().strftime('%Y_%m_%d-%H_%M_%S_%p')
-        cash_folder = f'{f_folder}/{start_time}'
+        cache_folder = f'{f_folder}/{start_time}'
 
         base_individ = DataStructureGraph(data=train_features,
-                                          cash_folder=cash_folder,
+                                          cache_folder=cache_folder,
                                           n_neighbors=10,
                                           epsilon_neighborhood=0.18, )
 
-        base_model = ModelNN(train_features[base_individ.basis], train_target[base_individ.basis],
+        base_model = ModelNN(train_features, train_target,
                              num_epochs=50,
                              batch_size=300,
                              problem='regres')
@@ -118,7 +118,7 @@ def run_example(n_runs, mut):
         base_train_loss = base_model.get_metric_on_train()
         base_test_loss = base_model.get_metric_on_test(test_features, test_target)
 
-        with_graph_model = ModelNN(train_features[base_individ.basis], train_target[base_individ.basis],
+        with_graph_model = ModelNN(train_features, train_target,
                                    num_epochs=50,
                                    batch_size=300,
                                    problem='regres')
@@ -126,7 +126,7 @@ def run_example(n_runs, mut):
         with_graph_train_loss = with_graph_model.get_metric_on_train()
         with_graph_test_loss = with_graph_model.get_metric_on_test(test_features, test_target)
 
-        with_evolution_model = ModelNN(train_features[base_individ.basis], train_target[base_individ.basis],
+        with_evolution_model = ModelNN(train_features, train_target,
                                        num_epochs=50,
                                        batch_size=300,
                                        problem='regres')
@@ -138,8 +138,8 @@ def run_example(n_runs, mut):
                               edges_weight_mutation=mut)
         evolution.run()
         evolution.plot_evolution_fitnesses()
-        evolution.base_individ.show_2d(train_target, save_path=f'{cash_folder}/final_graph.png')
-        evolution.plot_evolution_fitnesses(save_path=f'{cash_folder}/evolution_conv.png')
+        evolution.base_individ.show_2d(train_target, save_path=f'{cache_folder}/final_graph.png')
+        evolution.plot_evolution_fitnesses(save_path=f'{cache_folder}/evolution_conv.png')
 
         with_evolution_train_loss = with_evolution_model.get_metric_on_train()
         with_evolution_test_loss = with_evolution_model.get_metric_on_test(test_features, test_target)
@@ -178,8 +178,9 @@ def run_example(n_runs, mut):
             f'{f_folder}/{n_runs}_mammoth.csv')
 
 
-run_example(10, True)
-run_example(10, False)
-plot_mammoth('mammoth_n_runs_results/_50_5/10_mammoth.csv',
-             'mammoth_n_runs_results/noweightmut_50_5/10_mammoth.csv',
-             'mammoth_n_runs_results/with_without_weights_mutation_comparison.png')
+if __name__ == "__main__":
+    run_example(10, True)
+    run_example(10, False)
+    plot_mammoth('mammoth_n_runs_results/_50_5/10_mammoth.csv',
+                'mammoth_n_runs_results/noweightmut_50_5/10_mammoth.csv',
+                'mammoth_n_runs_results/with_without_weights_mutation_comparison.png')

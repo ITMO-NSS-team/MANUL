@@ -50,7 +50,7 @@ def run_example():
     train_target, test_target = split_dataset(target)
 
     base_individ = DataStructureGraph(data=train_features,
-                                      cash_folder='mammoth_cash',
+                                      cache_folder='mammoth_cache',
                                       n_neighbors=10,
                                       epsilon_neighborhood=0.18)
 
@@ -58,7 +58,7 @@ def run_example():
     base_individ.show_2d(labels=train_target, euclidean=True)
 
     # raw model without graph
-    base_model = ModelNN(train_features[base_individ.basis], train_target[base_individ.basis],
+    base_model = ModelNN(train_features, train_target,
                          num_epochs=50,
                          batch_size=300,
                          problem='regres')
@@ -67,7 +67,7 @@ def run_example():
     base_test_loss = base_model.get_metric_on_test(test_features, test_target)
 
     # raw model with base individ graph
-    with_graph_model = ModelNN(train_features[base_individ.basis], train_target[base_individ.basis],
+    with_graph_model = ModelNN(train_features, train_target,
                                num_epochs=50,
                                batch_size=300,
                                problem='regres')
@@ -77,7 +77,7 @@ def run_example():
 
     # check evolution convergence by 5 runs
     for i in range(5):
-        with_evolution_model = ModelNN(train_features[base_individ.basis], train_target[base_individ.basis],
+        with_evolution_model = ModelNN(train_features, train_target,
                                        num_epochs=50,
                                        batch_size=300,
                                        problem='regres')

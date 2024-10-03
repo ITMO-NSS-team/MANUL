@@ -46,25 +46,25 @@ colors_image, train_features, train_colors, test_features, test_colors = generat
 
 base_individ = DataStructureGraph(data=train_features,
                                   n_neighbors=10,
-                                  cash_folder='sin_test')
+                                  cache_folder='sin_test')
 
 base_individ.show_2d(train_colors, cmap_name='Blues', euclidean=True)
 
-base_model = ModelNN(train_feature=train_features[base_individ.basis],
-                     train_target=train_colors[base_individ.basis],
+base_model = ModelNN(train_feature=train_features,
+                     train_target=train_colors,
                      batch_size=10,
                      problem='regres')
 base_model.train(plot_convergence=True, num_epochs=50)
 base_train_loss = base_model.get_metric_on_train()
 base_test_loss = base_model.get_metric_on_test(test_features, test_colors)
 
-with_graph_model = ModelNN(train_features[base_individ.basis], train_colors[base_individ.basis],
+with_graph_model = ModelNN(train_features, train_colors,
                            batch_size=10, problem='regres')
 with_graph_model.train(graph=base_individ, num_epochs=50, plot_convergence=True)
 with_graph_train_loss = with_graph_model.get_metric_on_train()
 with_graph_test_loss = with_graph_model.get_metric_on_test(test_features, test_colors)
 
-with_evolution_model = ModelNN(train_features[base_individ.basis], train_colors[base_individ.basis],
+with_evolution_model = ModelNN(train_features, train_colors,
                                batch_size=10, problem='regres', num_epochs=50)
 
 evolution = Evolution(base_individ=base_individ,

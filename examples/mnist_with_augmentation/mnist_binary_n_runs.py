@@ -91,7 +91,7 @@ def run_example(n_runs):
     else:
         nam = 'noweightmut'
 
-    f_folder = f'cash_mnist_n_runs/{nam}_{iterations}_{pop_size}_mnist_2class'
+    f_folder = f'cache_mnist_n_runs/{nam}_{iterations}_{pop_size}_mnist_2class'
 
     feature, target, angles = get_data()
     train_features, test_features = split_dataset(feature)
@@ -110,27 +110,27 @@ def run_example(n_runs):
 
     for run in range(n_runs):
         start_time = datetime.now().strftime('%Y_%m_%d-%H_%M_%S_%p')
-        cash_folder = f'{f_folder}/{start_time}'
+        cache_folder = f'{f_folder}/{start_time}'
         base_individ = DataStructureGraph(data=train_features,
-                                          cash_folder=cash_folder,
+                                          cache_folder=cache_folder,
                                           n_neighbors=20
                                           )
 
-        base_model = ModelNN(train_features[base_individ.basis], train_target[base_individ.basis],
+        base_model = ModelNN(train_features, train_target,
                              num_epochs=100,
                              batch_size=300, problem='binary_class')
         base_model.train()
         base_train_loss = base_model.get_metric_on_train()
         base_test_loss = base_model.get_metric_on_test(test_features, test_target)
 
-        with_graph_model = ModelNN(train_features[base_individ.basis], train_target[base_individ.basis],
+        with_graph_model = ModelNN(train_features, train_target,
                                    num_epochs=100,
                                    batch_size=300, problem='binary_class')
         with_graph_model.train(base_individ)
         with_graph_train_loss = with_graph_model.get_metric_on_train()
         with_graph_test_loss = with_graph_model.get_metric_on_test(test_features, test_target)
 
-        with_evolution_model = ModelNN(train_features[base_individ.basis], train_target[base_individ.basis],
+        with_evolution_model = ModelNN(train_features, train_target,
                                        num_epochs=100,
                                        batch_size=300, problem='binary_class')
 
@@ -140,8 +140,8 @@ def run_example(n_runs):
                               model_to_optimize=with_evolution_model,
                               edges_weight_mutation=True)
         evolution.run()
-        evolution.base_individ.show_2d(train_target, save_path=f'{cash_folder}/final_graph.png')
-        evolution.plot_evolution_fitnesses(save_path=f'{cash_folder}/evolution_conv.png')
+        evolution.base_individ.show_2d(train_target, save_path=f'{cache_folder}/final_graph.png')
+        evolution.plot_evolution_fitnesses(save_path=f'{cache_folder}/evolution_conv.png')
 
         with_evolution_train_loss = with_evolution_model.get_metric_on_train()
         with_evolution_test_loss = with_evolution_model.get_metric_on_test(test_features, test_target)
@@ -178,5 +178,5 @@ def run_example(n_runs):
         df['test_with_evolution'] = test_with_evolution
         df.to_csv(f'{f_folder}/{n_runs}_mnist_2_class_aug.csv')
 
-
-run_example(n_runs=10)
+if __name__ == "__main__":
+    run_example(n_runs=10)

@@ -1,32 +1,13 @@
 import os.path
-from torch import float64 as fl64
 import numpy as np
 import pandas as pd
 from torch import nn
+import pickle as pkl
 
+from tests.utils import create_model_circle_withoutgraph, create_model_circle_withgraph
+from tests.utils import simple_nn, split_dataset, fake_loss
 from regularizator.ModuleNN import ModelNN
-
-
-def simple_nn(inp_dims):
-    model = nn.Sequential(nn.Linear(inp_dims, 128, dtype=fl64),
-                          nn.ReLU(),
-                          nn.Linear(128, 1, dtype=fl64),
-                          nn.ReLU())
-    return model
-
-
-def fake_loss(true, predicted):
-    """
-    Function to imitate the callable object of custom metric function
-    """
-    return 9999
-
-
-def split_dataset(data, split_ratio=0.8):
-    split_ratio = int(data.shape[0] * split_ratio)
-    train = data[:split_ratio]
-    test = data[split_ratio:]
-    return train, test
+from evolution.Evolution import Evolution
 
 
 def get_synthetic_data(type: str):
@@ -147,7 +128,7 @@ def test_custom_model_run():
     assert (new_prediction == prediction).all()
 
 
-def test_cash_folder():
+def test_cache_folder():
     data = get_synthetic_data('regression')
     train_features, test_features = split_dataset(data[:, :-1])
     train_target, test_target = split_dataset(data[:, -1])
@@ -159,19 +140,80 @@ def test_cash_folder():
                     train_target=train_target,
                     criterion=nn.L1Loss(),
                     target_metric=fake_loss,
-                    cash_folder='test_cash',
+                    cache_folder='test_cache',
                     model_name='test_name'
                     )
     model.train(plot_convergence=True)
     model.save_weights()
-    assert os.path.exists('test_cash/test_name_conv_plot.png')
-    assert os.path.exists('test_cash/test_name.pt')
-    os.remove('test_cash/test_name_conv_plot.png')
-    os.remove('test_cash/test_name.pt')
-    os.removedirs('test_cash')
+    assert os.path.exists('test_cache/test_name_conv_plot.png')
+    assert os.path.exists('test_cache/test_name.pt')
+    os.remove('test_cache/test_name_conv_plot.png')
+    os.remove('test_cache/test_name.pt')
+    os.removedirs('test_cache')
 
 
-def test_models_with_graph():
-    # TODO create graph sample and run models
-    pass
+def test_model_with_graph():
+    model, individ_shell, train_features = create_model_circle_withgraph()
 
+    model.train(graph=individ_shell, adaptive_lambda=False)
+    assert np.all(model.features == train_features)
+    assert len(model.trained_loss_values.keys()) == 3
+    assert np.isclose(model.trained_loss_values['graph_loss'] + model.trained_loss_values['model_loss'], model.trained_loss_values['combined_loss'], atol=1e-4)
+
+    
+
+def test_model_with_evol():
+    model, individ_shell, train_features = create_model_circle_withgraph()
+    
+    evolution = Evolution(base_individ=individ_shell,
+                              iterations=1,
+                              population_size=10,
+                              model_to_optimize=model,
+                              edges_weight_mutation=True)
+    
+    assert id(evolution.base_model) == id(model)
+    evolution.run()
+    assert np.all(model.features == train_features) and  np.all(model.features == evolution.base_individ.source_data)
+
+
+def test_check_stop_criteria():
+    model = create_model_circle_withoutgraph()
+
+    last_loss = 1.2235256
+    current_loss = 1.2235236
+
+    last_loss, change_count = model._check_stop_criteria(last_loss, current_loss, 1)
+
+    assert change_count == 2
+    assert last_loss == current_loss
+
+    current_loss = 5.3121
+
+    last_loss, change_count = model._check_stop_criteria(last_loss, current_loss, change_count)
+
+    assert change_count == 2
+    assert last_loss == current_loss
+
+
+def test_get_scaled_loss():
+    model = create_model_circle_withoutgraph()
+
+    loss_list = np.array([1,2,3,5,4])
+
+    scale_loss = model._get_scaled_loss(loss_list)
+
+    assert np.all(loss_list == np.array([1,2,3,5,4]))
+    assert scale_loss == 0.75
+
+
+def test_get_adaptive_lambda():
+    model = create_model_circle_withoutgraph()
+
+    combines_loss = [16.92036, 13.66173, 14.76129, 20.05487, 20.0401, 16.87396, 14.86376, 14.76943, 21.83021, 23.36205, 22.07374]
+    graph_loss = [16.61611, 13.38675, 14.49282, 19.78522, 19.77816, 16.6297, 14.62064, 14.53423, 21.6005, 23.14165, 21.85664]
+    nn_loss  = [0.30425, 0.27498, 0.26847, 0.26965, 0.26194, 0.24426, 0.24312, 0.23521, 0.22971, 0.22041, 0.2171]
+
+    lmds = model._get_adaptive_lambda(combines_loss, nn_loss, graph_loss)
+    check_lmds = np.array([0.43899881007134345, 1.0])
+
+    assert np.all(np.isclose(lmds, check_lmds, atol=1e-4))

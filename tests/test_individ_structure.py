@@ -1,3 +1,4 @@
+import os
 import numpy as np
 from sklearn.metrics.pairwise import euclidean_distances
 from copy import deepcopy
@@ -24,11 +25,13 @@ def test_properties():
 
 def test_loss_function():
     individ_shell = create_connected_graph_individ(source_data_array=np.array([[4, 0], [0, 0], [3, 9], [4, 2], [7, 7], [8, 2], [9, 0], [9, 9]]))
-    temp_target = np.array([1, 1, 1, 0, 0])
-    check_loss = np.dot(temp_target.T, individ_shell.laplacian)
-    check_loss = np.dot(check_loss, temp_target)
+    temp_target = np.array([1, 1, 1, 0, 0, 1, 1, 0])
+    # took that indexes, because that indexs are existed in individ_shell.basis
+    indexs_for_count = np.array([0, 1, 2])
+    check_loss = np.dot(temp_target[indexs_for_count].T, individ_shell.laplacian[indexs_for_count][:, indexs_for_count])
+    check_loss = np.dot(check_loss, temp_target[indexs_for_count])
 
-    res_loss = individ_shell.loss_function(temp_target)
+    res_loss = individ_shell.loss_function(temp_target, np.append(indexs_for_count, 7))
 
     assert isinstance(res_loss, float)
     assert res_loss - check_loss < 1e-8
@@ -110,7 +113,7 @@ def test_mutate_base():
 def test_mutate_edge():
     individ_shell = create_connected_graph_individ()
     operator = IndividEvoOperators(individs=[individ_shell], base_mutation=False, edges_mutation=True, edges_weight_mutation=False)
-    individs = operator.mutate(edges_existence_mutation_prob=0.3) 
+    individs = operator.mutate(edges_existence_mutation_prob=0.5) 
 
     assert len(individs) == 1
     assert id(individs[0]) != id(individ_shell)
@@ -167,3 +170,35 @@ def test_create_graph():
     assert len(np.unique(individ_shell.basis)) == len(individ_shell.basis)
     assert individ_shell.adjacency_matrix.shape == individ_shell.matrix_connect.shape == (len(individ_shell.basis), len(individ_shell.basis))
     assert individ_shell.matrix_connect.max() <= 1 and individ_shell.matrix_connect.min() >= 0
+
+def test_individ_cache():
+    # creating individ with connected graph and checking saving in cache
+    base_individ = create_connected_graph_individ()
+    base_individ.save_cache_object()
+    assert os.path.exists(f"{base_individ.cache_folder}/graph_obj.pkl")
+
+    # creation empty individ
+    individ_shell = DataStructureGraph(cache_folder="new_cache_individ")
+    individ_shell.adjacency_matrix = None
+    individ_shell.basis = None
+    assert base_individ.adjacency_matrix is not None and base_individ.basis is not None
+
+    # loading fields from first individ to second and checking that information had written
+    individ_shell.load_cache_object(f"{base_individ.cache_folder}/graph_obj.pkl")
+    assert np.all(individ_shell.adjacency_matrix == base_individ.adjacency_matrix) and np.all(individ_shell.basis == base_individ.basis)
+    assert individ_shell.cache_folder != base_individ.cache_folder
+
+    # updating information in second individ and saving only one field
+    individ_shell.adjacency_matrix = None
+    individ_shell.basis = None
+    individ_shell.fitness = 5
+    individ_shell.save_cache_object(name="another_cache", fields=["fitness"])
+    assert os.path.exists(f"{individ_shell.cache_folder}/another_cache.pkl")
+
+    # loading saved fields above to first individ and checking that other fields didn't change
+    base_individ.load_cache_object(f"{individ_shell.cache_folder}/another_cache.pkl")
+    assert base_individ.adjacency_matrix is not None and base_individ.basis is not None
+    assert base_individ.fitness == individ_shell.fitness
+
+    os.remove(f"{base_individ.cache_folder}/graph_obj.pkl")
+    os.remove(f"{individ_shell.cache_folder}/another_cache.pkl")
