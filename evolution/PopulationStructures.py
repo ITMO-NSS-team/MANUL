@@ -57,6 +57,24 @@ class Population:
                 individ.trained_loss_values = individ_model.trained_loss_values
         return self
     
+    def evaluate_individs_criteria(self, base_model):
+        """
+        Function for adding criterions to each individ of population
+        (for multi-criterion optimization)
+        :param base_model: model in which loss with individ is calculated
+        """
+        for individ in self.individs_pool:
+            if individ.fitness is None:
+                individ_model = deepcopy(base_model)
+                individ_model.train(individ)
+                fitness = individ_model.trained_loss_values['combined_loss']
+                fitness = 1 / fitness
+                individ.fitness = fitness
+                individ.criteria = [individ_model.trained_loss_values['graph_loss'],
+                                     individ_model.trained_loss_values['model_loss']]
+                individ.trained_loss_values = individ_model.trained_loss_values
+        return self
+    
     def load_individs_pool(self, path):
         """
         Function to load self object from pickle file

@@ -152,3 +152,75 @@ class Evolution:
         with open(f'{self.base_individ.cache_folder}/{name}.pkl', 'wb') as outp:
             pickle.dump(history, outp, pickle.HIGHEST_PROTOCOL)
             print(f'History evolution saved to {self.base_individ.cache_folder}/{name}.pkl')
+
+
+class MultiEvolution(Evolution):
+    def __init__(self, base_individ: DataStructureGraph,
+                 population_size: int,
+                 iterations: int,
+                 model_to_optimize: ModelNN,
+                 base_mutation=True,
+                 edges_mutation=True,
+                 edges_weight_mutation=True,
+                 evo_operators_params: dict = None):
+        
+        super().__init__(base_individ, population_size, iterations, model_to_optimize, base_mutation, edges_mutation, edges_weight_mutation, evo_operators_params)
+
+        self.__init_weights_vector()
+    
+    def __init_weights_vector(self):
+        x = np.linspace(0, 1, self.population_size)
+        y = x[-1::-1]
+        self.weights_vector = np.array([x, y]).T
+
+    def plot_vectors(self):
+        # origin_point = np.zeros(shape=(2, self.population_size))
+        for i in range(self.population_size):
+            plt.plot([0,self.weights_vector[i][0]], [0, self.weights_vector[i][1]])
+        plt.show()
+
+    def run(self):
+        evolution_history = {}
+        best_individs_history = {}
+        self.evaluate_criteria()
+
+        individ_parameters_dict = {}
+        for k, individ in enumerate(self.population.individs_pool):
+            individ_parameters_dict[k] = {'fitness': individ.fitness,
+                                          'basis': individ.basis}
+        evolution_history[0] = individ_parameters_dict
+
+        for i in range(self.iterations):
+            print(f'Evolution run, iteration - {i}')
+            pop_operators = PopulationEvoOperators(population=self.population)
+            self.decomposition_population_by_vectors()
+            
+            for vector in self.weights_vector:
+                print('Search non-dominant individs')
+                print('Selecting individs')
+                print('Crossover')
+                print('Mutate')
+                print('Count criterias in new individs')
+                print('Replace individs')
+
+    def evaluate_criteria(self):
+        self.population = self.population.evaluate_individs_criteria(self.base_model)
+
+    def subsidiary_method(self, vector, criteria):
+        norm_of_vector = np.linalg.norm(vector)
+        d1 = np.linalg.norm(criteria - np.array([0, 0]).T * vector) / norm_of_vector
+        d2 = np.linalg.norm(criteria - (np.array([0, 0]) + d1 *(vector/np.linalg.norm(vector))))
+        lmd = 3
+
+        return d1 + lmd * d2
+
+    def decomposition_population_by_vectors(self):
+        new_structure = []
+        current_structure = self.population.individs_pool
+        for vector in self.weights_vector:
+            result = map(lambda ind: self.subsidiary_method(vector, ind.criteria), current_structure)
+            result = np.argmin(result)
+            new_structure.append(current_structure[result])
+            current_structure = current_structure[0:result] + current_structure[result+1:]
+        
+        self.population.individs_pool = new_structure
