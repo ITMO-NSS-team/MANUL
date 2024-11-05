@@ -36,6 +36,7 @@ class DataStructureGraph:
         self.selected = False
         self.fitness = None
         self.criteria = None
+        self.level = None
 
         if cache_folder is None:
             self.cache_folder = f"cache/{datetime.now().strftime('%Y_%m_%d-%I_%M_%S_%p')}"

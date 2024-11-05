@@ -2,7 +2,7 @@ import numpy as np
 import pickle
 from matplotlib import pyplot as plt
 
-from evolution.PopulationEvoOperators import PopulationEvoOperators
+from evolution.PopulationEvoOperators import PopulationEvoOperators, PopulationMultiEvoOperators
 from evolution.IndividStructures import DataStructureGraph
 from evolution.PopulationStructures import Population
 from regularizator.ModuleNN import ModelNN
@@ -173,11 +173,19 @@ class MultiEvolution(Evolution):
         y = x[-1::-1]
         self.weights_vector = np.array([x, y]).T
 
-    def plot_vectors(self):
-        # origin_point = np.zeros(shape=(2, self.population_size))
+    def plot_vectors(self, path=None):
+        points = []
+        ind_from_pop = self.population.individs_pool
         for i in range(self.population_size):
             plt.plot([0,self.weights_vector[i][0]], [0, self.weights_vector[i][1]])
-        plt.show()
+            points.append(ind_from_pop[i].criteria)
+        points = np.array(points)
+        plt.scatter(points[:, 0], points[:, 1])
+        if path is not None:
+            plt.savefig(path)
+            plt.clf()
+        else:
+            plt.show()
 
     def run(self):
         evolution_history = {}
@@ -192,35 +200,30 @@ class MultiEvolution(Evolution):
 
         for i in range(self.iterations):
             print(f'Evolution run, iteration - {i}')
-            pop_operators = PopulationEvoOperators(population=self.population)
-            self.decomposition_population_by_vectors()
+            pop_operators = PopulationMultiEvoOperators(population=self.population)
+            pop_operators.decomposition_population_by_vectors(self.weights_vector)
+            self.plot_vectors(path=f"{self.population.individs_pool[0].cache_folder}/vector{i}.png")
             
-            for vector in self.weights_vector:
+            for idx_vector, vector in enumerate(self.weights_vector):
                 print('Search non-dominant individs')
-                print('Selecting individs')
+                pop_operators.fast_non_dominated_sorting()
+                print('Selecting individs') # - получается первый индивид
+                pop_operators.selection_for_multiopt(index_vector=idx_vector)
                 print('Crossover')
+                pop_operators.crossover_population(crossover_size_percent=self.evo_operators_params["crossover"].
+                                               get('crossover_size_percent', None))
                 print('Mutate')
-                print('Count criterias in new individs')
+                pop_operators.mutate_population(mutation_prob=self.evo_operators_params["mutation"].
+                                            get('mutation_prob', None),
+                                            base_mutation=self.base_mutation,
+                                            edges_mutation=self.edges_mutation,
+                                            edges_weight_mutation=self.edges_weight_mutation)
+                print('Count criteria in new individs')
+                self.evaluate_criteria()
                 print('Replace individs')
+                pop_operators.form_popualtion_with_new_individs()
+                for individ in self.population.individs_pool:
+                    individ.selected = False
 
     def evaluate_criteria(self):
         self.population = self.population.evaluate_individs_criteria(self.base_model)
-
-    def subsidiary_method(self, vector, criteria):
-        norm_of_vector = np.linalg.norm(vector)
-        d1 = np.linalg.norm(criteria - np.array([0, 0]).T * vector) / norm_of_vector
-        d2 = np.linalg.norm(criteria - (np.array([0, 0]) + d1 *(vector/np.linalg.norm(vector))))
-        lmd = 3
-
-        return d1 + lmd * d2
-
-    def decomposition_population_by_vectors(self):
-        new_structure = []
-        current_structure = self.population.individs_pool
-        for vector in self.weights_vector:
-            result = map(lambda ind: self.subsidiary_method(vector, ind.criteria), current_structure)
-            result = np.argmin(result)
-            new_structure.append(current_structure[result])
-            current_structure = current_structure[0:result] + current_structure[result+1:]
-        
-        self.population.individs_pool = new_structure

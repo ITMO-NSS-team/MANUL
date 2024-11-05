@@ -119,7 +119,145 @@ class PopulationEvoOperators:
             self.population.individs_pool.extend(elite)
 
 
+class PopulationMultiEvoOperators(PopulationEvoOperators):
+
+    def __init__(self, population):
+        super().__init__(population)
+
+    def subsidiary_method(self, vector, criteria):
+        norm_of_vector = np.linalg.norm(vector)
+        d1 = np.linalg.norm(criteria - np.array([0, 0]).T * vector) / norm_of_vector
+        d2 = np.linalg.norm(criteria - (np.array([0, 0]) + d1 *(vector/np.linalg.norm(vector))))
+        lmd = 3
+
+        return d1 + lmd * d2
+
+    def decomposition_population_by_vectors(self, weights_vector):
+        new_structure = []
+        current_structure = self.population.individs_pool
+        for vector in weights_vector:
+            result = list(map(lambda ind: self.subsidiary_method(vector, ind.criteria), current_structure))
+            result = np.argmin(result)
+            new_structure.append(current_structure[result])
+            current_structure = current_structure[0:result] + current_structure[result+1:]
+        
+        self.population.individs_pool = new_structure
+
+    def fast_non_dominated_sorting(self) -> list:
+        """
+        Procedure of separating points from the general population into non-dominated levels.
+        This function is a faster alternative to the ``slow_non_dominated_sorting``, but requires 
+        a little more memory to store indexes of elements, dominated by every solution. This 
+        method was introduced in *K. Deb, A. Pratap, S. Agarwal, and T. Meyarivan, “A fast 
+        and elitist multiobjective genetic algorithm: NSGA-II,” IEEE Trans. Evol. Comput.,
+        vol. 6, no. 2, pp. 182–197, Apr. 2002.* The computational complexity of the method is 
+        :math:`O(MN^2)`, where *N* is the population size, and *M* is the number of objective 
+        functions in comparisson with :math:`O(MN^3)` of the straightforward way.
 
 
+        Args:
+            population (`list`): The input population, represented as a list of individuals.
+
+        Returns:
+            levels (`list`): List of lists of population elements. The outer index is the number of a layer 
+                (e.g. 0-th is the current Pareto frontier), while the inner is the index of an element on a level.
+
+        """
+        population = self.population.individs_pool
+        # Число элементов, доминирующих над i-ым кандидиатом
+        domination_count = np.zeros(len(population))
+        # Индексы элементов, над которыми доминирует i-ый кандидиат
+        dominated_solutions = [[] for elem_idx in np.arange(len(population))]
+        current_level_idxs = []
+        for main_elem_idx in np.arange(len(population)):
+            for compared_elem_idx in np.arange(len(population)):
+                if main_elem_idx == compared_elem_idx:
+                    continue
+                if self.check_dominance(population[compared_elem_idx], population[main_elem_idx]):
+                    domination_count[main_elem_idx] += 1
+                elif self.check_dominance(population[main_elem_idx], population[compared_elem_idx]):
+                    dominated_solutions[main_elem_idx].append(compared_elem_idx)
+            if domination_count[main_elem_idx] == 0:
+                current_level_idxs.append(main_elem_idx)
+
+        level_idx = 0
+        while len(current_level_idxs) > 0:
+            for individ_idx in current_level_idxs: population[individ_idx].level = level_idx
+            new_level_idxs = []
+            for main_elem_idx in current_level_idxs:
+                for dominated_elem_idx in dominated_solutions[main_elem_idx]:
+                    domination_count[dominated_elem_idx] -= 1
+                    if domination_count[dominated_elem_idx] == 0:
+                        new_level_idxs.append(dominated_elem_idx)
+            level_idx += 1
+            current_level_idxs = new_level_idxs  # deepcopy(new_level_idxs)
+
+        self.population.individs_pool = population
+    
+    def check_dominance(self, target, compared_with) -> bool:
+        """
+
+        Function to check, if one solution is dominated by another.
+
+        Args:
+            target (`src.moeadd.moeadd_solution_template.MOEADDSolution`):  case-specific subclass object
+                The individual solution on the pareto levels, compared with the other element.
+            compared_with (`src.moeadd.moeadd_solution_template.MOEADDSolution`):  case-specific subclass object
+                The individual solution on the pareto levels, with with the target is compared.
+
+        Returns:
+            domiated (`bool`): Function returns True, if the **compared_with** dominates (has at least one objective
+                functions with less values, while the others are the same) the **target**; 
+                False in all other cases.
+
+        """
+        flag = False
+
+        for critea_idx in range(len(target.criteria)):
+            if target.criteria[critea_idx] > compared_with.criteria[critea_idx]:
+                return False
+            if target.criteria[critea_idx] < compared_with.criteria[critea_idx]:
+                flag = True
+        return flag
+    
+    def selection_for_multiopt(self, index_vector: int, size=1):
+        probabilties = []
+        other_individs = []
+        for ind_idx, individ in enumerate(self.population.individs_pool):
+            if ind_idx == index_vector:
+                continue
+            probabilties.append(abs(ind_idx - index_vector))
+            other_individs.append(ind_idx)
+
+        probabilties = probabilties / np.sum(probabilties)
+
+        if size > len(other_individs):
+            size = len(other_individs)
+
+        selected_individs = list(
+            np.random.choice(other_individs, replace=False, size=size, p=probabilties))
+        
+        for ind in selected_individs:
+            self.population.individs_pool[ind].selected = True
+        
+        self.population.individs_pool[index_vector].selected = True
 
 
+    def form_popualtion_with_new_individs(self):
+        new_individs = []
+        sort_ind = []
+        population = self.population.individs_pool
+        i = 0
+        while i < len(population):
+            individ = population[i]
+            if individ.level is None:
+                population.pop(i)
+                new_individs.append(individ)
+                continue
+            sort_ind.append(individ.level)
+            i += 1
+
+        sort_ind = np.argsort(sort_ind)[::-1]
+        for i, individ in enumerate(new_individs):
+            index = sort_ind[i]
+            self.population.individs_pool[index] = individ
