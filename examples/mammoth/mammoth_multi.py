@@ -1,5 +1,12 @@
 import ast
 from datetime import datetime
+from copy import deepcopy
+
+import os
+import sys
+
+root_dir = '/'.join(os.getcwd().split("/")[:-1])
+sys.path.append(root_dir)
 
 import numpy as np
 import pandas as pd
@@ -14,7 +21,7 @@ def form_dataset():
     Load points and generate colors for mammoth dataset
     :return: ndarray with points coordinates, ndarray with colors from 0 to 1
     """
-    fl = open("../data/mammoth_3d.json ", "r")
+    fl = open("examples/data/mammoth_3d.json ", "r")
     data = fl.read()
     data = np.array(ast.literal_eval(data))
     colors = np.linspace(0, 0.9, len(data))
@@ -47,8 +54,8 @@ def split_dataset(data, split_ratio=0.8):
     return train, test
 
 def run_example(mut):
-    pop_size = 5
-    iterations = 100
+    pop_size = 10
+    iterations = 20
     if mut:
         nam = ''
     else:
@@ -79,16 +86,16 @@ def run_example(mut):
                             batch_size=300,
                             problem='regres')
     base_model.train()
-    # base_train_loss = base_model.get_metric_on_train()
-    # base_test_loss = base_model.get_metric_on_test(test_features, test_target)
+    base_train_loss = base_model.get_metric_on_train()
+    base_test_loss = base_model.get_metric_on_test(test_features, test_target)
 
     with_graph_model = ModelNN(train_features, train_target,
                                 num_epochs=50,
                                 batch_size=300,
                                 problem='regres')
     with_graph_model.train(base_individ)
-    # with_graph_train_loss = with_graph_model.get_metric_on_train()
-    # with_graph_test_loss = with_graph_model.get_metric_on_test(test_features, test_target)
+    with_graph_train_loss = with_graph_model.get_metric_on_train()
+    with_graph_test_loss = with_graph_model.get_metric_on_test(test_features, test_target)
 
     with_evolution_model = ModelNN(train_features, train_target,
                                     num_epochs=50,
@@ -102,6 +109,28 @@ def run_example(mut):
                             edges_weight_mutation=mut)
     
     evolution.run()
+
+    for individ in evolution.population.individs_pool:
+        temp_model = deepcopy(evolution.base_model)
+        temp_model.train(individ)
+        individ.show_2d(train_target)
+        _train_loss = temp_model.get_metric_on_train()
+        _test_loss = temp_model.get_metric_on_test(test_features, test_target)
+        b1 = plt.bar(['base', 'with graph', 'with evolution'],
+                     [base_train_loss, with_graph_train_loss, _train_loss])
+        for b in b1:
+            height = b.get_height()
+            plt.text(b.get_x() + b.get_width() / 2.0, height, f'{height:.5f}', ha='center', va='bottom')
+        plt.title('MSE on train set')
+        plt.show()
+        b2 = plt.bar(['base', 'with graph', 'with evolution'],
+                     [base_test_loss, with_graph_test_loss, _test_loss])
+        for b in b2:
+            height = b.get_height()
+            plt.text(b.get_x() + b.get_width() / 2.0, height, f'{height:.5f}', ha='center', va='bottom')
+        plt.title('MSE on test set')
+        plt.show()
+
 
 
 if __name__ == "__main__":
