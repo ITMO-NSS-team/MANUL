@@ -3,7 +3,7 @@ from copy import deepcopy
 import os
 
 from tests.utils import create_connected_graph_individ
-from evolution.Evolution import Evolution
+from evolution.Evolution import Evolution, MultiEvolution
 from regularizator.ModuleNN import ModelNN
 
 
@@ -108,4 +108,7 @@ def test_save_and_load_history():
     assert isEqual
 
 
+# tests for multioptimization
 
+# def test_ini():
+    

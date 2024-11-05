@@ -4,7 +4,7 @@ import numpy as np
 from copy import deepcopy
 
 from tests.utils import create_connected_graph_individ
-from evolution.PopulationEvoOperators import PopulationEvoOperators
+from evolution.PopulationEvoOperators import PopulationEvoOperators, PopulationMultiEvoOperators
 from evolution.PopulationStructures import Population
 
 
@@ -132,3 +132,85 @@ def test_roulette_wheel_selection():
     select_inds = [ind for ind in population_shell.individs_pool if ind.selected == True]
 
     assert len(select_inds) == 1
+
+# multioptimization tests
+
+def test_decomposition():
+    size_of_population = 5
+    base_individ = create_connected_graph_individ()
+    population_shell = Population(size=size_of_population, base_individ=base_individ)
+    population_shell.generate()
+    vectors = np.array([[0.  , 1.  ], [0.25, 0.75], [0.5 , 0.5 ], [0.75, 0.25], [1.  , 0.]])
+    index_of_criteria = np.random.choice(size_of_population, size=size_of_population, replace=False)
+    for i, value in enumerate(index_of_criteria):
+        current_vector = vectors[value] / 2
+        population_shell.individs_pool[i].criteria = current_vector
+
+    population_operator = PopulationMultiEvoOperators(population=population_shell)
+    population_operator.decomposition_population_by_vectors(vectors)
+
+    result = True
+    for i, individ in enumerate(population_shell.individs_pool):
+        test_constr = np.all(individ.criteria == (vectors[i] / 2))
+        result *= test_constr
+
+    assert result
+
+def test_check_dominante():
+    base_individ = create_connected_graph_individ()
+    one_individ = deepcopy(base_individ)
+    two_individ = deepcopy(base_individ)
+    population_shell = Population(size=2, base_individ=base_individ)
+
+    population_operator = PopulationMultiEvoOperators(population=population_shell)
+
+    one_individ.criteria = [1, 1]
+    two_individ.criteria = [0, 1]
+    one_individ.level = None
+    two_individ.level = None
+
+    population_shell.individs_pool = [one_individ, two_individ]
+
+    assert population_operator.check_dominance(one_individ, two_individ) == False
+    population_operator.fast_non_dominated_sorting()
+
+    assert np.all([ind.level is not None for ind in population_shell.individs_pool])
+    assert population_shell.individs_pool[1].level < population_shell.individs_pool[0].level
+
+    one_individ.criteria = [0, 1]
+    two_individ.criteria = [1, 1]
+    one_individ.level = None
+    two_individ.level = None
+
+    population_shell.individs_pool = [one_individ, two_individ]
+
+    assert population_operator.check_dominance(one_individ, two_individ) == True
+    population_operator.fast_non_dominated_sorting()
+
+    assert np.all([ind.level is not None for ind in population_shell.individs_pool])
+    assert population_shell.individs_pool[0].level < population_shell.individs_pool[1].level
+
+    one_individ.criteria = [0, 1]
+    two_individ.criteria = [0, 1]
+    one_individ.level = None
+    two_individ.level = None
+
+    population_shell.individs_pool = [one_individ, two_individ]
+
+    assert population_operator.check_dominance(one_individ, two_individ) == False
+    population_operator.fast_non_dominated_sorting()
+
+    assert np.all([ind.level is not None for ind in population_shell.individs_pool])
+    assert population_shell.individs_pool[0].level == population_shell.individs_pool[1].level
+
+def test_selection_for_multiopt():
+    base_individ = create_connected_graph_individ()
+    population_shell = Population(size=5, base_individ=base_individ)
+    population_shell.generate()
+
+    population_operator = PopulationMultiEvoOperators(population=population_shell)
+    population_operator.selection_for_multiopt(2)
+
+    selected_individs = [individ for individ in population_shell.individs_pool if individ.selected]
+
+    assert len(selected_individs) == 2
