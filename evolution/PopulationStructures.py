@@ -71,6 +71,7 @@ class Population:
                 fitness = 1 / fitness
                 individ.fitness = fitness
                 individ.criteria = [individ_model.trained_loss_values['combined_loss'], 1/individ_model.trained_loss_values['graph_loss']]
+                # individ.criteria = [individ_model.trained_loss_values['model_loss'], individ_model.trained_loss_values['graph_loss']]
                 individ.trained_loss_values = individ_model.trained_loss_values
         return self
     

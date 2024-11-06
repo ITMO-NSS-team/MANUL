@@ -17,6 +17,11 @@ class IndividEvoOperators:
         :param individs: list with graph individs for changing
         """
         self.individs = [deepcopy(ind) for ind in individs]
+        for individ in self.individs:
+            individ.elitism = False
+            individ.fitness = None
+            individ.level = None
+
         self.base_mutation = base_mutation
         self.edges_mutation = edges_mutation
         self.edges_weight_mutation = edges_weight_mutation
@@ -31,9 +36,6 @@ class IndividEvoOperators:
                 f'IndividEvoOperators.mutate nodes_mutation_prob={nodes_mutation_prob} should be from 0 to 1')
 
         for individ in self.individs:
-            individ.elitism = False
-            individ.fitness = None
-            individ.level = None
             num_nodes = individ.number_of_nodes
             number_of_nodes_to_mutate = int(math.ceil(num_nodes * nodes_mutation_prob))
             number_of_edges_to_mutate = int(math.ceil(individ.adjacency_matrix.size * edges_existence_mutation_prob))
@@ -92,12 +94,6 @@ class IndividEvoOperators:
 
         individ1 = self.individs[0]
         individ2 = self.individs[1]
-        individ1.elitism = False
-        individ2.elitism = False
-        individ1.fitness = None
-        individ2.fitness = None
-        individ1.level = None
-        individ2.level = None
 
         # chose nodes with max difference in number of edges
         #nodes_edges_num = np.sum(individ1.adjacency_matrix, axis=0) - np.sum(individ2.adjacency_matrix, axis=0)

@@ -65,8 +65,6 @@ class PopulationEvoOperators:
                                               size=(crossover_size, 2))]
 
         for individ1, individ2 in selected_individs:
-            # individ1 = deepcopy(individ1)
-            # individ2 = deepcopy(individ2)
             mutator = IndividEvoOperators([individ1, individ2])
             new_individs = mutator.crossover_individs()
             self.population.individs_pool.extend(new_individs)
@@ -81,7 +79,6 @@ class PopulationEvoOperators:
         number_of_individs_to_mutate = int(len(selected_population) * mutation_prob)
 
         selected_individs = np.random.choice(selected_population, replace=False, size=number_of_individs_to_mutate).tolist()
-        # selected_individs = [deepcopy(ind) for ind in selected_individs]
 
         mutator = IndividEvoOperators(selected_individs, base_mutation, edges_mutation, edges_weight_mutation)
         # TODO throw mutation parameters to upper layers
@@ -124,7 +121,12 @@ class PopulationMultiEvoOperators(PopulationEvoOperators):
     def __init__(self, population):
         super().__init__(population)
 
-    def subsidiary_method(self, vector, criteria):
+    def scalar_product(self, vector, criteria):
+        """
+        Method for countinп angle between base vector and individ criteria
+        :param vector: coordinates of base vector
+        :param critetia: individ's criteria
+        """
         norm_of_vector = np.linalg.norm(vector)
         d1 = np.linalg.norm(criteria - np.array([0, 0]).T * vector) / norm_of_vector
         d2 = np.linalg.norm(criteria - (np.array([0, 0]) + d1 *(vector/np.linalg.norm(vector))))
@@ -132,11 +134,15 @@ class PopulationMultiEvoOperators(PopulationEvoOperators):
 
         return d1 + lmd * d2
 
-    def decomposition_population_by_vectors(self, weights_vector):
+    def decomposition_population_by_vectors(self, weights_vector: list):
+        """
+        Method for distribution individuals by base vectors with help sorting individuals according to the index of the vector 
+        :param weights_vector:  the list with vectors
+        """
         new_structure = []
         current_structure = self.population.individs_pool
         for vector in weights_vector:
-            result = list(map(lambda ind: self.subsidiary_method(vector, ind.criteria), current_structure))
+            result = list(map(lambda ind: self.scalar_product(vector, ind.criteria), current_structure))
             result = np.argmin(result)
             new_structure.append(current_structure[result])
             current_structure = current_structure[0:result] + current_structure[result+1:]
@@ -154,13 +160,7 @@ class PopulationMultiEvoOperators(PopulationEvoOperators):
         :math:`O(MN^2)`, where *N* is the population size, and *M* is the number of objective 
         functions in comparisson with :math:`O(MN^3)` of the straightforward way.
 
-
-        Args:
-            population (`list`): The input population, represented as a list of individuals.
-
-        Returns:
-            levels (`list`): List of lists of population elements. The outer index is the number of a layer 
-                (e.g. 0-th is the current Pareto frontier), while the inner is the index of an element on a level.
+        :param population: The input population, represented as a list of individuals.
 
         """
         population = self.population.individs_pool
@@ -196,20 +196,12 @@ class PopulationMultiEvoOperators(PopulationEvoOperators):
     
     def check_dominance(self, target, compared_with) -> bool:
         """
-
-        Function to check, if one solution is dominated by another.
-
-        Args:
-            target (`src.moeadd.moeadd_solution_template.MOEADDSolution`):  case-specific subclass object
-                The individual solution on the pareto levels, compared with the other element.
-            compared_with (`src.moeadd.moeadd_solution_template.MOEADDSolution`):  case-specific subclass object
-                The individual solution on the pareto levels, with with the target is compared.
-
-        Returns:
-            domiated (`bool`): Function returns True, if the **compared_with** dominates (has at least one objective
+        Method to check, if one solution is dominated by another.
+        :param target: individual solution on the pareto levels, compared with the other element.
+        :param compared_with: individual solution on the pareto levels, with with the target is compared.
+        :return: method returns True, if the **compared_with** dominates (has at least one objective
                 functions with less values, while the others are the same) the **target**; 
                 False in all other cases.
-
         """
         flag = False
 
@@ -221,6 +213,11 @@ class PopulationMultiEvoOperators(PopulationEvoOperators):
         return flag
     
     def selection_for_multiopt(self, index_vector: int, size=1):
+        """
+        Selection individuals for evolution operators (mutation, crossover). The choice depends on current base vector. Probabilities are counted by position of individuals between each other.
+        :param index_vector: index current base vector, coincides with the index of the individual corresponding to the vector
+        :param size: amount of selected individuals except current vector's individual
+        """
         probabilties = []
         other_individs = []
         for ind_idx, individ in enumerate(self.population.individs_pool):
@@ -244,6 +241,9 @@ class PopulationMultiEvoOperators(PopulationEvoOperators):
 
 
     def form_popualtion_with_new_individs(self):
+        """
+        Replace individuals with low level of dominance to new individuals that were obtained evolutionary operators.
+        """
         new_individs = []
         sort_ind = []
         population = self.population.individs_pool

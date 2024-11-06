@@ -224,6 +224,12 @@ class MultiEvolution(Evolution):
                 pop_operators.form_popualtion_with_new_individs()
                 for individ in self.population.individs_pool:
                     individ.selected = False
+        
+        self.save_individs()
+
+    def save_individs(self):
+        for index, individ in enumerate(self.population.individs_pool):
+            individ.save_cache_object(name=f'final_graph{index}')
 
     def evaluate_criteria(self):
         self.population = self.population.evaluate_individs_criteria(self.base_model)
