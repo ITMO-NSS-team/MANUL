@@ -189,14 +189,10 @@ class MultiEvolution(Evolution):
 
     def run(self):
         evolution_history = {}
-        best_individs_history = {}
+        self.best_individs_history = {}
         self.evaluate_criteria()
 
-        individ_parameters_dict = {}
-        for k, individ in enumerate(self.population.individs_pool):
-            individ_parameters_dict[k] = {'fitness': individ.fitness,
-                                          'basis': individ.basis}
-        evolution_history[0] = individ_parameters_dict
+        self.best_individs_history[0] = self.population.individs_pool
 
         for i in range(self.iterations):
             print(f'Evolution run, iteration - {i}')
@@ -224,6 +220,8 @@ class MultiEvolution(Evolution):
                 pop_operators.form_popualtion_with_new_individs()
                 for individ in self.population.individs_pool:
                     individ.selected = False
+            
+            self.best_individs_history[i+1] = self.population.individs_pool            
         
         self.save_individs()
 
@@ -233,3 +231,24 @@ class MultiEvolution(Evolution):
 
     def evaluate_criteria(self):
         self.population = self.population.evaluate_individs_criteria(self.base_model)
+
+    def plot_convergence_graph(self, features, target):
+        from copy import deepcopy
+        ylab = 'MSE Loss'
+
+        for iter in self.best_individs_history:
+            metrics = []
+            individs = self.best_individs_history[iter]
+            for individ in individs:
+                temp_model = deepcopy(self.base_model)
+                temp_model.train(individ)
+                metric = temp_model.get_metric_on_test(features, target)
+                metrics.append(metric)
+            plt.scatter([iter] * len(self.best_individs_history[iter]), metrics)
+
+        plt.title('Evolution convergence')
+        plt.xlabel('Generation')
+        plt.ylabel(ylab)
+        plt.show()
+
+        

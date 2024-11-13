@@ -104,6 +104,8 @@ def run_example(mut):
                             edges_weight_mutation=mut)
     
     evolution.run()
+    evolution.plot_convergence_graph(test_features, test_target)
+
 
     os.mkdir(f"{cache_folder}/results")
     for _, individ in enumerate(evolution.population.individs_pool):
