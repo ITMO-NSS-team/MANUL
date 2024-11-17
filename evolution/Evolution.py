@@ -236,15 +236,18 @@ class MultiEvolution(Evolution):
         from copy import deepcopy
         ylab = 'MSE Loss'
 
+        metrics = []
         for iter in self.best_individs_history:
-            metrics = []
             individs = self.best_individs_history[iter]
             for individ in individs:
                 temp_model = deepcopy(self.base_model)
                 temp_model.train(individ)
                 metric = temp_model.get_metric_on_test(features, target)
-                metrics.append(metric)
-            plt.scatter([iter] * len(self.best_individs_history[iter]), metrics)
+                if (len(metrics) - 1) < iter:
+                    metrics.append(metric)
+                elif metrics[-1] > metric:
+                    metrics[-1] = metric
+        plt.scatter(np.arange(len(metrics)), metrics)
 
         plt.title('Evolution convergence')
         plt.xlabel('Generation')
