@@ -106,9 +106,4 @@ def test_save_and_load_history():
         isEqual *= population.individs_pool[i].trained_loss_values == dict_for_test[i]["trained_loss_values"]
 
     assert isEqual
-
-
-# tests for multioptimization
-
-# def test_ini():
     
