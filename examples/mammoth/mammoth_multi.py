@@ -6,7 +6,7 @@ from copy import deepcopy
 import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt
-from evolution.Evolution import Evolution, MultiEvolution
+from evolution.Evolution import MultiEvolution
 from evolution.IndividStructures import DataStructureGraph
 from regularizator.ModuleNN import ModelNN
 
@@ -16,7 +16,7 @@ def form_dataset():
     Load points and generate colors for mammoth dataset
     :return: ndarray with points coordinates, ndarray with colors from 0 to 1
     """
-    fl = open("examples/data/mammoth_3d.json ", "r")
+    fl = open("../data/mammoth_3d.json ", "r")
     data = fl.read()
     data = np.array(ast.literal_eval(data))
     colors = np.linspace(0, 0.9, len(data))
