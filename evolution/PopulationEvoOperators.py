@@ -121,9 +121,9 @@ class PopulationMultiEvoOperators(PopulationEvoOperators):
     def __init__(self, population):
         super().__init__(population)
 
-    def scalar_product(self, vector, criteria):
+    def scalar_product(self, vector:np.ndarray, criteria: np.ndarray):
         """
-        Method for countinп angle between base vector and individ criteria
+        Method for computing angle between base vector and individ criteria
         :param vector: coordinates of base vector
         :param critetia: individ's criteria
         """
@@ -136,7 +136,7 @@ class PopulationMultiEvoOperators(PopulationEvoOperators):
 
     def decomposition_population_by_vectors(self, weights_vector: list):
         """
-        Method for distribution individuals by base vectors with help sorting individuals according to the index of the vector 
+        Method for distributing individuals by base vectors with help of sorting individuals according to the index of the vector 
         :param weights_vector:  the list with vectors
         """
         new_structure = []
@@ -159,8 +159,6 @@ class PopulationMultiEvoOperators(PopulationEvoOperators):
         vol. 6, no. 2, pp. 182–197, Apr. 2002.* The computational complexity of the method is 
         :math:`O(MN^2)`, where *N* is the population size, and *M* is the number of objective 
         functions in comparisson with :math:`O(MN^3)` of the straightforward way.
-
-        :param population: The input population, represented as a list of individuals.
 
         """
         population = self.population.individs_pool
@@ -214,7 +212,8 @@ class PopulationMultiEvoOperators(PopulationEvoOperators):
     
     def selection_for_multiopt(self, index_vector: int, size=1):
         """
-        Selection individuals for evolution operators (mutation, crossover). The choice depends on current base vector. Probabilities are counted by position of individuals between each other.
+        Selection of individuals for evolution operators (mutation, crossover). The choice depends on current base vector. 
+        Probabilities are counted by position of individuals among each other.
         :param index_vector: index current base vector, coincides with the index of the individual corresponding to the vector
         :param size: amount of selected individuals except current vector's individual
         """
@@ -242,7 +241,7 @@ class PopulationMultiEvoOperators(PopulationEvoOperators):
 
     def form_popualtion_with_new_individs(self):
         """
-        Replace individuals with low level of dominance to new individuals that were obtained evolutionary operators.
+        Replace individuals with low level of dominance to new individuals that were obtained from evolutionary operators.
         """
         new_individs = []
         sort_ind = []

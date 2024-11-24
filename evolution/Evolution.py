@@ -18,11 +18,11 @@ class Evolution:
                  edges_weight_mutation=True,
                  evo_operators_params: dict = None):
         """
-        Class for set and run evolution optimization on graph for best model fitting on data
+        Class for setup and execution of the evolution optimization on graph to improve the model fit to data
         :param base_individ: DataStructureGraph class object as starting point
         :param population_size: number of individs in population to produce from base_individ with mutation
         :param iterations: number of iterations for evolution
-        :param model_to_optimize: ModelNN for which the best quality is searching
+        :param model_to_optimize: ModelNN, for which the graph with best quality is searched
         :param evo_operators_params: dictionary with parameters for evolutionary operators for custom setting
         """
         self.evolution_history = None
@@ -164,6 +164,15 @@ class MultiEvolution(Evolution):
                  edges_weight_mutation=True,
                  evo_operators_params: dict = None):
         
+        """
+        Class for set and run multi-objective evolutionary optimization on graph for best model fitting on data
+        :param base_individ: DataStructureGraph class object as the starting point
+        :param population_size: number of individs in population to produce from base_individ with mutation
+        :param iterations: number of iterations for evolution
+        :param model_to_optimize: ModelNN, for which the graph with best quality is searched
+        :param evo_operators_params: dictionary with parameters for evolutionary operators for custom setting
+        """
+        
         super().__init__(base_individ, population_size, iterations, model_to_optimize, base_mutation, edges_mutation, edges_weight_mutation, evo_operators_params)
 
         self.__init_weights_vector()
@@ -174,6 +183,10 @@ class MultiEvolution(Evolution):
         self.weights_vector = np.array([x, y]).T
 
     def plot_vectors(self, path=None):
+        '''
+        Drawing weigth vectors for demonstration of Pareto-front for individs (primarily for debug purposes).
+        :param path: path for saving image. Optional, by default image will showed.
+        '''
         points = []
         ind_from_pop = self.population.individs_pool
         for i in range(self.population_size):
@@ -226,13 +239,19 @@ class MultiEvolution(Evolution):
         self.save_individs()
 
     def save_individs(self):
+        '''
+        Saving all individs at the current moment.
+        '''
         for index, individ in enumerate(self.population.individs_pool):
             individ.save_cache_object(name=f'final_graph{index}')
 
     def evaluate_criteria(self):
         self.population = self.population.evaluate_individs_criteria(self.base_model)
 
-    def plot_convergence_graph(self, features, target):
+    def plot_mse_best_individ_by_epoch(self, features, target):
+        '''
+        Plotting MSE metric on test dataset for the best individ in population for each iteration of evolution.
+        '''
         from copy import deepcopy
         ylab = 'MSE Loss'
 

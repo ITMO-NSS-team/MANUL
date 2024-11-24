@@ -8,7 +8,7 @@ from evolution.PopulationEvoOperators import IndividEvoOperators
 class Population:
     def __init__(self, size: int, base_individ):
         """
-        Class for generation population from single individ with mutation operator
+        Class for population generation from a single individ by repeatedly applying mutation operator.
         :param size: int - number of individs in population
         :param base_individ: DataStructureGraph with individ to mutate
         """
@@ -21,7 +21,7 @@ class Population:
                           edges_weight_mutation: bool = True,
                  nodes_mutation_prob: float = None):
         """
-        Function to generate population from base individ to pool by mutation
+        Function to generate population from the base individ to pool by mutation.
         :param nodes_mutation_prob: percentage of nodes for mutation
         :return: class object with individs pool
         """
@@ -44,7 +44,7 @@ class Population:
 
     def evaluate_individs_fitness(self, base_model):
         """
-        Function for adding fitness parameter to each individ of population
+        Function for adding fitness parameter to each individ of the population.
         :param base_model: model in which loss with individ is calculated
         """
         for individ in self.individs_pool:
@@ -59,8 +59,8 @@ class Population:
     
     def evaluate_individs_criteria(self, base_model):
         """
-        Function for adding criterions to each individ of population
-        (for multi-criterion optimization)
+        Function for adding criterions to each individ of the population
+        (implemented for multi-criterion optimization).
         :param base_model: model in which loss with individ is calculated
         """
         for individ in self.individs_pool:

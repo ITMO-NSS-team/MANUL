@@ -104,7 +104,7 @@ def run_example(mut):
                             edges_weight_mutation=mut)
     
     evolution.run()
-    evolution.plot_convergence_graph(test_features, test_target)
+    evolution.plot_mse_best_individ_by_epoch(test_features, test_target)
 
 
     os.mkdir(f"{cache_folder}/results")
