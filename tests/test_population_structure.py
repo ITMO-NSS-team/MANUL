@@ -136,6 +136,17 @@ def test_roulette_wheel_selection():
 # multioptimization tests
 
 def test_decomposition():
+    '''
+    Test, that checks sorting of individs in the population according to weight vectors (). Steps of test:
+
+    1. Creating vectors (the weight vectors), size(vectors) == size_of_population
+    2. Random mix indexes of individs and save in index_of_criteria
+    3. Foreach index_of_criteria and assign half-hearted values of i weight vector to individ criteria 
+    (it needs for that the criteria of individ were lying on the weight vector)
+    4. Launch operator decomposition_population_by_vectors
+    5. Check, that individs have an order in relation to the weight vectors 
+    (i-individ criteria equal half-hearted i-weight vector)
+    '''
     size_of_population = 5
     base_individ = create_connected_graph_individ()
     population_shell = Population(size=size_of_population, base_individ=base_individ)
