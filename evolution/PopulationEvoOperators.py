@@ -128,7 +128,7 @@ class PopulationMultiEvoOperators(PopulationEvoOperators):
         :param critetia: individ's criteria
         """
         norm_of_vector = np.linalg.norm(vector)
-        d1 = np.linalg.norm(criteria - np.array([0, 0]).T * vector) / norm_of_vector
+        d1 = np.linalg.norm((criteria - np.array([0, 0])).T * vector) / norm_of_vector
         d2 = np.linalg.norm(criteria - (np.array([0, 0]) + d1 *(vector/np.linalg.norm(vector))))
         lmd = 3
 
