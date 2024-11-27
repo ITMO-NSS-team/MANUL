@@ -1,5 +1,6 @@
 from copy import deepcopy
 
+import matplotlib.pyplot as plt
 import numpy as np
 
 from evolution.IndividEvoOperators import IndividEvoOperators
@@ -88,6 +89,21 @@ class PopulationEvoOperators:
         mutated_individs = mutator.mutate()
         self.population.individs_pool.extend(mutated_individs)
 
+
+    def check_dominance(self):
+        pass
+
+    def filter_population_multicriteria(self, size_to_save):
+        for i, individ in enumerate(self.population.individs_pool):
+            criteria1 = individ.model_error
+            criteria2 = 1/individ.energy
+            plt.scatter(criteria1, criteria2)
+            plt.annotate(str(i), criteria1, criteria2)
+        plt.xlabel('model error')
+        plt.ylabel('1/energy')
+        plt.show()
+
+    __
 
     def filter_population(self, size_to_save):
         elite_inds = [ind.elitism for ind in self.population.individs_pool]
