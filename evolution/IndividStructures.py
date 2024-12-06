@@ -37,6 +37,7 @@ class DataStructureGraph:
         self.fitness = None
         self.energy = None
         self.model_error = None
+        self.pareto_best = False
 
         if cache_folder is None:
             self.cache_folder = f"cache/{datetime.now().strftime('%Y_%m_%d-%I_%M_%S_%p')}"

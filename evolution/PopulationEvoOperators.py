@@ -1,5 +1,7 @@
 from copy import deepcopy
-
+from itertools import combinations
+import collections
+from operator import itemgetter
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -57,7 +59,7 @@ class PopulationEvoOperators:
         selected_population = list(filter(lambda individ: individ.selected, self.population.individs_pool))
         if crossover_size_percent is None:
             crossover_size_percent = 0.5
-        crossover_size = int(len(selected_population)*crossover_size_percent)
+        crossover_size = int(len(selected_population) * crossover_size_percent)
         if crossover_size > len(selected_population) // 2:
             crossover_size = len(selected_population) // 2
 
@@ -81,7 +83,8 @@ class PopulationEvoOperators:
             mutation_prob = 0.3
         number_of_individs_to_mutate = int(len(selected_population) * mutation_prob)
 
-        selected_individs = np.random.choice(selected_population, replace=False, size=number_of_individs_to_mutate).tolist()
+        selected_individs = np.random.choice(selected_population, replace=False,
+                                             size=number_of_individs_to_mutate).tolist()
         # selected_individs = [deepcopy(ind) for ind in selected_individs]
 
         mutator = IndividEvoOperators(selected_individs, base_mutation, edges_mutation, edges_weight_mutation)
@@ -89,23 +92,66 @@ class PopulationEvoOperators:
         mutated_individs = mutator.mutate()
         self.population.individs_pool.extend(mutated_individs)
 
-
-    def check_dominance(self):
-        pass
-
-    def filter_population_multicriteria(self, size_to_save):
+    def filter_population_multicriteria(self, size_to_save, plot_pareto_selection=True):
+        individs_criterias = []
         for i, individ in enumerate(self.population.individs_pool):
             criteria1 = individ.model_error
-            criteria2 = 1/individ.energy
-            plt.scatter(criteria1, criteria2)
-            plt.annotate(str(i), criteria1, criteria2)
-        plt.xlabel('model error')
-        plt.ylabel('1/energy')
-        plt.show()
+            criteria2 = individ.energy
+            individs_criterias.append([criteria1, criteria2])
 
-    __
+        individs_numbers = np.arange(len(individs_criterias))
+        cands_to_del = []
+        ind_pairs = combinations(individs_numbers, 2)
+        for pair in ind_pairs:
+            candidate1 = individs_criterias[pair[0]]
+            candidate2 = individs_criterias[pair[1]]
+            comparison = np.array(candidate1) < np.array(candidate2)
+            if np.all(comparison):  # if candidate1 is better
+                cands_to_del.append(pair[1])
+            if not np.any(comparison):  # if candidate2 is better
+                cands_to_del.append(pair[0])
 
-    def filter_population(self, size_to_save):
+        val, freq = np.unique(cands_to_del, return_counts=True)
+        # find individs which are not dominated - best ones
+        best_inds = [i for i in individs_numbers if i not in val]
+        # find number of not best individs which is needed for population size save
+        num_not_best = size_to_save - len(best_inds)
+        not_best_inds = []
+        if num_not_best > 0:
+            not_best_dict = collections.OrderedDict(
+                sorted(dict(zip(val, freq)).items(), key=itemgetter(1), reverse=True))
+            not_best_inds = list(not_best_dict.keys())[-num_not_best:]
+
+        next_generation = []
+        for ind in best_inds:
+            self.population.individs_pool[ind].pareto_best = True
+            next_generation.append(self.population.individs_pool[ind])
+        for ind in not_best_inds:
+            next_generation.append(self.population.individs_pool[ind])
+
+        self.population.individs_pool = next_generation
+
+        if plot_pareto_selection:
+            # blue points for initial population
+            for i, point in enumerate(individs_criterias):
+                plt.scatter(point[0], point[1], c='b')
+                plt.annotate(str(i), (point[0], point[1]))
+
+            # red points for next generation selected individs
+            for i, individ in enumerate(self.population.individs_pool):
+                criteria1 = individ.model_error
+                criteria2 = individ.energy
+                if i < len(best_inds):
+                    color = 'r'
+                else:
+                    color = 'orange'
+                plt.scatter(criteria1, criteria2, c=color)
+
+            plt.xlabel('model error')
+            plt.ylabel('energy')
+            plt.show()
+
+    '''def filter_population(self, size_to_save):
         elite_inds = [ind.elitism for ind in self.population.individs_pool]
         elite_inds = [i for i, x in enumerate(elite_inds) if x]
         elite = [self.population.individs_pool[i] for i in elite_inds]
@@ -119,23 +165,10 @@ class PopulationEvoOperators:
 
         # crop population to fixed size
 
-        # test code - if individs are chosen by probability
-        '''fitnesses = [f.fitness for f in self.population.individs_pool]
-        fitnesses = (fitnesses - np.min(fitnesses)) / (np.max(fitnesses) - np.min(fitnesses))
-        posibs_to_live = fitnesses / np.sum(fitnesses)
-        alive_inds_indices = np.random.choice(len(fitnesses), size=size_to_save-len(elite), p=posibs_to_live, replace=False)
-        self.population.individs_pool = [self.population.individs_pool[i] for i in alive_inds_indices]'''
-
         self.population.individs_pool = [x for _, x in sorted(zip([fitnesses[i] for i in uniq_inds],
                                                                   self.population.individs_pool),
                                                               key=lambda pair: pair[0])][-size_to_save + len(elite):]
 
         # if unique individs less than population size extend with elite
         while len(self.population.individs_pool) <= size_to_save - len(elite):
-            self.population.individs_pool.extend(elite)
-
-
-
-
-
-
+            self.population.individs_pool.extend(elite)'''

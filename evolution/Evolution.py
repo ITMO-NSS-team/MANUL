@@ -1,3 +1,5 @@
+from copy import deepcopy
+
 import numpy as np
 import pickle
 from matplotlib import pyplot as plt
@@ -78,16 +80,37 @@ class Evolution:
         else:
             plt.show()
 
+    def plot_evolution_pareto_fronts(self, save_path: str = None):
+        generations_num = len(self.evolution_history.keys())
+        generations_colors = [np.random.rand(3, ) for _ in range(generations_num)]
+        for generation in range(generations_num):
+            generation_energy = [self.evolution_history[generation][g]['energy'] for g in
+                                 range(self.population_size) if self.evolution_history[generation][g]['pareto_best']]
+            generation_errors = [self.evolution_history[generation][g]['model_error'] for g in
+                                 range(self.population_size) if self.evolution_history[generation][g]['pareto_best']]
+            for i in range(len(generation_errors)):
+                plt.scatter(generation_errors[i], generation_energy[i], c=generations_colors[generation], alpha=0.3)
+                plt.annotate(f'gen: {generation}', (generation_errors[-1], generation_energy[-1]))
+        if save_path is not None:
+            plt.savefig(f'{save_path}')
+            plt.close()
+        else:
+            plt.show()
+
     def run(self):
         evolution_history = {}
-        best_individs_history = {}
         self.evaluate_fitness()
 
-        individ_parameters_dict = {}
-        for k, individ in enumerate(self.population.individs_pool):
-            individ_parameters_dict[k] = {'fitness': individ.fitness,
-                                          'basis': individ.basis}
-        evolution_history[0] = individ_parameters_dict
+        evolution_history[0] = []
+        for individ in self.population.individs_pool:
+            individ_parameters = {"adjacency_matrix": individ.adjacency_matrix,
+                                  "matrix_connect": individ.matrix_connect,
+                                  "basis": individ.basis,
+                                  "fitness": individ.fitness,
+                                  "energy": individ.energy,
+                                  "model_error": individ.model_error,
+                                  "pareto_best": individ.pareto_best}
+            evolution_history[0].append(individ_parameters)
 
         for i in range(self.iterations):
             print(f'Evolution run, iteration - {i}')
@@ -119,31 +142,36 @@ class Evolution:
             self.evaluate_fitness()
 
             print('Filter population')
-            pop_operators.filter_population(self.population_size)
+            #pop_operators.filter_population(self.population_size)
+            pop_operators.filter_population_multicriteria(self.population_size)
+
+            evolution_history[i + 1] = []
             for individ in self.population.individs_pool:
-                if individ.elitism: best_individs_history[i] = {"adjacency_matrix": individ.adjacency_matrix,
-                                                                "matrix_connect": individ.matrix_connect, 
-                                                                "basis": individ.basis,
-                                                                "fitness": individ.fitness,
-                                                                "trained_loss_values": individ.trained_loss_values}
+                individ_parameters = {"adjacency_matrix": individ.adjacency_matrix,
+                                      "matrix_connect": individ.matrix_connect,
+                                      "basis": individ.basis,
+                                      "fitness": individ.fitness,
+                                      "energy": individ.energy,
+                                      "model_error": individ.model_error,
+                                      "pareto_best": individ.pareto_best}
+                evolution_history[i + 1].append(individ_parameters)
                 individ.selected = False
                 individ.elitism = False
 
-            individ_parameters_dict = {}
-            for k, individ in enumerate(self.population.individs_pool):
-                individ_parameters_dict[k] = {'fitness': individ.fitness,
-                                              'basis': individ.basis}
-
-            evolution_history[i + 1] = individ_parameters_dict
         self.evolution_history = evolution_history
 
+
         # overwrite base_individ and base model to best individ
-        best_individ_index = [ind.fitness for ind in self.population.individs_pool].index(
+        #TODO overwrite best individ logic
+
+
+
+        '''best_individ_index = [ind.fitness for ind in self.population.individs_pool].index(
             max([ind.fitness for ind in self.population.individs_pool]))
         self.base_individ = self.population.individs_pool[best_individ_index]
         self.base_model = self.base_model.train(self.base_individ)
         self.base_individ.save_cache_object(name='final_graph')
-        self.save_history(best_individs_history, name='best_individs_by_iterations')
+        self.save_history(self.evolution_history, name='evolution_history')'''
 
     def save_history(self, history: dict, name: str = None):
         if name is None:
@@ -152,3 +180,37 @@ class Evolution:
         with open(f'{self.base_individ.cache_folder}/{name}.pkl', 'wb') as outp:
             pickle.dump(history, outp, pickle.HIGHEST_PROTOCOL)
             print(f'History evolution saved to {self.base_individ.cache_folder}/{name}.pkl')
+
+    @property
+    def pareto(self):
+        """
+        Property that return pareto front of best graph individs in last generation of evolution
+        by two criteria - model loss and energy
+        """
+        pareto_best = [ind for ind in self.population.individs_pool if ind.pareto_best]
+        return pareto_best
+
+    def plot_pareto(self, save_path=None):
+        """
+        Function to plot pareto front of best individs by two criteria - model loss and energy
+        """
+        individs_criterias = [[ind.model_error, ind.energy] for ind in self.pareto]
+        for i, point in enumerate(individs_criterias):
+            plt.scatter(point[0], point[1], c='r')
+            plt.annotate(str(i), (point[0], point[1]))
+        if save_path is not None:
+            plt.savefig(save_path)
+            plt.close()
+        else:
+            plt.show()
+
+    def pareto_models(self):
+        """
+        Function for training base model on pareto front individs
+        """
+        trained_models = []
+        for individ in self.pareto:
+            individ_model = deepcopy(self.base_model)
+            individ_model.train(individ)
+            trained_models.append(individ_model)
+        return trained_models

@@ -55,8 +55,8 @@ class Population:
                 fitness = 1 / fitness
                 individ.fitness = fitness
                 #individ.trained_loss_values = individ_model.trained_loss_values
-                individ.energy = individ_model.trained_loss_values['graph_loss'][-1]
-                individ.model_error = individ_model.trained_loss_values['model_loss'][-1]
+                individ.energy = individ_model.trained_loss_values['graph_loss']
+                individ.model_error = individ_model.trained_loss_values['model_loss']
         return self
     
     def load_individs_pool(self, path):

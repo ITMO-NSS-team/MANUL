@@ -1,64 +1,34 @@
-import ast
 import numpy as np
+import pandas as pd
 from matplotlib import pyplot as plt
+
 from evolution.Evolution import Evolution
 from evolution.IndividStructures import DataStructureGraph
 from regularizator.ModuleNN import ModelNN
 
 
-def form_dataset():
-    """
-    Load points and generate colors for mammoth dataset
-    :return: ndarray with points coordinates, ndarray with colors from 0 to 1
-    """
-    fl = open("../data/mammoth_3d.json ", "r")
-    data = fl.read()
-    data = np.array(ast.literal_eval(data))
-    colors = np.linspace(0, 0.9, len(data))
-    data = np.array(sorted(data, key=lambda parameters: parameters[1]))
-    new_data = []
-    new_colors = []
-    for i, dt in enumerate(data):
-        new_data.append(dt)
-        new_colors.append(colors[i])
-    data = []
-    colors = []
-    temp_data = []
-    temp_colors = []
-    for i, dat in enumerate(new_data):
-        if i % 2 != 0:
-            temp_data.append(dat)
-            temp_colors.append(new_colors[i])
-        else:
-            data.append(dat)
-            colors.append(new_colors[i])
-    colors.extend(temp_colors)
-    data.extend(temp_data)
-    return np.array(data), np.array(colors)
-
-
-def split_dataset(data, split_ratio=0.8):
-    split_ratio = int(data.shape[0] * split_ratio)
-    train = data[:split_ratio]
-    test = data[split_ratio:]
-    return train, test
-
+def get_data():
+    train = pd.read_csv('data/circle_curve_train.csv')
+    train_features = train[['x', 'y']]
+    train_target = train['color']
+    test = pd.read_csv('data/circle_curve_test.csv')
+    test_features = test[['x', 'y']]
+    test_target = test['color']
+    return (np.array(train_features),
+            np.array(train_target),
+            np.array(test_features),
+            np.array(test_target))
 
 def run_example():
     iters = 100
-    folder = f'mammoth_pareto(colors)_{iters}'
-    feature, target = form_dataset()
-    train_features, test_features = split_dataset(feature)
-    train_target, test_target = split_dataset(target)
-
+    folder = f'circle_curve_nomut_{iters}'
+    train_features, train_target, test_features, test_target = get_data()
     base_individ = DataStructureGraph(data=train_features,
                                       cache_folder=folder,
                                       n_neighbors=10,
                                       epsilon_neighborhood=0.18)
 
     base_individ.show_2d(save_path=f'{folder}/initial_graph.png', labels=train_target)
-
-    # raw model without graph
     base_model = ModelNN(train_features, train_target,
                          num_epochs=50,
                          batch_size=300,
@@ -89,14 +59,14 @@ def run_example():
                               model_to_optimize=with_evolution_model,
                               base_mutation=True,
                               edges_mutation=True,
-                              edges_weight_mutation=True)
+                              edges_weight_mutation=False)
         evolution.run()
         evolution.plot_evolution_pareto_fronts()
         evolution.plot_pareto(f'{folder}/evolution_res_pareto.png')
         result_graphs = evolution.pareto
 
         for g, graph in enumerate(result_graphs):
-            graph.show_2d(save_path=f'{folder}/pareto_{g}.png')
+            graph.show_2d(save_path=f'{folder}/pareto_{g}.png', labels=train_target)
 
         result_models = evolution.pareto_models()
         for m, model in enumerate(result_models):
