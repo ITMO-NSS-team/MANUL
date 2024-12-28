@@ -13,6 +13,7 @@ from datetime import datetime
 
 import topo as tp
 from sklearn.decomposition import PCA
+from sklearn.manifold import Isomap
 from sklearn.metrics.pairwise import euclidean_distances
 import plotly.graph_objects as go
 import plotly
@@ -23,7 +24,9 @@ class DataStructureGraph:
                  n_neighbors: int = None,
                  epsilon_neighborhood: float = None,
                  graph_file: str = None,
-                 cache_folder: str = None):
+                 cache_folder: str = None,
+                 data_labels: [Optional, np.ndarray] = None,
+                 fully_connected: [Optional, bool] = False):
         """
         Class for initialization individ  for evolution as complex graph structure with graph properties
         :param data: features table for graph structure creation
@@ -32,9 +35,13 @@ class DataStructureGraph:
         :param graph_file: str - path to file .pkl with DataStructureGraph object
         :param cache_folder: str - path to save cache
         """
+        self.isomap = None
         self.elitism = False
         self.selected = False
         self.fitness = None
+        self.energy = None
+        self.model_error = None
+        self.pareto_best = False
 
         if cache_folder is None:
             self.cache_folder = f"cache/{datetime.now().strftime('%Y_%m_%d-%I_%M_%S_%p')}"
@@ -47,16 +54,23 @@ class DataStructureGraph:
         if graph_file is not None:
             self.load_cache_object(graph_file)
 
+        if graph_file is None and data_labels is not None:
+            self.source_labels = data_labels
+
         if graph_file is None and data is not None:
             self.source_data = data.astype(float)
-            self.create_graph(data, n_neighbors, epsilon_neighborhood)
+            self.pr_source_data = self.source_data
+            if fully_connected:
+                self.create_fully_connected_graph(data)
+            else:
+                self.create_graph(data, n_neighbors, epsilon_neighborhood)
             self.save_cache_object('base_graph')
 
     def save_cache_object(self, name: str = None, fields: list = None):
         """
         Function to save  self object as pickle file
         :param name: string with name without .pkl to save in cache folder
-        :param fields: list with names of selective fields for saving 
+        :param fields: list with names of selective fields for saving
         """
         if name is None:
             name = 'graph_obj'
@@ -65,12 +79,12 @@ class DataStructureGraph:
         if fields is not None:
             for field in fields:
                 if field not in self.__dict__:
-                    print(f"The field {field} isn't exist in DataSrtucutre object")
+                    print(f"The field {field} isn't exist in DataStrucutre object")
                     continue
                 save_dict[field] = self.__dict__[field]
         else:
             save_dict = self.__dict__
-        
+
         with open(f'{self.cache_folder}/{name}.pkl', 'wb') as outp:
             pickle.dump(save_dict, outp, pickle.HIGHEST_PROTOCOL)
             print(f'Graph object saved to {self.cache_folder}/{name}.pkl')
@@ -95,7 +109,7 @@ class DataStructureGraph:
 
     def loss_function(self, f_x: np.ndarray, indices=None):
         """
-        Function for calculation graph loss with f(x) values
+        Function for calculation graph loss with f(x) values - Dirichlet energy
         :param f_x: np.ndarray - values of f(x) function for loss calculation
         :param indices: list with batch indices
         :return: float - value of loss function
@@ -115,6 +129,19 @@ class DataStructureGraph:
         part_1 = np.dot(f_x.T, laplacian)
         loss = np.dot(part_1, f_x)
         return loss.reshape(-1)[0]
+
+    def create_fully_connected_graph(self, nodes_data: np.ndarray):
+        """
+        Method to create fully connected graph from table data
+        """
+        print('Calculate Euclidean distances')
+        euclid_dists = euclidean_distances(nodes_data, nodes_data)
+        self.matrix_connect = euclid_dists / np.max(euclid_dists)
+        # for small graphs fully connected adj matrix
+        self.adjacency_matrix = np.ones(euclid_dists.shape)
+        np.fill_diagonal(self.adjacency_matrix, 0)
+        self.basis = np.arange(euclid_dists.shape[0]).astype(int)
+
 
     def create_graph(self, nodes_data: np.ndarray,
                      n_neighbors: int = None,
@@ -280,6 +307,44 @@ class DataStructureGraph:
         self.adjacency_matrix[node][new_edges] = 1
         self.adjacency_matrix[new_edges, node] = 1
 
+    def isomap_self_projection(self, n_neighbors: int = 10):
+        """
+        Function for recalculation features (points coordinates) for correctness with distances matrix
+        :param n_neighbors: optional int with n_neighbors for Isomap algorithm
+        """
+        new_distances = self.matrix_connect  # matrix of new distances between features
+        base_points = self.source_data[self.basis]
+        n_components = self.source_data.shape[-1]  # dimensionality of projection space
+        isomap = Isomap(n_neighbors=n_neighbors, n_components=n_components, metric="precomputed")
+        _ = isomap.fit_transform(new_distances)
+        dist_base_to_features = np.zeros((self.source_data.shape[0], base_points.shape[0]))  # Create an empty matrix for test-to-train distances
+        for i, feature_s in enumerate(self.source_data):
+            dist_base_to_features[i, :] = np.linalg.norm(base_points - feature_s, axis=1)
+        features_embedding = isomap.transform(dist_base_to_features)
+        self.pr_source_data = features_embedding
+        self.isomap = isomap
+
+        '''plt.scatter(features_embedding[:, 1], features_embedding[:, 0], s=0.5)
+        plt.title('Features coordinates after isomap on base')
+        plt.show()
+
+        plt.scatter(self.source_data[:, 1], self.source_data[:, 0], s=0.5)
+        plt.title('Features coordinates before isomap on base')
+        plt.show()'''
+
+    def isomap_data_projection(self, features: np.ndarray, n_neighbors: int = 10):
+        """
+        Function for reproject new data with transformation, learned on raw features
+        """
+        base_points = self.source_data[self.basis]
+        if self.isomap is None:
+            self.isomap_self_projection(n_neighbors)
+        dist_data_to_source_features = np.zeros((features.shape[0], base_points.shape[0]))
+        for i, feature_s in enumerate(features):
+            dist_data_to_source_features[i, :] = np.linalg.norm(base_points - feature_s, axis=1)
+        features_embedding = self.isomap.transform(dist_data_to_source_features)
+        return features_embedding
+
     @property
     def laplacian(self):
         """
@@ -319,7 +384,8 @@ class DataStructureGraph:
         :param cmap_name: string with Matplotlib colormap name
         :param euclidean: use adjacency_matrix for graph generation or euq
         """
-        nodes_coordinates = self.source_data[self.basis]
+        title = f'Energy = {self.energy}, model loss = {self.model_error}'
+        nodes_coordinates = self.pr_source_data[self.basis]
         if nodes_coordinates.shape[1] > 2:
             pca = PCA(n_components=2)
             pca.fit(nodes_coordinates)
@@ -333,6 +399,12 @@ class DataStructureGraph:
             g = nx.Graph(weights_matrix)
         if labels is not None:
             nodes_labels = labels[self.basis]
+            colors = nodes_labels
+            sm = plt.cm.ScalarMappable(cmap=cmap_name, norm=plt.Normalize(vmin=min(colors), vmax=max(colors)))
+            c = plt.colorbar(sm, ax=ax)
+            c.set_label('Target values')
+        elif self.source_labels is not None:
+            nodes_labels = self.source_labels[self.basis]
             colors = nodes_labels
             sm = plt.cm.ScalarMappable(cmap=cmap_name, norm=plt.Normalize(vmin=min(colors), vmax=max(colors)))
             c = plt.colorbar(sm, ax=ax)

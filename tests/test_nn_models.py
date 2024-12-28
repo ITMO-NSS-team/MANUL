@@ -173,7 +173,7 @@ def test_model_with_evol():
     
     assert id(evolution.base_model) == id(model)
     evolution.run()
-    assert np.all(model.features == train_features) and  np.all(model.features == evolution.base_individ.source_data)
+    assert np.all(model.features == train_features) and  np.all(model.features == evolution.base_individ.pr_source_data)
 
 
 def test_check_stop_criteria():

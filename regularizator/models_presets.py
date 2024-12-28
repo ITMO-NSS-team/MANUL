@@ -1,6 +1,6 @@
 import torch.nn as nn
 from sklearn.metrics import mean_squared_error, roc_auc_score, f1_score
-from torch import float64 as fl64
+from torch import float64
 
 
 def nn_presets(problem: str, input_dim: int):
@@ -10,35 +10,40 @@ def nn_presets(problem: str, input_dim: int):
     :param input_dim: input features dimensions num
     :return: model as nn.Sequential
     """
-    presets_dict = {'regres': [nn.Linear(input_dim, 512, dtype=fl64),
-                               nn.ReLU(),
-                               nn.Linear(512, 256, dtype=fl64),
-                               nn.ReLU(),
-                               nn.Linear(256, 256, dtype=fl64),
-                               nn.ReLU(),
-                               nn.Linear(256, 64, dtype=fl64),
-                               nn.ReLU(),
-                               nn.Linear(64, 1, dtype=fl64)],
-                    'binary_class': [nn.Linear(input_dim, 512, dtype=fl64),
-                                     nn.ReLU(),
-                                     nn.Linear(512, 256, dtype=fl64),
-                                     nn.ReLU(),
-                                     nn.Linear(256, 256, dtype=fl64),
-                                     nn.ReLU(),
-                                     nn.Linear(256, 64, dtype=fl64),
-                                     nn.ReLU(),
-                                     nn.Linear(64, 1, dtype=fl64),
+    presets_dict = {'regres': [nn.Linear(input_dim, 512, dtype=float64),
+                               #nn.ReLU(),
+                               nn.Linear(512, 256, dtype=float64),
+                               #nn.ReLU(),
+                               nn.Linear(256, 64, dtype=float64),
+                               #nn.ReLU(),
+                               nn.Linear(64, 1, dtype=float64)],
+
+                    'binary_class': [nn.Linear(input_dim, 512, dtype=float64),
+                                     nn.Linear(512, 256, dtype=float64),
+                                     nn.Linear(256, 64, dtype=float64),
+                                     nn.Linear(64, 1, dtype=float64),
                                      nn.Sigmoid()],
-                    'multiclass': [nn.Linear(input_dim, 512, dtype=fl64),
+                    'multiclass': [nn.Linear(input_dim, 512, dtype=float64),
                                    nn.ReLU(),
-                                   nn.Linear(512, 128, dtype=fl64),
+                                   nn.Linear(512, 128, dtype=float64),
                                    nn.ReLU(),
                                    nn.Dropout(p=0.25),
-                                   nn.Linear(128, 10, dtype=fl64),
+                                   nn.Linear(128, 10, dtype=float64),
                                    nn.Softmax(dim=1)]}
     seq = presets_dict[problem]
     model = nn.Sequential(*seq)
     return model
+
+''''binary_class': [nn.Linear(input_dim, 512, dtype=float64),
+                                     nn.ReLU(),
+                                     nn.Linear(512, 256, dtype=float64),
+                                     nn.ReLU(),
+                                     nn.Linear(256, 256, dtype=float64),
+                                     nn.ReLU(),
+                                     nn.Linear(256, 64, dtype=float64),
+                                     nn.ReLU(),
+                                     nn.Linear(64, 1, dtype=float64),
+                                     nn.Sigmoid()],'''
 
 
 def criterion_presets(problem: str):

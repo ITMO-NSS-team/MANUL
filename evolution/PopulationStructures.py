@@ -51,10 +51,11 @@ class Population:
             if individ.fitness is None:
                 individ_model = deepcopy(base_model)
                 individ_model.train(individ)
-                fitness = individ_model.trained_loss_values['combined_loss']
-                fitness = 1 / fitness
+                loss = individ_model.trained_loss_values['combined_loss']
+                fitness = 1 / loss
                 individ.fitness = fitness
-                individ.trained_loss_values = individ_model.trained_loss_values
+                individ.energy = individ_model.trained_loss_values['graph_loss']
+                individ.model_error = individ_model.trained_loss_values['model_loss']
         return self
     
     def load_individs_pool(self, path):

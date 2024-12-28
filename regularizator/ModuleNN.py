@@ -1,6 +1,8 @@
 import os
 from datetime import datetime
-from typing import Callable
+from typing import Callable, Optional
+
+from sklearn.manifold import Isomap
 from tqdm import tqdm
 
 import numpy as np
@@ -227,7 +229,7 @@ class ModelNN:
         if np.isnan(lam_nn) or np.isnan(lam_graph):
             print(f'Lambda search failed: nn_disp={lam_nn}, graph_disp={lam_graph}')
             return [1, 1]
-        
+
         return [lam_nn / (np.nanmax([lam_nn, lam_graph])), lam_graph / (np.nanmax([lam_nn, lam_graph]))]
 
     def preprocess_target(self, nn_output, target_y: np.ndarray):
@@ -247,7 +249,7 @@ class ModelNN:
               plot_convergence=False,
               lmds: list[float, float] = None,
               weight_loss: bool = False,
-              adaptive_lambda: bool = True,
+              adaptive_lambda: bool = False,
               num_epochs: int = None):
         """
         :param num_epochs: number of epochs for model training
@@ -261,7 +263,8 @@ class ModelNN:
             self.num_epochs = num_epochs
 
         if lmds is None:
-            lmds = [1, 1]
+            lmds = [1, 0]
+            #print(f'NN loss coefficient = {lmds[0]}, graph loss coefficient = {lmds[1]}')
 
         self.model.train()
 
@@ -276,15 +279,19 @@ class ModelNN:
         progress_bar = tqdm(list(np.arange(self.num_epochs)), desc="Epoch", colour="white")
         info_bar = {"Loss": 0}
 
+        features = self.features
+        if graph is not None:
+            features = graph.pr_source_data
+
         while epoch < self.num_epochs and no_changes_epoch <= self.stop_criteria_count:
-            permutation = randperm(self.features.shape[0])
+            permutation = randperm(features.shape[0])
             loss_list = np.array([])
             graph_loss_list = np.array([])
             nn_loss_list = np.array([])
 
             for i in range(0, len(self.target), self.batch_size):
                 indices = permutation[i:i + self.batch_size]
-                batch_x, target_y = self.features[indices], self.target[indices]
+                batch_x, target_y = features[indices], self.target[indices]
                 batch_x = torch.Tensor(batch_x).to(fl64).to(self.device)
 
                 self.optimizer.zero_grad()
@@ -322,7 +329,7 @@ class ModelNN:
             loss_epoch_mean = np.mean(loss_list)
             info_bar['Loss'] = np.round(loss_epoch_mean, 5)
             progress_bar.update()
-            progress_bar.set_postfix_str(info_bar)
+            progress_bar.set_postfix_str(str(info_bar))
 
             losses.append(np.round(loss_epoch_mean, 5))
             graph_losses.append(np.round(np.mean(graph_loss_list), 5))
