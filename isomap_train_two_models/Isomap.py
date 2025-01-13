@@ -3,6 +3,57 @@ from torch import nn
 
 device = 'cuda'
 
+class FloydWarshall(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, graph):
+        """
+        Forward pass for Floyd-Warshall algorithm.
+        """
+        n_samples = graph.size(0)
+        dist = graph.clone()
+
+        # Run Floyd-Warshall algorithm
+        for k in range(n_samples):
+            dist = torch.min(dist, dist[:, k:k+1] + dist[k:k+1, :])
+
+        # Save necessary tensors for the backward pass
+        #ctx.save_for_backward(graph, dist)
+
+        # Save only the final result and the input for the backward pass
+        ctx.graph = graph  # Save input graph
+        ctx.n_samples = n_samples
+        ctx.dist = dist  # Save final distances
+
+
+        return dist
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        """
+        Backward pass to compute gradients efficiently.
+        """
+        # graph, dist = ctx.saved_tensors
+        # n_samples = graph.size(0)
+
+        graph = ctx.graph
+        dist = ctx.dist
+        n_samples = ctx.n_samples
+
+        # Initialize gradient w.r.t. the input graph
+        grad_input = torch.zeros_like(graph)
+
+        # Compute gradients by propagating through the relaxation steps
+        for k in reversed(range(n_samples)):
+            grad_update = grad_output < (dist[:, k:k+1] + dist[k:k+1, :])
+            grad_input += grad_update.float() * grad_output
+
+            # Clear unnecessary tensors explicitly (simulate cleanup)
+            del grad_update  # Clean up per iteration to save memory
+        return grad_input
+
+
+
+
 class IsomapNN(nn.Module):
     def __init__(self, weights_initial_assumption: torch.tensor,
                  n_components: int = 2,
@@ -28,13 +79,32 @@ class IsomapNN(nn.Module):
         values = upper_diag[params_inds[:, 0], params_inds[:, 1]]
         self.layer = torch.nn.Parameter(values)
 
-    def _compute_shortest_paths(self, graph):
+    def _compute_shortest_paths_simple(self, graph):
         """Compute shortest paths using Floyd-Warshall algorithm."""
         n_samples = graph.size(0)
         dist = graph.clone()
         for k in range(n_samples):
             dist = torch.minimum(dist, dist[:, k:k+1] + dist[k:k+1, :])
         return dist
+
+
+
+    def _compute_shortest_paths_optimized(self, graph):
+        """
+        Wrapper for memory-efficient shortest path computation.
+        """
+        return FloydWarshall.apply(graph)
+
+    def _compute_shortest_paths(self, graph, optimized=False):
+        """Compute shortest paths using Floyd-Warshall algorithm."""
+        if optimized:
+            return FloydWarshall.apply(graph)
+        else:
+            n_samples = graph.size(0)
+            dist = graph.clone()
+            for k in range(n_samples):
+                dist = torch.minimum(dist, dist[:, k:k+1] + dist[k:k+1, :])
+            return dist
 
 
     def _construct_graph(self, distance_matrix):
