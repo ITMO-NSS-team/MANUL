@@ -349,7 +349,7 @@ class ModelNN:
                 graph_losses = None
                 nn_losses = None
             self._plot_convergence(losses, lmds_epochs, nn_losses, graph_losses)
-
+        self._train_loss = loss
     def _plot_convergence(self, losses, lmds_epoch, nn_losses=None, graph_losses=None):
         """
         Function to plot model convergence on losses lists

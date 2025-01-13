@@ -4,28 +4,41 @@ from datetime import datetime
 import numpy as np
 import torch
 from matplotlib import pyplot as plt
-from sklearn.datasets import make_circles
+from torch.nn.utils import parameters_to_vector
 from sklearn.metrics import pairwise_distances
 from sklearn.model_selection import train_test_split
 from torch import float32, nn, optim, float64
 from torch.utils.data import TensorDataset, DataLoader
 
 from isomap_pytorch.Isomap import IsomapNN
+from isomap_pytorch.NNCG import NysNewtonCG
 from regularizator.ModuleNN import ModelNN
 
 device = 'cuda'
+
+
 def to_polar(X):
     r = X[:, 0] ** 2 + X[:, 1] ** 2
     phi = torch.arctan(X[:, 1] / X[:, 0])
     polar = torch.stack((r, phi), axis=1)
     return polar
 
-def generate_dataset():
-    np.random.seed()
-    # Step 1: Generate the dataset
-    X, y = make_circles(n_samples=1000, factor=0.5, noise=0.1)
 
-    # Split the data into training and testing sets
+def generate_dataset():
+    n_samples = 1000
+    xs = np.random.uniform(low=-1, high=1, size=n_samples)
+    ys = np.random.uniform(low=-1, high=1, size=n_samples)
+    points = np.vstack((xs, ys)).T
+
+    colors = np.array([(abs(point[0]) + abs(point[1])) / 2 for point in points])
+
+    '''plt.scatter(points[:, 1], points[:, 0], c=colors)
+    plt.colorbar()
+    plt.show()'''
+
+    X = points
+    y = colors
+
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
     X_train, X_validation, y_train, y_validation = train_test_split(X_train, y_train, test_size=0.25)
     return X_train, X_test, X_validation, y_train, y_test, y_validation
@@ -42,17 +55,17 @@ dist_train = torch.tensor(pairwise_distances(train_features, train_features), dt
 isomap_model = IsomapNN(dist_train)
 
 isomap_model.to(device)
-isomap_criterion = nn.BCELoss()
+isomap_criterion = nn.L1Loss()
 lr = 0.01
-isomap_optimizer = optim.AdamW(isomap_model.parameters(), lr=lr)
+isomap_optimizer = NysNewtonCG(isomap_model.parameters(), lr=lr)
 
-working_folder = datetime.now().strftime('isomap_train_%Y%m%d_%H.%M')
+working_folder = datetime.now().strftime('nncg_regres_isomap_train_%Y%m%d_%H.%M')
 if not os.path.exists(working_folder):
     os.makedirs(working_folder)
 working_folder = f'{os.getcwd()}/{working_folder}'
 
 epochs = 1000
-save_each = 250
+save_each = 500
 losses = []
 
 best_lost = np.inf
@@ -60,6 +73,7 @@ best_isomap_model = None
 
 for epoch in range(epochs):
     epoch_losses = []
+
     for features, target in train_loader:
         target = target.to(device)
 
@@ -67,39 +81,28 @@ for epoch in range(epochs):
 
         task_model = ModelNN(train_feature=peproj_features.cpu().detach().numpy(),
                              train_target=target,
-                             problem='binary_class',
+                             problem='regres',
                              num_epochs=300,
                              stop_criteria_count=100)
         task_model.train()
 
-        output = task_model.model(peproj_features)
-        loss = isomap_criterion(output.to(torch.float32), target.reshape_as(output).to(torch.float32))
-        epoch_losses.append(loss.item())
+        def closure_nncg():
+            #output = task_model.model(peproj_features)
+            task_model_loss = task_model._train_loss
 
-        if loss > 0.15:
-            for g in isomap_optimizer.param_groups:
-                g['lr'] = 0.01
-                lr = 0.01
-        if  0.15 >= loss >= 0.01:
-            for g in isomap_optimizer.param_groups:
-                g['lr'] = 0.001
-                lr = 0.001
-        if loss <= 0.01:
-            for g in isomap_optimizer.param_groups:
-                g['lr'] = 0.0001
-                lr = 0.0001
+            grads = torch.autograd.grad(task_model_loss, isomap_model.layer, create_graph=True)
+            grads = parameters_to_vector(grads)
+            grads = torch.where(grads != grads, torch.zeros_like(grads), grads)
 
-        loss.backward()
+            return task_model_loss, grads
 
-        isomap_optimizer.step()
 
-        '''output = task_model.model(peproj_features)
-        #negative_weights_sum = abs((isomap_model.layer < 0).sum())
-        #loss = isomap_criterion(output.to(torch.float32), target.reshape_as(output).to(torch.float32)) + negative_weights_sum
-        loss = isomap_criterion(output.to(torch.float32), target.reshape_as(output).to(torch.float32))
-        epoch_losses.append(loss.item())
-        loss.backward()
-        isomap_optimizer.step()'''
+        if epoch % 10 == 0:
+            task_model_loss, grads = closure_nncg()
+            isomap_optimizer.update_preconditioner(grads)
+
+        isomap_optimizer.step(closure_nncg)
+
 
     losses.append(np.mean(epoch_losses))
     print(f'epoch {epoch}/{epochs}, lr={lr},  loss={losses[-1]}')
@@ -119,7 +122,6 @@ for epoch in range(epochs):
         plt.savefig(f'{working_folder}/isomap_model_convergence.png')
         plt.show()
 
-
 torch.save(best_isomap_model.state_dict(), f'{working_folder}/isomap_model.pt')
 
 plt.plot(np.arange(len(losses)), losses, label='Train')
@@ -133,16 +135,15 @@ plt.tight_layout()
 plt.savefig(f'{working_folder}/isomap_model_convergence.png')
 plt.show()
 
-
 train_proj_points = best_isomap_model.predict(dist_train)
 test_dist = torch.tensor(pairwise_distances(test_features, train_features))
 test_proj_points = best_isomap_model.predict(test_dist)
 
 task_model = ModelNN(train_feature=train_proj_points.cpu().detach().numpy(),
-                             train_target=train_target,
-                             problem='binary_class',
-                             num_epochs=300,
-                             stop_criteria_count=100)
+                     train_target=train_target,
+                     problem='regres',
+                     num_epochs=300,
+                     stop_criteria_count=100)
 task_model.train()
 train_acc = task_model.get_metric_on_train()
 test_acc = task_model.get_metric_on_test(test_proj_points.cpu().detach().numpy(), test_target)
@@ -150,10 +151,8 @@ test_acc = task_model.get_metric_on_test(test_proj_points.cpu().detach().numpy()
 train_output = task_model.model(train_proj_points.to(float64)).cpu().detach().numpy()
 output = task_model.model(test_proj_points.to(float64)).cpu().detach().numpy()
 
-
 test_proj_points = test_proj_points.cpu().detach().numpy()
 train_proj_points = train_proj_points.cpu().detach().numpy()
-
 
 fig, axs = plt.subplots(3, 2, figsize=(10, 10))
 axs[0, 0].scatter(test_proj_points[:, 1], test_proj_points[:, 0], c=test_target)
@@ -170,16 +169,17 @@ axs[2, 0].set_title('Euclidean train classes')
 axs[2, 1].scatter(train_proj_points[:, 1], train_proj_points[:, 0], c=train_output)
 axs[2, 1].set_title('Reprojected train classes')
 
-fig.suptitle(f'NN transformed: Train ROC AUC={train_acc}, Test ROC AUC={test_acc}')
+fig.suptitle(f'NN transformed: Train MSE={train_acc}, Test MSE={test_acc}')
 plt.tight_layout()
 plt.savefig(f'{working_folder}/best_graph_prediction.png')
 plt.show()
 
+
 def to_polar(X):
-  r=X[:,0]**2+X[:,1]**2
-  phi=torch.arctan(X[:,1]/X[:,0])
-  polar=torch.stack((r,phi),axis=1)
-  return polar
+    r = X[:, 0] ** 2 + X[:, 1] ** 2
+    phi = torch.arctan(X[:, 1] / X[:, 0])
+    polar = torch.stack((r, phi), axis=1)
+    return polar
 
 
 x = np.linspace(-1, 1, 10)
@@ -204,4 +204,3 @@ plt.scatter(proj_grid_features[:, 1], proj_grid_features[:, 0])
 plt.title('Grid in transformed coordinates')
 plt.savefig(f'{working_folder}/grid_with_isomap.png')
 plt.show()
-

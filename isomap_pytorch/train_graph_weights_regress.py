@@ -21,11 +21,20 @@ def to_polar(X):
     return polar
 
 def generate_dataset():
-    np.random.seed()
-    # Step 1: Generate the dataset
-    X, y = make_circles(n_samples=1000, factor=0.5, noise=0.1)
+    n_samples = 1000
+    xs = np.random.uniform(low=-1, high=1, size=n_samples)
+    ys = np.random.uniform(low=-1, high=1, size=n_samples)
+    points = np.vstack((xs, ys)).T
 
-    # Split the data into training and testing sets
+    colors = np.array([(abs(point[0])+abs(point[1]))/2 for point in points])
+
+    '''plt.scatter(points[:, 1], points[:, 0], c=colors)
+    plt.colorbar()
+    plt.show()'''
+
+    X=points
+    y=colors
+
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
     X_train, X_validation, y_train, y_validation = train_test_split(X_train, y_train, test_size=0.25)
     return X_train, X_test, X_validation, y_train, y_test, y_validation
@@ -42,17 +51,17 @@ dist_train = torch.tensor(pairwise_distances(train_features, train_features), dt
 isomap_model = IsomapNN(dist_train)
 
 isomap_model.to(device)
-isomap_criterion = nn.BCELoss()
+isomap_criterion = nn.L1Loss()
 lr = 0.01
 isomap_optimizer = optim.AdamW(isomap_model.parameters(), lr=lr)
 
-working_folder = datetime.now().strftime('isomap_train_%Y%m%d_%H.%M')
+working_folder = datetime.now().strftime('regres_isomap_train_%Y%m%d_%H.%M')
 if not os.path.exists(working_folder):
     os.makedirs(working_folder)
 working_folder = f'{os.getcwd()}/{working_folder}'
 
-epochs = 1000
-save_each = 250
+epochs = 5000
+save_each = 500
 losses = []
 
 best_lost = np.inf
@@ -67,24 +76,24 @@ for epoch in range(epochs):
 
         task_model = ModelNN(train_feature=peproj_features.cpu().detach().numpy(),
                              train_target=target,
-                             problem='binary_class',
+                             problem='regres',
                              num_epochs=300,
                              stop_criteria_count=100)
-        task_model.train()
+        task_model.train(plot_convergence=True)
 
         output = task_model.model(peproj_features)
         loss = isomap_criterion(output.to(torch.float32), target.reshape_as(output).to(torch.float32))
         epoch_losses.append(loss.item())
 
-        if loss > 0.15:
+        if loss > 0.12:
             for g in isomap_optimizer.param_groups:
                 g['lr'] = 0.01
                 lr = 0.01
-        if  0.15 >= loss >= 0.01:
+        if 0.12 >= loss >= 0.05:
             for g in isomap_optimizer.param_groups:
                 g['lr'] = 0.001
                 lr = 0.001
-        if loss <= 0.01:
+        if loss <= 0.05:
             for g in isomap_optimizer.param_groups:
                 g['lr'] = 0.0001
                 lr = 0.0001
@@ -140,7 +149,7 @@ test_proj_points = best_isomap_model.predict(test_dist)
 
 task_model = ModelNN(train_feature=train_proj_points.cpu().detach().numpy(),
                              train_target=train_target,
-                             problem='binary_class',
+                             problem='regres',
                              num_epochs=300,
                              stop_criteria_count=100)
 task_model.train()
@@ -170,7 +179,7 @@ axs[2, 0].set_title('Euclidean train classes')
 axs[2, 1].scatter(train_proj_points[:, 1], train_proj_points[:, 0], c=train_output)
 axs[2, 1].set_title('Reprojected train classes')
 
-fig.suptitle(f'NN transformed: Train ROC AUC={train_acc}, Test ROC AUC={test_acc}')
+fig.suptitle(f'NN transformed: Train MSE={train_acc}, Test MSE={test_acc}')
 plt.tight_layout()
 plt.savefig(f'{working_folder}/best_graph_prediction.png')
 plt.show()
