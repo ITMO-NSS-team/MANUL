@@ -95,7 +95,7 @@ class IsomapNN(nn.Module):
         """
         return FloydWarshall.apply(graph)
 
-    def _compute_shortest_paths(self, graph, optimized=False):
+    def _compute_shortest_paths(self, graph, optimized=True):
         """Compute shortest paths using Floyd-Warshall algorithm."""
         if optimized:
             return FloydWarshall.apply(graph)
