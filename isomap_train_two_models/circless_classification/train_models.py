@@ -10,6 +10,8 @@ from sklearn.model_selection import train_test_split
 from torch import float32, nn, optim, float64
 from torch.utils.data import TensorDataset, DataLoader
 
+
+
 from isomap_train_two_models.Isomap import IsomapNN
 
 device = 'cuda'
@@ -62,7 +64,7 @@ model_seq = [nn.Linear(train_features.size(1), 512, dtype=float32),
                                  nn.Linear(64, 1, dtype=float32),
                                  nn.Sigmoid()]
 
-dist_train = torch.tensor(pairwise_distances(train_features, train_features), dtype=float32)
+dist_train = torch.tensor(pairwise_distances(train_features, train_features), dtype=float32).to(device)
 test_dist = torch.tensor(pairwise_distances(test_features, train_features.cpu().detach().numpy()), dtype=float32).to(device)
 
 isomap_model = IsomapNN(dist_train)

@@ -17,14 +17,7 @@ class FloydWarshall(torch.autograd.Function):
             dist = torch.min(dist, dist[:, k:k+1] + dist[k:k+1, :])
 
         # Save necessary tensors for the backward pass
-        #ctx.save_for_backward(graph, dist)
-
-        # Save only the final result and the input for the backward pass
-        ctx.graph = graph  # Save input graph
-        ctx.n_samples = n_samples
-        ctx.dist = dist  # Save final distances
-
-
+        ctx.save_for_backward(graph, dist)
         return dist
 
     @staticmethod
@@ -32,23 +25,16 @@ class FloydWarshall(torch.autograd.Function):
         """
         Backward pass to compute gradients efficiently.
         """
-        # graph, dist = ctx.saved_tensors
-        # n_samples = graph.size(0)
-
-        graph = ctx.graph
-        dist = ctx.dist
-        n_samples = ctx.n_samples
+        graph, dist = ctx.saved_tensors
+        n_samples = graph.size(0)
 
         # Initialize gradient w.r.t. the input graph
         grad_input = torch.zeros_like(graph)
 
         # Compute gradients by propagating through the relaxation steps
         for k in reversed(range(n_samples)):
-            grad_update = grad_output < (dist[:, k:k+1] + dist[k:k+1, :])
-            grad_input += grad_update.float() * grad_output
+            grad_input += (grad_output < (dist[:, k:k+1] + dist[k:k+1, :])).float() * grad_output
 
-            # Clear unnecessary tensors explicitly (simulate cleanup)
-            del grad_update  # Clean up per iteration to save memory
         return grad_input
 
 
