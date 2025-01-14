@@ -37,7 +37,52 @@ class FloydWarshall(torch.autograd.Function):
 
         return grad_input
 
+class TestPointShortestPaths(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, test_distances, dist_matrix, n_neighbors):
+        """
+        Forward pass to compute shortest paths for test points to training points.
+        """
+        n_test, n_train = test_distances.size()
+        device = test_distances.device
+        G_X = torch.full((n_test, n_train), float('inf'), dtype=test_distances.dtype, device=device)
 
+        # Store necessary variables for backward pass
+        ctx.save_for_backward(test_distances, dist_matrix)
+        ctx.n_neighbors = n_neighbors
+
+        # Compute shortest paths
+        for i in range(n_test):
+            distances = test_distances[i]
+            neighbors = torch.topk(distances, n_neighbors, largest=False).indices
+            for neighbor in neighbors:
+                G_X[i] = torch.minimum(G_X[i], dist_matrix[neighbor] + distances[neighbor])
+
+        return G_X
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        """
+        Backward pass to compute gradients efficiently.
+        """
+        test_distances, dist_matrix = ctx.saved_tensors
+        n_neighbors = ctx.n_neighbors
+        n_test, n_train = test_distances.size()
+
+        # Initialize gradient tensors
+        grad_test_distances = torch.zeros_like(test_distances)
+        grad_dist_matrix = torch.zeros_like(dist_matrix)
+
+        # Backpropagate through the shortest path computations
+        for i in range(n_test):
+            distances = test_distances[i]
+            neighbors = torch.topk(distances, n_neighbors, largest=False).indices
+            for neighbor in neighbors:
+                update_mask = (dist_matrix[neighbor] + distances[neighbor] < grad_output[i]).float()
+                grad_test_distances[i, neighbors] += update_mask
+                grad_dist_matrix[neighbor] += update_mask
+
+        return grad_test_distances, grad_dist_matrix, None
 
 
 class IsomapNN(nn.Module):
@@ -49,6 +94,7 @@ class IsomapNN(nn.Module):
         self.n_neighbors = n_neighbors
         self.distances_matrix = weights_initial_assumption
         self._init_weights(weights_initial_assumption)
+        #self.dist_matrix_ = None
 
     def update_distance_matrix(self):
         matrix = torch.zeros(self.distances_matrix.size(0), self.distances_matrix.size(1)).to(device)
@@ -84,14 +130,35 @@ class IsomapNN(nn.Module):
     def _compute_shortest_paths(self, graph, optimized=True):
         """Compute shortest paths using Floyd-Warshall algorithm."""
         if optimized:
-            return FloydWarshall.apply(graph)
+            dist = self._compute_shortest_paths_optimized(graph)
         else:
-            n_samples = graph.size(0)
-            dist = graph.clone()
-            for k in range(n_samples):
-                dist = torch.minimum(dist, dist[:, k:k+1] + dist[k:k+1, :])
-            return dist
+            dist = self._compute_shortest_paths_simple(graph)
+        return dist
 
+    def _compute_test_shortest_paths_simple(self, test_distances):
+        n_test = test_distances.size(0)
+        n_train = self.dist_matrix_.size(0)
+        G_X = torch.full((n_test, n_train), float('inf'), dtype=test_distances.dtype).to(device)
+        for i in range(n_test):
+            distances = test_distances[i]
+            neighbors = torch.topk(distances, self.n_neighbors, largest=False).indices
+            for neighbor in neighbors:
+                G_X[i] = torch.minimum(G_X[i], self.dist_matrix_[neighbor] + distances[neighbor])
+        return G_X
+
+    def _compute_test_shortest_paths_optimized(self, test_distances):
+        """
+        Wrapper for memory-efficient test shortest path computation.
+        """
+        return TestPointShortestPaths.apply(test_distances, self.dist_matrix_, self.n_neighbors)
+
+    def _compute_test_shortest_paths(self,test_distances,optimized=True):
+        '''Compute shortest paths for test points to training points'''
+        if optimized:
+            dist = self._compute_test_shortest_paths_optimized(test_distances)
+        else:
+            dist = self._compute_test_shortest_paths_simple(test_distances)
+        return dist
 
     def _construct_graph(self, distance_matrix):
         """Construct a graph where only the distances to neighbors are preserved."""
@@ -137,16 +204,18 @@ class IsomapNN(nn.Module):
         if self.embedding_ is None or self.eigenvalues_ is None or self.eigenvectors_ is None:
             raise ValueError("The model must be fitted before calling transform.")
 
-        n_test = test_distances.size(0)
-        n_train = self.dist_matrix_.size(0)
+        # n_test = test_distances.size(0)
+        # n_train = self.dist_matrix_.size(0)
 
-        # Compute shortest paths for test points to training points
-        G_X = torch.full((n_test, n_train), float('inf'), dtype=test_distances.dtype).to(device)
-        for i in range(n_test):
-            distances = test_distances[i]
-            neighbors = torch.topk(distances, self.n_neighbors, largest=False).indices
-            for neighbor in neighbors:
-                G_X[i] = torch.min(G_X[i], self.dist_matrix_[neighbor] + distances[neighbor])
+        # # Compute shortest paths for test points to training points
+        # G_X = torch.full((n_test, n_train), float('inf'), dtype=test_distances.dtype).to(device)
+        # for i in range(n_test):
+        #     distances = test_distances[i]
+        #     neighbors = torch.topk(distances, self.n_neighbors, largest=False).indices
+        #     for neighbor in neighbors:
+        #         G_X[i] = torch.min(G_X[i], self.dist_matrix_[neighbor] + distances[neighbor])
+
+        G_X = self._compute_test_shortest_paths(test_distances,optimized=True)
 
         # Center the distances for test points
         train_mean = torch.mean(self.dist_matrix_ ** 2, dim=1, keepdim=True)
