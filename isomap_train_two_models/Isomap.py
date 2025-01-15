@@ -41,65 +41,58 @@ class FloydWarshall(torch.autograd.Function):
 
 class TestPointShortestPaths(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, test_distances, dist_matrix, n_neighbors):
+    def forward(ctx, test_dist, dist_matrix, n_neighbors):
         """
         Forward pass to compute shortest paths for test points to training points.
         """
-        n_test, n_train = test_distances.size()
-        device = test_distances.device
-        G_X = torch.full((n_test, n_train), float('inf'), dtype=test_distances.dtype, device=device)
+        n_test, n_train = test_dist.size()
+
+        # Identify the indices of the n_neighbors closest training points for each test point
+        neighbors = torch.topk(test_dist, n_neighbors, largest=False).indices  # Shape: (n_test, n_neighbors)
+
+        # Gather the distances for the selected neighbors
+        neighbor_distances = test_dist.gather(1, neighbors)  # Shape: (n_test, n_neighbors)
+        dist_matrix_neighbors = dist_matrix[neighbors]  # Shape: (n_test, n_neighbors, n_train)
+
+        # Compute the combined distances from test points through neighbors to training points
+        combined_distances = dist_matrix_neighbors + neighbor_distances.unsqueeze(-1)  # Shape: (n_test, n_neighbors, n_train)
+
+        # Compute the minimum distances for each test point to training points
+        G_X, min_indices = combined_distances.min(dim=1)  # G_X: (n_test, n_train), min_indices: (n_test, n_train)
 
         # Store necessary variables for backward pass
-        ctx.save_for_backward(test_distances, dist_matrix)
+        ctx.save_for_backward(test_dist, dist_matrix, neighbors, min_indices)
         ctx.n_neighbors = n_neighbors
-
-        # Compute shortest paths
-        for i in range(n_test):
-            distances = test_distances[i]
-            neighbors = torch.topk(distances, n_neighbors, largest=False).indices
-            for neighbor in neighbors:
-                G_X[i] = torch.minimum(G_X[i], dist_matrix[neighbor] + distances[neighbor])
 
         return G_X
 
     @staticmethod
     def backward(ctx, grad_output):
         """
-        Backward pass to compute gradients efficiently.
+        Backward pass to compute gradients for test_dist and dist_matrix.
         """
-        test_distances, dist_matrix = ctx.saved_tensors
+        test_dist, dist_matrix, neighbors, min_indices = ctx.saved_tensors
         n_neighbors = ctx.n_neighbors
-        n_test, n_train = test_distances.size()
+        n_test, n_train = test_dist.size()
 
-        # Initialize gradient tensors
-        grad_test_distances = torch.zeros_like(test_distances)
+        # Initialize gradients
+        grad_test_dist = torch.zeros_like(test_dist)
         grad_dist_matrix = torch.zeros_like(dist_matrix)
 
-        # Backpropagate through the shortest path computations
+        # Backpropagate gradients
+        # Iterate over each test point
         for i in range(n_test):
-            distances = test_distances[i]
-            neighbors = torch.topk(distances, n_neighbors, largest=False).indices
-            for neighbor in neighbors:
-                update_mask = (dist_matrix[neighbor] + distances[neighbor] < grad_output[i]).float()
-                grad_test_distances[i, neighbors] += update_mask
-                grad_dist_matrix[neighbor] += update_mask
+            # Get the neighbors and corresponding indices
+            neighbor_indices = neighbors[i]  # Shape: (n_neighbors,)
+            min_idx = min_indices[i]  # Shape: (n_train,)
 
-        # # Calculate the distances for all tests at once
-        # distances = test_distances.unsqueeze(1)  # Shape: (n_test, 1)
-        # neighbors = torch.topk(distances, n_neighbors, largest=False).indices  # Shape: (n_test, n_neighbors)
+            # Scatter gradients for the neighbors
+            for j in range(n_train):
+                neighbor = neighbor_indices[min_idx[j]]
+                grad_test_dist[i, neighbor] += grad_output[i, j]
+                grad_dist_matrix[neighbor, j] += grad_output[i, j]
 
-        # # Create a mask directly
-        # grad_output_expanded = grad_output.unsqueeze(1).expand_as(neighbors)  # Expand grad_output to match neighbors' shape
-        # dist_matrix_expanded = dist_matrix[neighbors]  # Select dist_matrix for all neighbors at once
-        # neighbor_distances = distances[neighbors]  # Select the distances for each neighbor
-
-        # update_mask = (dist_matrix_expanded + neighbor_distances < grad_output_expanded).float()
-
-        # # Apply the updates to grad_test_distances and grad_dist_matrix
-        # grad_test_distances.scatter_add_(1, neighbors, update_mask)
-        # grad_dist_matrix.index_add_(0, neighbors.flatten(), update_mask.flatten())
-
-        return grad_test_distances, grad_dist_matrix, None
+        return grad_test_dist, grad_dist_matrix, None
 
 
 

@@ -49,7 +49,7 @@ def to_polar(X):
 def generate_dataset():
     np.random.seed()
     # Step 1: Generate the dataset
-    X, y = make_circles(n_samples=20000, factor=0.5, noise=0.1)
+    X, y = make_circles(n_samples=2000, factor=0.5, noise=0.1)
 
     # Split the data into training and testing sets
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
@@ -70,12 +70,16 @@ model_seq = [nn.Linear(train_features.size(1), 512, dtype=float32),
 
 dist_train = torch.tensor(pairwise_distances(train_features, train_features), dtype=float32).to(device)
 
-pts, reduced_dist = reduce_dist_fps(dist_train, 500)
+pts, reduced_dist = reduce_dist_fps(dist_train, 100)
 
 reduced_train_target = train_target[pts]
 reduced_train_features = train_features[pts]
 
-test_dist = torch.tensor(pairwise_distances(test_features, train_features.cpu().detach().numpy()), dtype=float32).to(device)
+test_dist = torch.tensor(pairwise_distances(test_features, reduced_train_features.cpu().detach().numpy()), dtype=float32).to(device)
+
+dist_train_new = torch.zeros((train_features.shape[0], train_features[pts].shape[0]),device=device)
+for i, x_train in enumerate(train_features):
+    dist_train_new[i, :] = torch.linalg.norm(train_features[pts] - x_train, axis=1)
 
 isomap_model = IsomapNN(reduced_dist)
 isomap_model.to(device)
@@ -103,11 +107,11 @@ for epoch in range(epochs):
     reduced_target = reduced_train_target.to(device)
 
     reproj_features = isomap_model().to(float32)
+
+    train_transform_start=time.time()
     with torch.no_grad():
-        dist_train_new = torch.zeros((train_features.shape[0], train_features[pts].shape[0]),device=device)
-        for i, x_train in enumerate(train_features):
-            dist_train_new[i, :] = torch.linalg.norm(train_features[pts] - x_train, axis=1)
         features = isomap_model.transform(dist_train_new)
+    train_transform_end=time.time()
 
     # ИНИЦИАЛИЗАЦИЯ ВТОРОЙ МОДЕЛИ
     task_model = nn.Sequential(*model_seq).to(device)
@@ -148,18 +152,20 @@ for epoch in range(epochs):
         #torch.save(task_model.state_dict(), f'{working_folder}/best_task_model.pt')
         best_reproj_points = reproj_features
 
-        #reproj_features2 = best_isomap_model.transform(test_dist)
-        #plot_train_projection(test_features, reproj_features2, test_target, losses[-1], f'{working_folder}/{epoch}_test.png')
+        reproj_features2 = best_isomap_model.transform(test_dist)
+        plot_train_projection(test_features, reproj_features2, test_target, losses[-1], f'{working_folder}/{epoch}_test.png')
     iso_start = time.time()
     loss.backward()
     iso_end = time.time()
     isomap_optimizer.step()
 
     print(f'epoch {epoch}/{epochs}, lr={lr},  loss={losses[-1]}')
+    print('Train transform time {}'.format(train_transform_end-train_transform_start))
     print('Inner NN train time {}'.format(inner_end-inner_start))
     print('Isomap backward time {}'.format(iso_end-iso_start))
 
     if epoch % save_each == 0:
+        plt.figure()
         plt.plot(np.arange(len(losses)), losses, label='Train')
         plt.title('Convergence plot')
         plt.ylabel('Loss')
@@ -170,11 +176,12 @@ for epoch in range(epochs):
         plt.tight_layout()
         #plt.yscale('log')
         plt.savefig(f'{working_folder}/isomap_model_convergence.png')
-        plt.show()
+        #plt.show()
 
 
 torch.save(best_isomap_model.state_dict(), f'{working_folder}/isomap_model.pt')
 
+plt.figure()
 plt.plot(np.arange(len(losses)), losses, label='Train')
 plt.title('Convergence plot')
 plt.ylabel('Loss')
@@ -185,12 +192,12 @@ plt.legend()
 plt.tight_layout()
 #plt.yscale('log')
 plt.savefig(f'{working_folder}/isomap_model_convergence.png')
-plt.show()
+#plt.show()
 
 
 test_proj_points = best_isomap_model.transform(test_dist)
 
-train_reproj_points = best_isomap_model.transform(dist_train)
+train_reproj_points = best_isomap_model.transform(dist_train_new)
 
 # инициализация модели для теста
 task_model = nn.Sequential(*model_seq).to(device)
@@ -256,7 +263,7 @@ plt.scatter(polar_grid_features[:, 1], polar_grid_features[:, 0])
 plt.title('Grid in polar coordinates')
 plt.show()
 
-grid_dist = pairwise_distances(grid, train_features)
+grid_dist = pairwise_distances(grid, train_features[pts])
 
 proj_grid_features = best_isomap_model.transform(torch.tensor(grid_dist, dtype=float32).to(device)).cpu().detach().numpy()
 
