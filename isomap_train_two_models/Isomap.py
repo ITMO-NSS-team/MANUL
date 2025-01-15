@@ -15,7 +15,7 @@ class FloydWarshall(torch.autograd.Function):
         # Run Floyd-Warshall algorithm
         for k in range(n_samples):
             dist = torch.min(dist, dist[:, k:k+1] + dist[k:k+1, :])
-
+        #dist = torch.min(dist, dist[:, :, None] + dist[None, :, :])
         # Save necessary tensors for the backward pass
         ctx.save_for_backward(graph, dist)
         return dist
@@ -36,6 +36,8 @@ class FloydWarshall(torch.autograd.Function):
             grad_input += (grad_output < (dist[:, k:k+1] + dist[k:k+1, :])).float() * grad_output
 
         return grad_input
+
+
 
 class TestPointShortestPaths(torch.autograd.Function):
     @staticmethod
@@ -82,7 +84,23 @@ class TestPointShortestPaths(torch.autograd.Function):
                 grad_test_distances[i, neighbors] += update_mask
                 grad_dist_matrix[neighbor] += update_mask
 
+        # # Calculate the distances for all tests at once
+        # distances = test_distances.unsqueeze(1)  # Shape: (n_test, 1)
+        # neighbors = torch.topk(distances, n_neighbors, largest=False).indices  # Shape: (n_test, n_neighbors)
+
+        # # Create a mask directly
+        # grad_output_expanded = grad_output.unsqueeze(1).expand_as(neighbors)  # Expand grad_output to match neighbors' shape
+        # dist_matrix_expanded = dist_matrix[neighbors]  # Select dist_matrix for all neighbors at once
+        # neighbor_distances = distances[neighbors]  # Select the distances for each neighbor
+
+        # update_mask = (dist_matrix_expanded + neighbor_distances < grad_output_expanded).float()
+
+        # # Apply the updates to grad_test_distances and grad_dist_matrix
+        # grad_test_distances.scatter_add_(1, neighbors, update_mask)
+        # grad_dist_matrix.index_add_(0, neighbors.flatten(), update_mask.flatten())
+
         return grad_test_distances, grad_dist_matrix, None
+
 
 
 class IsomapNN(nn.Module):
