@@ -200,13 +200,13 @@ class IsomapNN(nn.Module):
         eigenvalues, eigenvectors = torch.linalg.eigh(K)
 
         # Sort eigenvalues and eigenvectors in descending order
-        sorted_indices = torch.argsort(eigenvalues, descending=True)
+        sorted_indices = torch.argsort(torch.abs(eigenvalues), descending=True)
         eigenvalues = eigenvalues[sorted_indices][:self.n_components]
         eigenvectors = eigenvectors[:, sorted_indices][:, :self.n_components]
 
         self.eigenvalues_ = eigenvalues
         self.eigenvectors_ = eigenvectors
-        self.embedding_ = eigenvectors * torch.sqrt(eigenvalues)
+        self.embedding_ = self.eigenvectors_*torch.sign(self.eigenvalues_) * torch.sqrt(torch.abs(self.eigenvalues_))
 
         return self.embedding_
 
@@ -235,7 +235,7 @@ class IsomapNN(nn.Module):
         K_test = -0.5 * (G_X - train_mean.T - torch.mean(G_X, dim=1, keepdim=True) + overall_mean)
 
         # Project test points into the embedding space
-        test_embedding = K_test @ self.eigenvectors_ / torch.sqrt(self.eigenvalues_)
+        test_embedding = K_test @ self.eigenvectors_*torch.sign(self.eigenvalues_) / torch.sqrt(torch.abs(self.eigenvalues_)+ 1e-8)
         return test_embedding
 
     def forward(self):

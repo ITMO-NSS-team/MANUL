@@ -1,4 +1,4 @@
-import os
+import os,sys
 from datetime import datetime
 
 import numpy as np
@@ -8,6 +8,10 @@ from matplotlib import pyplot as plt
 from sklearn.metrics import pairwise_distances
 from torch import float32, nn
 from torchvision import datasets
+
+os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname( __file__ ), '../..')))
+
 
 from isomap_train_two_models.Isomap import IsomapNN
 from isomap_train_two_models.utils import reduce_dist_fps
@@ -100,12 +104,13 @@ pts, reduced_dist = reduce_dist_fps(dist_train, retain_points)
 reduced_train_target = torch.tensor(train_target[pts], dtype=float32)
 reduced_train_features = torch.tensor(train_features[pts], dtype=float32)
 
+
 test_dist = torch.tensor(pairwise_distances(test_features, reduced_train_features), dtype=float32).to(device)
 val_dist = torch.tensor(pairwise_distances(val_features, reduced_train_features), dtype=float32).to(device)
 
 dist_train_new = torch.tensor(pairwise_distances(train_features, train_features[pts]), dtype=float32).to(device)
 
-latent_len = 768
+latent_len = 10
 isomap_model = IsomapNN(reduced_dist, n_components=latent_len)
 
 isomap_model.to(device)
@@ -135,14 +140,15 @@ if not os.path.exists(working_folder):
 
 working_folder = f'{os.getcwd()}/{working_folder}'
 
-lr = 1e-5
+lr = 1e-2
 isomap_optim = torch.optim.Adam(params=isomap_model.parameters(), lr=lr)
 isomap_criterion = nn.CrossEntropyLoss()
 losses = []
 val_losses = []
-best_lost = np.inf
+best_loss = np.inf
 best_val_loss = np.inf
 best_isomap_model = None
+patience = 0
 
 for epoch in range(isomap_epochs):
     isomap_optim.zero_grad()
@@ -182,11 +188,35 @@ for epoch in range(isomap_epochs):
 
     print(f'epoch {epoch}/{isomap_epochs}, lr={lr},  loss={losses[-1]}, val_loss={val_losses[-1]}')
     #torch.save(isomap_model.distances_matrix, f'{working_folder}/optimization/distance_matrix_{epoch}.pt')
+    
 
+    #if isomap_loss.item() > 0.15:
+    #    for g in isomap_optim.param_groups:
+    #        g['lr'] = 0.01
+    #        lr = 0.01
+    #if 0.15 >= isomap_loss.item() >= 0.01:
+    #    for g in isomap_optim.param_groups:
+    #        g['lr'] = 0.001
+    #        lr = 0.001
+    #if isomap_loss.item() <= 0.01:
+    #    for g in isomap_optim.param_groups:
+    #        g['lr'] = 0.0001
+    #        lr = 0.0001
 
-    if losses[-1] < best_lost:
+ 
+    if losses[-1] < best_loss:
         #best_isomap_model = isomap_model
-        best_lost = losses[-1]
+        best_loss = losses[-1]
+        patience = 0
+    else:
+        patience+=1
+        if patience == 20:
+            print('Patience lost')
+            random_matrix = torch.rand_like(isomap_model.distances_matrix)
+            random_matrix = random_matrix - torch.diag(torch.diagonal(random_matrix))
+            isomap_model.distances_matrix = isomap_model.distances_matrix + lr*random_matrix
+            best_loss = np.inf
+            patience = 0
 
     if val_losses[-1] < best_val_loss:
         best_val_loss = val_losses[-1]
@@ -220,8 +250,8 @@ for epoch in range(isomap_epochs):
         fig, axs = plt.subplots(1, 2, figsize=(10, 5))
         axs[0].plot(np.arange(len(losses)), losses)
         axs[0].set_title('Train')
-        axs[0].axhline(best_lost, c='r', linestyle='dashed')
-        axs[0].annotate(str(round(best_lost, 4)), (0, best_lost), c='r')
+        axs[0].axhline(best_loss, c='r', linestyle='dashed')
+        axs[0].annotate(str(round(best_loss, 4)), (0, best_loss), c='r')
         axs[0].set_ylabel('Loss')
         axs[0].set_xlabel('Epochs')
         axs[1].plot(np.arange(len(val_losses)), val_losses, c='orange')
@@ -233,14 +263,14 @@ for epoch in range(isomap_epochs):
         plt.suptitle('Convergence plot')
         plt.tight_layout()
         plt.savefig(f'{working_folder}/convergence.png')
-        plt.show()
+        #plt.show()
 
 
 fig, axs = plt.subplots(1, 2, figsize=(10, 5))
 axs[0].plot(np.arange(len(losses)), losses)
 axs[0].set_title('Train')
-axs[0].axhline(best_lost, c='r', linestyle='dashed')
-axs[0].annotate(str(round(best_lost, 4)), (0, best_lost), c='r')
+axs[0].axhline(best_loss, c='r', linestyle='dashed')
+axs[0].annotate(str(round(best_loss, 4)), (0, best_loss), c='r')
 axs[0].set_ylabel('Loss')
 axs[0].set_xlabel('Epochs')
 axs[1].plot(np.arange(len(val_losses)), val_losses, c='orange')
