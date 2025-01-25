@@ -45,7 +45,7 @@ def to_polar(X):
 def generate_dataset():
     np.random.seed()
     # Step 1: Generate the dataset
-    X, y = make_circles(n_samples=2000, factor=0.5, noise=0.1)
+    X, y = make_circles(n_samples=20000, factor=0.5, noise=0.1)
 
     # Split the data into training and testing sets
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
@@ -88,7 +88,6 @@ best_lost = np.inf
 best_isomap_model = None
 
 for epoch in range(epochs):
-    epoch_losses = []
     target = train_target.to(device)
 
     reproj_features = isomap_model().to(float32)
@@ -109,7 +108,7 @@ for epoch in range(epochs):
 
     output = task_model(reproj_features)
     loss = isomap_criterion(output.to(torch.float32), target.reshape_as(output).to(torch.float32))
-    epoch_losses.append(loss.item())
+    losses.append(loss.item())
 
 
     if loss > 0.15:
@@ -125,16 +124,17 @@ for epoch in range(epochs):
             g['lr'] = 0.0001
             lr = 0.0001
 
-    losses.append(np.mean(epoch_losses))
     if losses[-1] < best_lost:
         best_isomap_model = isomap_model
         best_lost = losses[-1]
-        plot_train_projection(train_features, reproj_features, output, losses[-1], f'{working_folder}/{epoch}.png')
+        plot_train_projection(train_features, reproj_features, output, losses[-1], f'{working_folder}/{epoch}_fit.png')
         #torch.save(task_model.state_dict(), f'{working_folder}/best_task_model.pt')
         best_reproj_points = reproj_features
 
         reproj_features2 = best_isomap_model.transform(test_dist)
         plot_train_projection(test_features, reproj_features2, test_target, losses[-1], f'{working_folder}/{epoch}_test.png')
+        reproj_features3 = best_isomap_model.transform(dist_train)
+        plot_train_projection(train_features, reproj_features3, train_target, losses[-1], f'{working_folder}/{epoch}_train.png')
 
     loss.backward()
     isomap_optimizer.step()

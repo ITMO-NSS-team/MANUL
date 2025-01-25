@@ -1,4 +1,9 @@
+import matplotlib.pyplot as plt
+import numpy as np
 import torch
+from matplotlib.offsetbox import AnnotationBbox, OffsetImage
+from sklearn.decomposition import PCA
+
 
 def farthest_point_sampling(dist_matrix, retain_points):
     """
@@ -37,3 +42,10 @@ def reduce_dist_fps(dist_matrix, retain_points):
     pts = farthest_point_sampling(dist_matrix, retain_points)
     reduced_dist = dist_matrix[pts][:, pts]
     return pts, reduced_dist
+
+
+def plot_points_with_PCA(points, labels):
+    labels = np.argmax(labels, axis=1)
+    points_2d = PCA(n_components=2).fit_transform(points)
+    plt.scatter(points_2d[:, 1], points_2d[:, 0], c=labels)
+    plt.show()

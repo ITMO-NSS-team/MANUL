@@ -11,6 +11,7 @@ from torch import float32, nn, optim, float64
 from torch.utils.data import TensorDataset, DataLoader
 
 from isomap_train_two_models.Isomap import IsomapNN
+from isomap_train_two_models.utils import reduce_dist_fps
 
 device = 'cuda'
 
@@ -71,9 +72,17 @@ model_seq = [nn.Linear(train_features.size(1), 512, dtype=float32),
                                  nn.Linear(64, 1, dtype=float32)]
 
 dist_train = torch.tensor(pairwise_distances(train_features, train_features), dtype=float32)
-test_dist = torch.tensor(pairwise_distances(test_features, train_features.cpu().detach().numpy()), dtype=float32).to(device)
+pts, reduced_dist = reduce_dist_fps(dist_train, 300)
 
-isomap_model = IsomapNN(dist_train)
+reduced_train_target = train_target[pts]
+reduced_train_features = train_features[pts]
+
+test_dist = torch.tensor(pairwise_distances(test_features, reduced_train_features.cpu().detach().numpy()), dtype=float32).to(device)
+
+dist_train_new = torch.zeros((train_features.shape[0], train_features[pts].shape[0]),device=device)
+for i, x_train in enumerate(train_features):
+    dist_train_new[i, :] = torch.linalg.norm(train_features[pts] - x_train, axis=1)
+isomap_model = IsomapNN(reduced_dist)
 isomap_model.to(device)
 
 isomap_criterion = nn.L1Loss()
@@ -85,7 +94,7 @@ if not os.path.exists(working_folder):
     os.makedirs(working_folder)
 working_folder = f'{os.getcwd()}/{working_folder}'
 
-epochs = 1000
+epochs = 1500
 task_epochs = 50
 save_each = 200
 losses = []
@@ -96,10 +105,11 @@ best_isomap_model = None
 for epoch in range(epochs):
     epoch_losses = []
     target = train_target.to(device)
+    reduced_target = reduced_train_target.to(device)
 
     reproj_features = isomap_model().to(float32)
     with torch.no_grad():
-        features = reproj_features.clone()
+        features = isomap_model.transform(dist_train_new)
 
     # ИНИЦИАЛИЗАЦИЯ ВТОРОЙ МОДЕЛИ
     task_model = nn.Sequential(*model_seq).to(device)
@@ -114,28 +124,28 @@ for epoch in range(epochs):
         task_optim.step()
 
     output = task_model(reproj_features)
-    loss = isomap_criterion(output.to(torch.float32), target.reshape_as(output).to(torch.float32))
+    loss = isomap_criterion(output.to(torch.float32), reduced_target.reshape_as(output).to(torch.float32))
     epoch_losses.append(loss.item())
 
 
-    if loss > 0.15:
+    if loss > 0.12:
         for g in isomap_optimizer.param_groups:
             g['lr'] = 0.01
             lr = 0.01
-    if 0.15 >= loss >= 0.01:
-        for g in isomap_optimizer.param_groups:
-            g['lr'] = 0.001
-            lr = 0.001
-    if loss <= 0.01:
+    if 0.12 >= loss >= 0.01:
         for g in isomap_optimizer.param_groups:
             g['lr'] = 0.0001
             lr = 0.0001
+    if loss <= 0.01:
+        for g in isomap_optimizer.param_groups:
+            g['lr'] = 0.00001
+            lr = 0.00001
 
     losses.append(np.mean(epoch_losses))
     if losses[-1] < best_lost:
         best_isomap_model = isomap_model
         best_lost = losses[-1]
-        plot_train_projection(train_features, reproj_features, output, losses[-1], f'{working_folder}/{epoch}.png')
+        plot_train_projection(reduced_train_features, reproj_features, output, losses[-1], f'{working_folder}/{epoch}.png')
         #torch.save(task_model.state_dict(), f'{working_folder}/best_task_model.pt')
         best_reproj_points = reproj_features
 
@@ -179,7 +189,7 @@ plt.show()
 
 test_proj_points = best_isomap_model.transform(test_dist)
 
-train_reproj_points = best_isomap_model.transform(dist_train)
+train_reproj_points = best_isomap_model.transform(dist_train_new)
 
 # инициализация модели для теста
 task_model = nn.Sequential(*model_seq).to(device)
@@ -245,7 +255,7 @@ plt.scatter(polar_grid_features[:, 1], polar_grid_features[:, 0])
 plt.title('Grid in polar coordinates')
 plt.show()
 
-grid_dist = pairwise_distances(grid, train_features)
+grid_dist = pairwise_distances(grid, train_features[pts])
 
 proj_grid_features = best_isomap_model.transform(torch.tensor(grid_dist, dtype=float32).to(device)).cpu().detach().numpy()
 
