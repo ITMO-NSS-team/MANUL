@@ -82,36 +82,107 @@ def init_data(train_size=30000, validation_size=10000, test_size=10000):
 
 
 train_features, train_target, val_features, val_target, test_features, test_target = init_data()
-# RAVEL DATA
-train_features = train_features.reshape(train_features.shape[0],
-                                            train_features.shape[1] *
-                                            train_features.shape[2] *
-                                            train_features.shape[3])
-test_features = test_features.reshape(test_features.shape[0],
-                                            test_features.shape[1] *
-                                            test_features.shape[2] *
-                                            test_features.shape[3])
-val_features = val_features.reshape(val_features.shape[0],
-                                            val_features.shape[1] *
-                                            val_features.shape[2] *
-                                            val_features.shape[3])
+
+# Define the Convolutional Autoencoder
+class ConvAutoencoder(nn.Module):
+    def __init__(self, latent_dim=64):
+        super(ConvAutoencoder, self).__init__()
+        # Encoder
+        self.encoder = nn.Sequential(
+            nn.Conv2d(1, 32, kernel_size=3, stride=2, padding=1),  # [B, 32, 14, 14]
+            nn.ReLU(),
+            nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1),  # [B, 64, 7, 7]
+            nn.ReLU(),
+            nn.Flatten(),
+            nn.Linear(64 * 7 * 7, latent_dim)
+        )
+        # Decoder
+        self.decoder = nn.Sequential(
+            nn.Linear(latent_dim, 64 * 7 * 7),
+            nn.ReLU(),
+            nn.Unflatten(1, (64, 7, 7)),
+            nn.ConvTranspose2d(64, 32, kernel_size=3, stride=2, padding=1, output_padding=1),  # [B, 32, 14, 14]
+            nn.ReLU(),
+            nn.ConvTranspose2d(32, 1, kernel_size=3, stride=2, padding=1, output_padding=1),  # [B, 1, 28, 28]
+            nn.Sigmoid()  # Output values between 0 and 1
+        )
+
+    def forward(self, x):
+        latent = self.encoder(x)
+        reconstruction = self.decoder(latent)
+        return reconstruction, latent
+
+
+latent_len = 8
+
+cae_dataset = torch.utils.data.TensorDataset(torch.Tensor(train_features), torch.Tensor(train_target))
+cae_loader = torch.utils.data.DataLoader(cae_dataset, batch_size=128, shuffle=True)
+
+cae_model = ConvAutoencoder(latent_dim=latent_len).to("cuda")
+
+cae_criterion = nn.MSELoss()
+cae_optimizer = torch.optim.Adam(cae_model.parameters(), lr=1e-3)
+
+
+# Training loop
+epochs = 10
+for epoch in range(epochs):
+    total_loss = 0
+    for batch, _ in cae_loader:
+        batch = batch.to("cuda")
+        cae_optimizer.zero_grad()
+        reconstruction, _ = cae_model(batch)
+        loss = cae_criterion(reconstruction, batch)
+        loss.backward()
+        cae_optimizer.step()
+        total_loss += loss.item()
+    print(f"CAE Epoch {epoch+1}/{epochs}, Loss: {total_loss/len(cae_loader)}")
+
+del(cae_dataset)
+del(cae_loader)
+
+## RAVEL DATA
+#train_features = train_features.reshape(train_features.shape[0],
+#                                            train_features.shape[1] *
+#                                            train_features.shape[2] *
+#                                            train_features.shape[3])
+#test_features = test_features.reshape(test_features.shape[0],
+#                                            test_features.shape[1] *
+#                                            test_features.shape[2] *
+#                                            test_features.shape[3])
+#val_features = val_features.reshape(val_features.shape[0],
+#                                            val_features.shape[1] *
+#                                            val_features.shape[2] *
+#                                            val_features.shape[3])
+
+with torch.no_grad():
+    _,train_features = cae_model(torch.Tensor(train_features).to('cuda'))
+    _,test_features = cae_model(torch.Tensor(test_features).to('cuda'))
+    _,val_features = cae_model(torch.Tensor(val_features).to('cuda'))
+
+cae_model=cae_model.to('cpu')
+
+torch.cuda.empty_cache()
 
 retain_points = 1000
 
-dist_train = torch.tensor(pairwise_distances(train_features, train_features), dtype=float32)
+dist_train = torch.cdist(train_features,train_features)
 # SELECT SPARSE POINTS
 pts, reduced_dist = reduce_dist_fps(dist_train, retain_points)
+
+dist_train = dist_train.detach().cpu()
+
 reduced_train_target = torch.tensor(train_target[pts], dtype=float32)
 reduced_train_features = torch.tensor(train_features[pts], dtype=float32)
 
 
-test_dist = torch.tensor(pairwise_distances(test_features, reduced_train_features), dtype=float32).to(device)
-val_dist = torch.tensor(pairwise_distances(val_features, reduced_train_features), dtype=float32).to(device)
+test_dist = torch.cdist(test_features, reduced_train_features).to(device)
+val_dist = torch.cdist(val_features, reduced_train_features).to(device)
 
-dist_train_new = torch.tensor(pairwise_distances(train_features, train_features[pts]), dtype=float32).to(device)
+dist_train_new = torch.cdist(train_features, train_features[pts]).to(device)
 
-latent_len = 8
-isomap_model = IsomapNN(reduced_dist, n_components=latent_len, n_neighbors=35)
+#latent_len = 8
+isomap_model = IsomapNN(reduced_dist, n_components=latent_len)
 
 isomap_model.to(device)
 
@@ -122,18 +193,21 @@ model_seq = [nn.Linear(latent_len, 512, dtype=float32),
                                  ]
 print(model_seq)
 
-train_features = torch.tensor(train_features, dtype=float32).to(device)
+train_features = train_features.clone().detach().cpu()
 train_target = torch.tensor(train_target, dtype=float32).to(device)
-val_features = torch.tensor(val_features, dtype=float32).to(device)
+val_features = val_features.clone().detach().cpu()
 val_target = torch.tensor(val_target, dtype=float32).to(device)
-test_features = torch.tensor(test_features, dtype=float32).to(device)
+test_features = test_features.clone().detach().cpu()
 test_target = torch.tensor(test_target, dtype=float32).to(device)
+
+
+torch.cuda.empty_cache()
 
 isomap_epochs = 5000
 task_epochs = 300
 save_each = 100
 
-working_folder = datetime.now().strftime(f'ICML_RESULTS/mnist_fnn_({latent_len})%Y%m%d_%H.%M')
+working_folder = datetime.now().strftime(f'ICML_RESULTS/mnist_fnn_CAE_({latent_len})%Y%m%d_%H.%M')
 if not os.path.exists(working_folder):
     os.makedirs(working_folder)
     #os.makedirs(f'{working_folder}/optimization')
@@ -190,22 +264,23 @@ for epoch in range(isomap_epochs):
     #torch.save(isomap_model.distances_matrix, f'{working_folder}/optimization/distance_matrix_{epoch}.pt')
     
 
-    #if isomap_loss.item() > 0.15:
-    #    for g in isomap_optim.param_groups:
-    #        g['lr'] = 0.01
-    #        lr = 0.01
-    #if 0.15 >= isomap_loss.item() >= 0.01:
-    #    for g in isomap_optim.param_groups:
-    #        g['lr'] = 0.001
-    #        lr = 0.001
-    #if isomap_loss.item() <= 0.01:
-    #    for g in isomap_optim.param_groups:
-    #        g['lr'] = 0.0001
-    #        lr = 0.0001
+    if isomap_loss.item() > 0.15:
+        for g in isomap_optim.param_groups:
+            g['lr'] = 0.01
+            lr = 0.01
+    if 0.15 >= isomap_loss.item() >= 0.01:
+        for g in isomap_optim.param_groups:
+            g['lr'] = 0.001
+            lr = 0.001
+    if isomap_loss.item() <= 0.01:
+        for g in isomap_optim.param_groups:
+            g['lr'] = 0.0001
+            lr = 0.0001
 
     if losses[-1] < best_loss:
         #best_isomap_model = isomap_model
         best_loss = losses[-1]
+
     if val_losses[-1] < best_val_loss:
         best_val_loss = val_losses[-1]
         best_isomap_model = isomap_model

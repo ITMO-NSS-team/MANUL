@@ -9,8 +9,8 @@ from sklearn.metrics import pairwise_distances
 from torch import float32, nn
 from torchvision import datasets
 
-from isomap_train_two_models.Isomap import IsomapNN
-from isomap_train_two_models.utils import reduce_dist_fps
+#from isomap_train_two_models.Isomap import IsomapNN
+#from isomap_train_two_models.utils import reduce_dist_fps
 
 from sklearn.decomposition import PCA
 
@@ -133,7 +133,7 @@ for i in range(5):
     test_out = torch.argmax(test_out, dim=1)
     test_target = torch.argmax(test_target, dim=1)
     test_acc = accuracy(test_out, test_target)
-    print(f'Test accuracy {test_CEL}')
+    print(f'Test accuracy {test_acc}')
 
     metrics['CEL_train'].append(task_losses[-1])
     metrics['CEL_test'].append(test_CEL)
