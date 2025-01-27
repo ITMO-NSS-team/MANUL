@@ -206,6 +206,7 @@ for epoch in range(isomap_epochs):
     if losses[-1] < best_loss:
         #best_isomap_model = isomap_model
         best_loss = losses[-1]
+
     if val_losses[-1] < best_val_loss:
         best_val_loss = val_losses[-1]
         best_isomap_model = isomap_model
