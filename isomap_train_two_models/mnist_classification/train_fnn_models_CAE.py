@@ -127,12 +127,12 @@ if __name__=='__main__':
     cae_optimizer = torch.optim.Adam(cae_model.parameters(), lr=1e-3)
 
 
-    # Training loop
-    epochs = 100
+    #Training loop
+    epochs = 250
     for epoch in range(epochs):
-    # ep=0
-    # total_loss=len(cae_loader)
-    # while (total_loss/len(cae_loader))>1e-5:
+    #ep=0
+    #total_loss=len(cae_loader)
+    #while (total_loss/len(cae_loader))>1e-3:
         total_loss = 0
         for batch, _ in cae_loader:
             batch = batch.to("cuda")
@@ -335,6 +335,7 @@ if __name__=='__main__':
             plt.tight_layout()
             plt.savefig(f'{working_folder}/convergence.png')
             #plt.show()
+            plt.close()
 
 
     fig, axs = plt.subplots(1, 2, figsize=(10, 5))
@@ -353,7 +354,7 @@ if __name__=='__main__':
     plt.suptitle('Convergence plot')
     plt.tight_layout()
     plt.savefig(f'{working_folder}/convergence.png')
-    plt.show()
+    #plt.show()
 
     task_model = nn.Sequential(*model_seq).to(device)
     task_optim = torch.optim.AdamW(params=task_model.parameters(), lr=0.0001)
