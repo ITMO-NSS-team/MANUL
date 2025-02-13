@@ -128,7 +128,7 @@ if __name__=='__main__':
 
 
     #Training loop
-    epochs = 250
+    epochs = 300
     for epoch in range(epochs):
     #ep=0
     #total_loss=len(cae_loader)
@@ -190,12 +190,13 @@ if __name__=='__main__':
     dist_train_new = torch.cdist(train_features, train_features[pts]).to(device)
 
     #latent_len = 8
-    isomap_model = IsomapNN(reduced_dist, n_components=latent_len)
+    isomap_model = IsomapNN(reduced_dist, n_components=latent_len, eigval_choice = 'MDS_plus')
 
     isomap_model.to(device)
 
-    model_seq = [nn.Linear(latent_len, 512, dtype=float32),
-                                     nn.Linear(512, 256, dtype=float32),
+    model_seq = [nn.Linear(latent_len, latent_len-1, dtype=float32),
+                                     nn.ReLU(),
+                                     nn.Linear(latent_len-1, 256, dtype=float32),
                                      nn.Linear(256, 64, dtype=float32),
                                      nn.Linear(64, 10, dtype=float32),  # 10 classes
                                      ]
@@ -211,7 +212,7 @@ if __name__=='__main__':
 
     torch.cuda.empty_cache()
 
-    isomap_epochs = 5000
+    isomap_epochs = 2000
     task_epochs = 300
     save_each = 100
 
@@ -265,6 +266,8 @@ if __name__=='__main__':
         val_loss = isomap_criterion(validation_output.to(torch.float32), val_target.reshape_as(validation_output).to(torch.float32))
         val_losses.append(val_loss.item())
 
+
+        
         isomap_loss.backward()
         isomap_optim.step()
 

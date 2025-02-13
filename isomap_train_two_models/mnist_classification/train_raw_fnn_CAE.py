@@ -127,7 +127,7 @@ for i in range(5):
 
 
     #Training loop
-    epochs = 250
+    epochs = 300
     for epoch in range(epochs):
     #ep=0
     #total_loss=len(cae_loader)
@@ -151,11 +151,19 @@ for i in range(5):
 
 
 
-    model_seq = [nn.Linear(train_features.shape[-1], 512, dtype=float32),
-                 nn.Linear(512, 256, dtype=float32),
-                 nn.Linear(256, 64, dtype=float32),
-                 nn.Linear(64, 10, dtype=float32),  # 10 classes
-                 ]
+    # model_seq = [nn.Linear(train_features.shape[-1], 512, dtype=float32),
+    #              nn.Linear(512, 256, dtype=float32),
+    #              nn.Linear(256, 64, dtype=float32),
+    #              nn.Linear(64, 10, dtype=float32),  # 10 classes
+    #              ]
+
+    model_seq = [nn.Linear(latent_len, latent_len-1, dtype=float32),
+                                    nn.ReLU(),
+                                    nn.Linear(latent_len-1, 256, dtype=float32),
+                                    nn.Linear(256, 64, dtype=float32),
+                                    nn.Linear(64, 10, dtype=float32),  # 10 classes
+                                    ]
+
     print(model_seq)
     task_model = nn.Sequential(*model_seq).to(device)
     task_optim = torch.optim.AdamW(params=task_model.parameters(), lr=0.0001)
@@ -202,7 +210,7 @@ for i in range(5):
     metrics['acc_train'].append(train_acc.cpu().detach().numpy())
     metrics['acc_test'].append(test_acc.cpu().detach().numpy())
 
-    working_folder = datetime.now().strftime('ICML_RESULTS/mnist_fnn_(raw_model)%Y%m%d_%H.%M')
+    working_folder = datetime.now().strftime('ICML_RESULTS/mnist_fnn_CAE(raw_model)%Y%m%d_%H.%M')
     if not os.path.exists(working_folder):
         os.makedirs(working_folder)
 

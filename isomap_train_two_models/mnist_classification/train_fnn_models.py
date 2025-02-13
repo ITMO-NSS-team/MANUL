@@ -99,10 +99,13 @@ val_features = val_features.reshape(val_features.shape[0],
 retain_points = 1000
 
 dist_train = torch.tensor(pairwise_distances(train_features, train_features), dtype=float32)
+
+
 # SELECT SPARSE POINTS
 pts, reduced_dist = reduce_dist_fps(dist_train, retain_points)
 reduced_train_target = torch.tensor(train_target[pts], dtype=float32)
 reduced_train_features = torch.tensor(train_features[pts], dtype=float32)
+
 
 
 test_dist = torch.tensor(pairwise_distances(test_features, reduced_train_features), dtype=float32).to(device)
@@ -111,7 +114,7 @@ val_dist = torch.tensor(pairwise_distances(val_features, reduced_train_features)
 dist_train_new = torch.tensor(pairwise_distances(train_features, train_features[pts]), dtype=float32).to(device)
 
 latent_len = 8
-isomap_model = IsomapNN(reduced_dist, n_components=latent_len, n_neighbors=35)
+isomap_model = IsomapNN(reduced_dist, n_components=latent_len)
 
 isomap_model.to(device)
 
@@ -129,7 +132,7 @@ val_target = torch.tensor(val_target, dtype=float32).to(device)
 test_features = torch.tensor(test_features, dtype=float32).to(device)
 test_target = torch.tensor(test_target, dtype=float32).to(device)
 
-isomap_epochs = 5000
+isomap_epochs = 2000
 task_epochs = 300
 save_each = 100
 
@@ -140,7 +143,7 @@ if not os.path.exists(working_folder):
 
 working_folder = f'{os.getcwd()}/{working_folder}'
 
-lr = 1e-5
+lr = 1e-2
 isomap_optim = torch.optim.Adam(params=isomap_model.parameters(), lr=lr)
 isomap_criterion = nn.CrossEntropyLoss()
 losses = []
