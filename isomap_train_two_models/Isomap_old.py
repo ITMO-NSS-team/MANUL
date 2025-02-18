@@ -1,69 +1,7 @@
 import torch
 from torch import nn
-from .KernelPCA import KernelPCA
-
 
 device = 'cuda'
-
-
-def smacof_single_pytorch(
-    dissimilarities,
-    n_components=2,
-    init=None,
-    max_iter=300,
-    eps=1e-3,
-    random_state=None,
-    device='cpu',
-    verbose=0
-):
-    D = dissimilarities.to(device).double()  # Force double precision
-    n_samples = D.shape[0]
-
-    if random_state is not None:
-        torch.manual_seed(random_state)
-
-    # Initialize and scale X to match D's magnitude
-    if init is None:
-        X = torch.rand(n_samples, n_components, device=device, dtype=torch.double)
-        with torch.no_grad():
-            S_init = torch.cdist(X, X, p=2)
-            scale = (D.mean() / S_init.mean()).item()
-            X *= scale
-    else:
-        X = init.to(device).double()
-
-    old_stress = None
-    for it in range(max_iter):
-        S = torch.cdist(X, X, p=2) + 1e-6  # Add epsilon to avoid division by zero
-        stress = 0.5 * torch.sum((S - D)**2)
-
-        # Guttman transform
-        ratio = D / S
-        B = -ratio
-        diag_updates = ratio.sum(dim=1)
-        B.diagonal().add_(diag_updates)
-
-        X_new = (1.0 / n_samples) * (B @ X)
-
-        # Update X and compute normalization
-        X = X_new
-        dis = torch.norm(X, dim=1).sum()
-        if dis < 1e-6:
-            dis = torch.tensor(1e-6, device=device)
-
-        normalized_stress = stress / dis
-        if verbose >= 2:
-            print(f"Iter {it}: Stress = {stress.item()}")
-
-        # Check convergence
-        if old_stress is not None and (old_stress - normalized_stress) < eps:
-            if verbose:
-                print(f"Converged at iteration {it}")
-            break
-        old_stress = normalized_stress
-
-    return X
-
 
 class FloydWarshall(torch.autograd.Function):
     @staticmethod
@@ -99,41 +37,7 @@ class FloydWarshall(torch.autograd.Function):
 
         return grad_input
 
-# class FloydWarshall(torch.autograd.Function):
-#     @staticmethod
-#     def forward(ctx, graph, T=0.01):
-#         """
-#         Forward pass using Floyd-Warshall, with temperature T for softmin in backward.
-#         """
-#         n_samples = graph.size(0)
-#         dist = graph.clone()
-#         for k in range(n_samples):
-#             dist = torch.min(dist, dist[:, k:k+1] + dist[k:k+1, :])
-#         ctx.save_for_backward(graph, dist)
-#         ctx.T = T  # Temperature for the softmin approximation
-#         return dist
 
-#     @staticmethod
-#     def backward(ctx, grad_output):
-#         """
-#         Backward pass using a softmin approximation.
-#         Instead of a hard indicator, we compute weights = exp(-diff/T),
-#         where diff = (dist[:, k] + dist[k, :]) - dist.
-#         """
-#         graph, dist = ctx.saved_tensors
-#         T = ctx.T
-#         n_samples = graph.size(0)
-#         grad_input = torch.zeros_like(graph)
-
-#         # Loop over k (we still need a loop, but now with a soft approximation)
-#         for k in reversed(range(n_samples)):
-#             candidate = dist[:, k:k+1] + dist[k:k+1, :]  # shape: [n_samples, n_samples]
-#             diff = candidate - dist  # difference from final distances
-#             # Compute softmin weight: near 1 if candidate is close to dist, decaying as diff increases
-#             weights = torch.exp(-diff / T)
-#             # Accumulate gradients weighted by the softmin weights
-#             grad_input += weights * grad_output
-#         return grad_input, None
 
 class TestPointShortestPaths(torch.autograd.Function):
     @staticmethod
@@ -195,16 +99,13 @@ class TestPointShortestPaths(torch.autograd.Function):
 class IsomapNN(nn.Module):
     def __init__(self, weights_initial_assumption: torch.tensor,
                  n_components: int = 2,
-                 n_neighbors: int = 25,
-                 eigval_choice: str = 'MDS'):
+                 n_neighbors: int = 25):
         super().__init__()
         self.n_components = n_components
         self.n_neighbors = n_neighbors
         self.distances_matrix = weights_initial_assumption
         self._init_weights(weights_initial_assumption)
-        self.kernel_pca_=KernelPCA(n_components=self.n_components,eigval_choice=eigval_choice)
         #self.dist_matrix_ = None
-        #self.SMACOF_refine = False
 
     def update_distance_matrix(self):
         matrix = torch.zeros(self.distances_matrix.size(0), self.distances_matrix.size(1)).to(device)
@@ -288,45 +189,54 @@ class IsomapNN(nn.Module):
         K = -0.5 * H @ (distances ** 2) @ H
         return K
 
-    def fit_transform(self, distance_matrix, SMACOF_refine = False):
+    def fit_transform(self, distance_matrix):
         """Fit the model and return the embedding for the training set."""
         graph = self._construct_graph(distance_matrix)
         geodesic_distances = self._compute_shortest_paths(graph)
-
-        geodesic_distances = torch.nan_to_num(geodesic_distances, nan=0.0, posinf=0.0, neginf=0.0)
-
         self.dist_matrix_ = geodesic_distances.clone()
 
+        # Create kernel and perform eigen decomposition
+        K = self._double_centering(geodesic_distances)
+        eigenvalues, eigenvectors = torch.linalg.eigh(K)
 
-        G = self.dist_matrix_**2
-        G *= -0.5
+        # Sort eigenvalues and eigenvectors in descending order
+        sorted_indices = torch.argsort(torch.abs(eigenvalues), descending=True)
+        eigenvalues = eigenvalues[sorted_indices][:self.n_components]
+        eigenvectors = eigenvectors[:, sorted_indices][:, :self.n_components]
 
+        self.eigenvalues_ = eigenvalues
+        self.eigenvectors_ = eigenvectors
+        self.embedding_ = self.eigenvectors_*torch.sign(self.eigenvalues_) * torch.sqrt(torch.abs(self.eigenvalues_))
 
-        self.embedding_ = self.kernel_pca_.fit_transform(G)
+        return self.embedding_
 
-        if SMACOF_refine:
-            self.refined_embedding_ = smacof_single_pytorch(self.distances_matrix, n_components=self.n_components,init=self.embedding_,device=G.device)
-            return self.refined_embedding_
-        else:
-            return self.embedding_
+    def transform(self, test_distances):
+        """Transform new points based on the fitted Isomap model."""
+        if self.embedding_ is None or self.eigenvalues_ is None or self.eigenvectors_ is None:
+            raise ValueError("The model must be fitted before calling transform.")
 
-    def transform(self, test_distances,SMACOF_refine = False):
+        # n_test = test_distances.size(0)
+        # n_train = self.dist_matrix_.size(0)
+
+        # # Compute shortest paths for test points to training points
+        # G_X = torch.full((n_test, n_train), float('inf'), dtype=test_distances.dtype).to(device)
+        # for i in range(n_test):
+        #     distances = test_distances[i]
+        #     neighbors = torch.topk(distances, self.n_neighbors, largest=False).indices
+        #     for neighbor in neighbors:
+        #         G_X[i] = torch.min(G_X[i], self.dist_matrix_[neighbor] + distances[neighbor])
 
         G_X = self._compute_test_shortest_paths(test_distances,optimized=True)
 
-        if SMACOF_refine:
-            diss = G_X.clone()
-
         # Center the distances for test points
+        train_mean = torch.mean(self.dist_matrix_ ** 2, dim=1, keepdim=True)
+        overall_mean = torch.mean(self.dist_matrix_ ** 2)
         G_X **= 2
-        G_X *= -0.5
+        K_test = -0.5 * (G_X - train_mean.T - torch.mean(G_X, dim=1, keepdim=True) + overall_mean)
 
-
-        if SMACOF_refine:
-            self.refined_embedding_ = smacof_single_pytorch(diss, n_components=self.n_components,init=self.kernel_pca_.transform(G_X),device=G_X.device)
-            return self.refined_embedding_
-        else:
-            return self.kernel_pca_.transform(G_X)
+        # Project test points into the embedding space
+        test_embedding = K_test @ self.eigenvectors_*torch.sign(self.eigenvalues_) / torch.sqrt(torch.abs(self.eigenvalues_)+ 1e-8)
+        return test_embedding
 
     def forward(self):
         self.update_distance_matrix()

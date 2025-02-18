@@ -1,4 +1,4 @@
-import os
+import os,sys
 from datetime import datetime
 
 import numpy as np
@@ -10,7 +10,8 @@ from sklearn.metrics import pairwise_distances
 from sklearn.model_selection import train_test_split
 from torch import float32, nn, optim
 
-
+os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname( __file__ ), '../..')))
 
 import time
 
@@ -125,10 +126,10 @@ for _ in range(10):
 
         reproj_features = isomap_model().to(float32)
 
-        plt.scatter(reproj_features.cpu().detach().numpy()[:, 1],
-                    reproj_features.cpu().detach().numpy()[:, 0],
-                    c=reduced_train_target.cpu().detach().numpy())
-        plt.show()
+        #plt.scatter(reproj_features.cpu().detach().numpy()[:, 1],
+                    #reproj_features.cpu().detach().numpy()[:, 0],
+                    #c=reduced_train_target.cpu().detach().numpy())
+        #plt.show()
 
         with torch.no_grad():
             features = isomap_model.transform(dist_train_new)
@@ -212,7 +213,7 @@ for _ in range(10):
             plt.tight_layout()
             plt.yscale('log')
             plt.savefig(f'{working_folder}/isomap_model_convergence.png')
-            plt.show()
+            #plt.show()
 
 
     torch.save(best_isomap_model.state_dict(), f'{working_folder}/isomap_model.pt')
@@ -231,7 +232,7 @@ for _ in range(10):
     plt.tight_layout()
     plt.yscale('log')
     plt.savefig(f'{working_folder}/isomap_model_convergence.png')
-    plt.show()
+    #plt.show()
 
 
     test_proj_points = best_isomap_model.transform(test_dist)
@@ -287,7 +288,7 @@ for _ in range(10):
     fig.suptitle(f'NN transformed: Train BCE={train_bce}, Test BCE={test2_bce}\nTrain accuracy={train_acc}, Test accuracy={test2_acc}')
     plt.tight_layout()
     plt.savefig(f'{working_folder}/best_graph_prediction.png')
-    plt.show()
+    #plt.show()
 
     df = pd.DataFrame()
     df['BCE_train'] = [train_bce]
@@ -312,12 +313,12 @@ for _ in range(10):
 
     plt.scatter(grid[:, 1], grid[:, 0])
     plt.title('Grid in euclidean coordinates')
-    plt.show()
+    #plt.show()
 
     polar_grid_features = to_polar(torch.tensor(grid))
     plt.scatter(polar_grid_features[:, 1], polar_grid_features[:, 0])
     plt.title('Grid in polar coordinates')
-    plt.show()
+    #plt.show()
 
     grid_dist = pairwise_distances(grid, train_features[pts])
 
@@ -326,5 +327,5 @@ for _ in range(10):
     plt.scatter(proj_grid_features[:, 1], proj_grid_features[:, 0])
     plt.title('Grid in transformed coordinates')
     plt.savefig(f'{working_folder}/grid_with_isomap.png')
-    plt.show()
+    #plt.show()
 

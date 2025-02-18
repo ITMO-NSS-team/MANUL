@@ -77,23 +77,93 @@ metrics = {'CEL_train': [],
            'acc_train': [],
            'acc_test': []}
 
+
+
+# Define the Convolutional Autoencoder
+class ConvAutoencoder(nn.Module):
+    def __init__(self, latent_dim=64):
+        super(ConvAutoencoder, self).__init__()
+        # Encoder
+        self.encoder = nn.Sequential(
+            nn.Conv2d(1, 32, kernel_size=3, stride=2, padding=1),  # [B, 32, 14, 14]
+            nn.ReLU(),
+            nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1),  # [B, 64, 7, 7]
+            nn.ReLU(),
+            nn.Flatten(),
+            nn.Linear(64 * 7 * 7, latent_dim)
+        )
+        # Decoder
+        self.decoder = nn.Sequential(
+            nn.Linear(latent_dim, 64 * 7 * 7),
+            nn.ReLU(),
+            nn.Unflatten(1, (64, 7, 7)),
+            nn.ConvTranspose2d(64, 32, kernel_size=3, stride=2, padding=1, output_padding=1),  # [B, 32, 14, 14]
+            nn.ReLU(),
+            nn.ConvTranspose2d(32, 1, kernel_size=3, stride=2, padding=1, output_padding=1),  # [B, 1, 28, 28]
+            nn.Sigmoid()  # Output values between 0 and 1
+        )
+
+    def forward(self, x):
+        latent = self.encoder(x)
+        reconstruction = self.decoder(latent)
+        return reconstruction, latent
+
+
+
+
+
 for i in range(5):
     train_features, train_target, _, _, test_features, test_target = init_data()
-    # RAVEL DATA
-    train_features = train_features.reshape(train_features.shape[0],
-                                            train_features.shape[1] *
-                                            train_features.shape[2] *
-                                            train_features.shape[3])
-    test_features = test_features.reshape(test_features.shape[0],
-                                          test_features.shape[1] *
-                                          test_features.shape[2] *
-                                          test_features.shape[3])
 
-    model_seq = [nn.Linear(train_features.shape[-1], 512, dtype=float32),
-                 nn.Linear(512, 256, dtype=float32),
-                 nn.Linear(256, 64, dtype=float32),
-                 nn.Linear(64, 10, dtype=float32),  # 10 classes
-                 ]
+    latent_len = 8
+
+    cae_dataset = torch.utils.data.TensorDataset(torch.Tensor(train_features), torch.Tensor(train_target))
+    cae_loader = torch.utils.data.DataLoader(cae_dataset, batch_size=128, shuffle=True)
+
+    cae_model = ConvAutoencoder(latent_dim=latent_len).to("cuda")
+
+    cae_criterion = nn.MSELoss()
+    cae_optimizer = torch.optim.Adam(cae_model.parameters(), lr=1e-3)
+
+
+    #Training loop
+    epochs = 300
+    for epoch in range(epochs):
+    #ep=0
+    #total_loss=len(cae_loader)
+    #while (total_loss/len(cae_loader))>1e-3:
+        total_loss = 0
+        for batch, _ in cae_loader:
+            batch = batch.to("cuda")
+            cae_optimizer.zero_grad()
+            reconstruction, _ = cae_model(batch)
+            loss = cae_criterion(reconstruction, batch)
+            loss.backward()
+            cae_optimizer.step()
+            total_loss += loss.item()
+        #ep+=1
+        print(f"CAE Epoch {epoch+1}/{epochs}, Loss: {total_loss/len(cae_loader)}")
+        #print(f"CAE Epoch {ep}, Loss: {total_loss/len(cae_loader)}")
+
+    with torch.no_grad():
+        _,train_features = cae_model(torch.Tensor(train_features).to('cuda'))
+        _,test_features = cae_model(torch.Tensor(test_features).to('cuda'))
+
+
+
+    # model_seq = [nn.Linear(train_features.shape[-1], 512, dtype=float32),
+    #              nn.Linear(512, 256, dtype=float32),
+    #              nn.Linear(256, 64, dtype=float32),
+    #              nn.Linear(64, 10, dtype=float32),  # 10 classes
+    #              ]
+
+    model_seq = [nn.Linear(latent_len, latent_len-1, dtype=float32),
+                                    nn.ReLU(),
+                                    nn.Linear(latent_len-1, 256, dtype=float32),
+                                    nn.Linear(256, 64, dtype=float32),
+                                    nn.Linear(64, 10, dtype=float32),  # 10 classes
+                                    ]
+
     print(model_seq)
     task_model = nn.Sequential(*model_seq).to(device)
     task_optim = torch.optim.AdamW(params=task_model.parameters(), lr=0.0001)
@@ -140,7 +210,7 @@ for i in range(5):
     metrics['acc_train'].append(train_acc.cpu().detach().numpy())
     metrics['acc_test'].append(test_acc.cpu().detach().numpy())
 
-    working_folder = datetime.now().strftime('ICML_RESULTS/mnist_fnn_(raw_model)%Y%m%d_%H.%M')
+    working_folder = datetime.now().strftime('ICML_RESULTS/mnist_fnn_CAE(raw_model)%Y%m%d_%H.%M')
     if not os.path.exists(working_folder):
         os.makedirs(working_folder)
 
