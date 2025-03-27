@@ -12,3 +12,6 @@ examples/data/*_mnist.npy
 *.csv
 *.pt
 *.dat
+*.csv
+*.pt
+*.dat

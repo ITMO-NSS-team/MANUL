@@ -318,6 +318,8 @@ class IsomapNN(nn.Module):
             diss = G_X.clone()
 
         # Center the distances for test points
+        train_mean = torch.mean(self.dist_matrix_ ** 2, dim=1, keepdim=True)
+        overall_mean = torch.mean(self.dist_matrix_ ** 2)
         G_X **= 2
         G_X *= -0.5
 
