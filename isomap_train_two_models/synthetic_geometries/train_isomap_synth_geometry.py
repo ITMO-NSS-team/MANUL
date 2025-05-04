@@ -56,18 +56,22 @@ def plot_predictoion_PCA_transform(points, proj_points, true_labels, predicted_l
 def plot_predictoion(points, proj_points_2d, true_labels, predicted_labels, title, save_path):
     points_2d = PCA(n_components=2).fit_transform(points)
 
-    fig, axs = plt.subplots(1, 3, figsize=(14, 5))
-    cs0 = axs[0].scatter(points_2d[:, 1], points_2d[:, 0], c=true_labels)
-    fig.colorbar(cs0, ax=axs[0])
-    axs[0].set_title('Euclidean - Target values')
+    fig, axs = plt.subplots(2, 2, figsize=(14, 5))
+    cs0 = axs[0,0].scatter(points_2d[:, 1], points_2d[:, 0], c=true_labels)
+    fig.colorbar(cs0, ax=axs[0,0])
+    axs[0,0].set_title('Euclidean - Target values')
 
-    cs1 = axs[1].scatter(proj_points_2d[:, 1], proj_points_2d[:, 0], c=predicted_labels)
-    fig.colorbar(cs1, ax=axs[1])
-    axs[1].set_title('ISOMAP projected - Predicted values')
+    cs1 = axs[1,0].scatter(proj_points_2d[:, 1], proj_points_2d[:, 0], c=predicted_labels)
+    fig.colorbar(cs1, ax=axs[1,0])
+    axs[1,0].set_title('ISOMAP projected - Predicted values')
 
-    cs2 = axs[2].scatter(points_2d[:, 1], points_2d[:, 0], c=predicted_labels)
-    fig.colorbar(cs2, ax=axs[2])
-    axs[2].set_title('Euclidean - Predicted values')
+    cs3 = axs[1,1].scatter(proj_points_2d[:, 1], proj_points_2d[:, 0], c=true_labels)
+    fig.colorbar(cs1, ax=axs[1,1])
+    axs[1,1].set_title('ISOMAP projected - True values')
+
+    cs2 = axs[0,1].scatter(points_2d[:, 1], points_2d[:, 0], c=predicted_labels)
+    fig.colorbar(cs2, ax=axs[0,1])
+    axs[0,1].set_title('Euclidean - Predicted values')
 
     fig.suptitle(title)
     plt.tight_layout()
@@ -101,15 +105,20 @@ def run_isomap(run_number=1):
         data = (data - np.min(data)) / (np.max(data) - np.min(data))
         X_train, X_test, y_train, y_test = train_test_split(data, labels)
 
+        print('X_train mean={} std={}'.format(np.mean(X_train),np.var(X_train)))
+        print('X_test mean={} std={}'.format(np.mean(X_test),np.var(X_test)))
+
         geom_path = f'results_(1k)/{geometry}/isomap'
         if not os.path.exists(geom_path):
             os.makedirs(geom_path)
 
         dist_train = torch.tensor(pairwise_distances(X_train, X_train), dtype=float32)
         max_val = torch.max(dist_train)
+
+        
         dist_train = dist_train / max_val
         # SELECT SPARSE POINTS
-        if X_train.shape[0] > 1000:
+        if X_train.shape[0] > 5000:
             retain_points = 1000
             pts, reduced_dist = reduce_dist_fps(dist_train, retain_points)
         else:
@@ -131,11 +140,15 @@ def run_isomap(run_number=1):
         else:
             latent_len = X_train.shape[-1]'''
         latent_len = 3
+        print('reduced_dist mean={} std={}'.format(torch.mean(reduced_dist),torch.var(reduced_dist)))
+        print('dist_train_new mean={} std={}'.format(torch.mean(dist_train_new),torch.var(dist_train_new)))
+        print('test_dist mean={} std={}'.format(torch.mean(test_dist),torch.var(test_dist)))
         for r in range(0, run_number):
             print(f'{geom_path} - {r}')
 
             # ________________TRAIN ISOMAP ______________________________
-            isomap_model = IsomapNN(reduced_dist, n_components=latent_len)
+            
+            isomap_model = IsomapNN(reduced_dist, n_components=latent_len, eigval_choice='MDS')
             isomap_model.to(device)
 
             isomap_epochs = 1000
@@ -150,13 +163,14 @@ def run_isomap(run_number=1):
             # ISOMAP TRAIN LOOP
             for epoch in range(isomap_epochs):
                 reproj_features = isomap_model().to(float32)
-
+                #print('reproj_features mean={} std={}'.format(torch.mean(reproj_features),torch.var(reproj_features)))
                 with torch.no_grad():
+                    
                     features = isomap_model.transform(dist_train_new)
-
-                task_model = nn.Sequential(nn.Linear(latent_len, 562, dtype=float32),
+                    #print('features mean={} std={}'.format(torch.mean(features),torch.var(features)))
+                task_model = nn.Sequential(nn.Linear(latent_len, 512, dtype=float32),
                                            #nn.ReLU(),
-                                           nn.Linear(562, 256, dtype=float32),
+                                           nn.Linear(512, 256, dtype=float32),
                                            nn.Linear(256, 64, dtype=float32),
                                            nn.Linear(64, 1, dtype=float32)
                                            ).to(device)
@@ -184,7 +198,7 @@ def run_isomap(run_number=1):
 
                 if losses[-1] > 0.20:
                     for g in isomap_optim.param_groups:
-                        g['lr'] = 0.01
+                        g['lr'] = 0.001
                 if 0.20 >= losses[-1] >= 0.06:
                     for g in isomap_optim.param_groups:
                         g['lr'] = 0.0001
