@@ -3,7 +3,7 @@ from copy import deepcopy
 import os
 
 from tests.utils import create_connected_graph_individ
-from evolution.Evolution import Evolution
+from evolution.Evolution import Evolution, MultiEvolution
 from regularizator.ModuleNN import ModelNN
 
 
@@ -106,6 +106,4 @@ def test_save_and_load_history():
         isEqual *= population.individs_pool[i].trained_loss_values == dict_for_test[i]["trained_loss_values"]
 
     assert isEqual
-
-
-
+    

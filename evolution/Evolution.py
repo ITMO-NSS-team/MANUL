@@ -2,7 +2,7 @@ import numpy as np
 import pickle
 from matplotlib import pyplot as plt
 
-from evolution.PopulationEvoOperators import PopulationEvoOperators
+from evolution.PopulationEvoOperators import PopulationEvoOperators, PopulationMultiEvoOperators
 from evolution.IndividStructures import DataStructureGraph
 from evolution.PopulationStructures import Population
 from regularizator.ModuleNN import ModelNN
@@ -18,11 +18,11 @@ class Evolution:
                  edges_weight_mutation=True,
                  evo_operators_params: dict = None):
         """
-        Class for set and run evolution optimization on graph for best model fitting on data
+        Class for setup and execution of the evolution optimization on graph to improve the model fit to data
         :param base_individ: DataStructureGraph class object as starting point
         :param population_size: number of individs in population to produce from base_individ with mutation
         :param iterations: number of iterations for evolution
-        :param model_to_optimize: ModelNN for which the best quality is searching
+        :param model_to_optimize: ModelNN, for which the graph with best quality is searched
         :param evo_operators_params: dictionary with parameters for evolutionary operators for custom setting
         """
         self.evolution_history = None
@@ -152,3 +152,125 @@ class Evolution:
         with open(f'{self.base_individ.cache_folder}/{name}.pkl', 'wb') as outp:
             pickle.dump(history, outp, pickle.HIGHEST_PROTOCOL)
             print(f'History evolution saved to {self.base_individ.cache_folder}/{name}.pkl')
+
+
+class MultiEvolution(Evolution):
+    def __init__(self, base_individ: DataStructureGraph,
+                 population_size: int,
+                 iterations: int,
+                 model_to_optimize: ModelNN,
+                 base_mutation=True,
+                 edges_mutation=True,
+                 edges_weight_mutation=True,
+                 evo_operators_params: dict = None):
+        
+        """
+        Class for set and run multi-objective evolutionary optimization on graph for best model fitting on data
+        :param base_individ: DataStructureGraph class object as the starting point
+        :param population_size: number of individs in population to produce from base_individ with mutation
+        :param iterations: number of iterations for evolution
+        :param model_to_optimize: ModelNN, for which the graph with best quality is searched
+        :param evo_operators_params: dictionary with parameters for evolutionary operators for custom setting
+        """
+        
+        super().__init__(base_individ, population_size, iterations, model_to_optimize, base_mutation, edges_mutation, edges_weight_mutation, evo_operators_params)
+
+        self.__init_weights_vector()
+    
+    def __init_weights_vector(self):
+        x = np.linspace(0, 1, self.population_size)
+        y = x[-1::-1]
+        self.weights_vector = np.array([x, y]).T
+
+    def plot_vectors(self, path=None):
+        '''
+        Drawing weigth vectors for demonstration of Pareto-front for individs (primarily for debug purposes).
+        :param path: path for saving image. Optional, by default image will showed.
+        '''
+        points = []
+        ind_from_pop = self.population.individs_pool
+        for i in range(self.population_size):
+            plt.plot([0,self.weights_vector[i][0]], [0, self.weights_vector[i][1]])
+            points.append(ind_from_pop[i].criteria)
+        points = np.array(points)
+        plt.scatter(points[:, 0], points[:, 1])
+        if path is not None:
+            plt.savefig(path)
+            plt.clf()
+        else:
+            plt.show()
+
+    def run(self):
+        evolution_history = {}
+        self.best_individs_history = {}
+        self.evaluate_criteria()
+
+        self.best_individs_history[0] = self.population.individs_pool
+
+        for i in range(self.iterations):
+            print(f'Evolution run, iteration - {i}')
+            pop_operators = PopulationMultiEvoOperators(population=self.population)
+            pop_operators.decomposition_population_by_vectors(self.weights_vector)
+            self.plot_vectors(path=f"{self.population.individs_pool[0].cache_folder}/vector{i}.png")
+            
+            for idx_vector, vector in enumerate(self.weights_vector):
+                print('Search non-dominant individs')
+                pop_operators.fast_non_dominated_sorting()
+                print('Selecting individs') # - получается первый индивид
+                pop_operators.selection_for_multiopt(index_vector=idx_vector)
+                print('Crossover')
+                pop_operators.crossover_population(crossover_size_percent=self.evo_operators_params["crossover"].
+                                               get('crossover_size_percent', None))
+                print('Mutate')
+                pop_operators.mutate_population(mutation_prob=self.evo_operators_params["mutation"].
+                                            get('mutation_prob', None),
+                                            base_mutation=self.base_mutation,
+                                            edges_mutation=self.edges_mutation,
+                                            edges_weight_mutation=self.edges_weight_mutation)
+                print('Count criteria in new individs')
+                self.evaluate_criteria()
+                print('Replace individs')
+                pop_operators.form_popualtion_with_new_individs()
+                for individ in self.population.individs_pool:
+                    individ.selected = False
+            
+            self.best_individs_history[i+1] = self.population.individs_pool            
+        
+        self.save_individs()
+
+    def save_individs(self):
+        '''
+        Saving all individs at the current moment.
+        '''
+        for index, individ in enumerate(self.population.individs_pool):
+            individ.save_cache_object(name=f'final_graph{index}')
+
+    def evaluate_criteria(self):
+        self.population = self.population.evaluate_individs_criteria(self.base_model)
+
+    def plot_mse_best_individ_by_epoch(self, features, target):
+        '''
+        Plotting MSE metric on test dataset for the best individ in population for each iteration of evolution.
+        '''
+        from copy import deepcopy
+        ylab = 'MSE Loss'
+
+        metrics = []
+        for iter in self.best_individs_history:
+            individs = self.best_individs_history[iter]
+            for individ in individs:
+                temp_model = deepcopy(self.base_model)
+                temp_model.train(individ)
+                metric = temp_model.get_metric_on_test(features, target)
+                if (len(metrics) - 1) < iter:
+                    metrics.append(metric)
+                elif metrics[-1] > metric:
+                    metrics[-1] = metric
+        plt.scatter(np.arange(len(metrics)), metrics)
+
+        plt.title('Evolution convergence')
+        plt.xlabel('Generation')
+        plt.ylabel(ylab)
+        plt.show()
+
+        
