@@ -64,7 +64,6 @@ class ModelNN:
         self.target = train_target
         self.batch_size = batch_size
         self.num_epochs = num_epochs
-        self.batch_size = batch_size
         self.problem = problem
 
         self.init_model(model_structure, model_weights)

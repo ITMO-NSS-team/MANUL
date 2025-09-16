@@ -32,7 +32,7 @@ setuptools.setup(
     packages=setuptools.find_packages(exclude=['test*']),
     include_package_data=True,
     extras_require={
-        key: _get_requirements(Path('other_requirements', f'{key}.txt'))
+        key: _get_requirements(Path('extra_requirements', f'{key}.txt'))
         for key in ('evo_test', 'docs')
     },
 )

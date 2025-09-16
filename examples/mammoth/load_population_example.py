@@ -1,14 +1,10 @@
 import os
-import ast
-
-import numpy as np
 import pandas as pd
-from copy import deepcopy
 from mammoth_3d_n_runs import form_dataset, split_dataset
 
 from evolution.IndividStructures import DataStructureGraph
 from evolution.PopulationEvoOperators import Population
-from regularizator.ModuleNN import ModelNN
+
 
 def plot_loss(info_loss):
     import plotly.express as px
