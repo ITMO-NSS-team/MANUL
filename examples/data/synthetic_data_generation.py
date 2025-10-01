@@ -7,14 +7,6 @@ from sklearn.decomposition import PCA
 np.random.seed(42)
 
 
-def circles_2d(n_samples=1000):
-    xs = np.random.uniform(low=-1, high=1, size=n_samples)
-    ys = np.random.uniform(low=-1, high=1, size=n_samples)
-    points = np.vstack((xs, ys)).T
-    colors = np.array([(abs(point[0]) + abs(point[1])) / 2 for point in points])
-    return points, colors
-
-
 def plot_data(points, colors, title='', save_path=None):
     pca_points = PCA(n_components=2).fit_transform(points)
 

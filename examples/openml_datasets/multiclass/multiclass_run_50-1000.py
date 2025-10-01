@@ -9,7 +9,7 @@ from sklearn.preprocessing import StandardScaler, LabelEncoder
 
 from evolution.Evolution import Evolution
 from evolution.IndividStructures import DataStructureGraph
-from regularizator.ModuleNN import ModelNN
+from structure_approximation.ModuleNN import ModelNN
 
 
 def split_train_test_shuffle(dataset_df, target_name):

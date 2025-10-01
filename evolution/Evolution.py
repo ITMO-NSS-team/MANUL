@@ -5,7 +5,7 @@ from matplotlib import pyplot as plt
 from evolution.PopulationEvoOperators import PopulationEvoOperators, PopulationMultiEvoOperators
 from evolution.IndividStructures import DataStructureGraph
 from evolution.PopulationStructures import Population
-from regularizator.ModuleNN import ModelNN
+from structure_approximation.ModuleNN import ModelNN
 
 
 class Evolution:

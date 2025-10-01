@@ -6,7 +6,7 @@ import pickle as pkl
 
 from tests.utils import create_model_circle_withoutgraph, create_model_circle_withgraph
 from tests.utils import simple_nn, split_dataset, fake_loss
-from regularizator.ModuleNN import ModelNN
+from structure_approximation.ModuleNN import ModelNN
 from evolution.Evolution import Evolution
 
 

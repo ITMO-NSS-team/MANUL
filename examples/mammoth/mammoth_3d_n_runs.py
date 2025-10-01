@@ -6,7 +6,7 @@ import pandas as pd
 from matplotlib import pyplot as plt
 from evolution.Evolution import Evolution
 from evolution.IndividStructures import DataStructureGraph
-from regularizator.ModuleNN import ModelNN
+from structure_approximation.ModuleNN import ModelNN
 
 
 def form_dataset():

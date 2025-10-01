@@ -7,7 +7,7 @@ import pandas as pd
 from matplotlib import pyplot as plt
 from evolution.Evolution import MultiEvolution
 from evolution.IndividStructures import DataStructureGraph
-from regularizator.ModuleNN import ModelNN
+from structure_approximation.ModuleNN import ModelNN
 
 def get_data():
     features = np.load("examples/data/feature_mnist.npy")

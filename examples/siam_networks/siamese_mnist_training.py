@@ -1,7 +1,7 @@
 from torchvision import datasets
 import numpy as np
 from evolution.IndividStructures import DataStructureGraph
-from regularizator.ModuleNN import ModelNN
+from structure_approximation.ModuleNN import ModelNN
 
 
 dataset = datasets.MNIST('data', train=True, download=False)

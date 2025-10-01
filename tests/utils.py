@@ -6,7 +6,7 @@ from torch import float64 as fl64
 from torch import nn
 
 from evolution.IndividStructures import DataStructureGraph
-from regularizator.ModuleNN import ModelNN
+from structure_approximation.ModuleNN import ModelNN
 
 def simple_nn(inp_dims):
     model = nn.Sequential(nn.Linear(inp_dims, 128, dtype=fl64),

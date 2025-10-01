@@ -1,0 +1,20 @@
+from datetime import datetime
+
+import torch
+from torch import float32
+
+from examples.data.synthetic_data_generation import geometries
+from gradient_isomap.GradientIsomap import GradientIsomap
+
+device = 'cuda'
+for geometry in geometries.keys():
+    data, labels = geometries[geometry][0]()
+    latent_len = geometries[geometry][1]
+    train_target = torch.tensor(labels, dtype=float32).to(device)
+    isomap = GradientIsomap(train_feature=data,
+                            train_target=train_target,
+                            latent_len=latent_len,
+                            checkpoint_each=100,
+                            logs_folder=f'{geometry}_{datetime.now().strftime("%d%m%Y-%H.%M")}',
+                            plot_convergence=False)
+    isomap.train()

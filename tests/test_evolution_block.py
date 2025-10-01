@@ -4,7 +4,7 @@ import os
 
 from tests.utils import create_connected_graph_individ
 from evolution.Evolution import Evolution, MultiEvolution
-from regularizator.ModuleNN import ModelNN
+from structure_approximation.ModuleNN import ModelNN
 
 
 def test_genearte_evolution():

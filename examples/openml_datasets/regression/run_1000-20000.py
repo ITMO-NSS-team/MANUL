@@ -9,7 +9,7 @@ from sklearn.preprocessing import LabelEncoder
 
 from evolution.Evolution import Evolution
 from evolution.IndividStructures import DataStructureGraph
-from regularizator.ModuleNN import ModelNN
+from structure_approximation.ModuleNN import ModelNN
 
 def split_train_test(dataset, target_name, split_ratio: float = 0.2):
     y = dataset[target_name].to_numpy()

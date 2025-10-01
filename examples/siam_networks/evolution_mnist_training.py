@@ -1,7 +1,7 @@
 from torchvision import datasets
 from evolution.Evolution import Evolution
 from evolution.IndividStructures import DataStructureGraph
-from regularizator.ModuleNN import ModelNN
+from structure_approximation.ModuleNN import ModelNN
 
 cache_folder = 'cache'
 
