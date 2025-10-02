@@ -3,6 +3,7 @@ import os
 import pickle
 
 from evolution.PopulationEvoOperators import IndividEvoOperators
+from structure_approximation.IntrinsicNN import IntrinsicNN
 
 
 class Population:
@@ -42,7 +43,7 @@ class Population:
         self.individs_pool = individs_pool
         return self
 
-    def evaluate_individs_fitness(self, base_model):
+    '''def evaluate_individs_fitness(self, base_model):
         """
         Function for adding fitness parameter to each individ of the population.
         :param base_model: model in which loss with individ is calculated
@@ -50,6 +51,26 @@ class Population:
         for individ in self.individs_pool:
             if individ.fitness is None:
                 individ_model = deepcopy(base_model)
+                individ_model.train(individ)
+                fitness = individ_model.trained_loss_values['combined_loss']
+                fitness = 1 / fitness
+                individ.fitness = fitness
+                individ.trained_loss_values = individ_model.trained_loss_values
+        return self'''
+
+    def evaluate_individs_fitness(self):
+        """
+        Function for adding fitness parameter to each individ of the population.
+        """
+        for individ in self.individs_pool:
+            if individ.fitness is None:
+
+                individ_model = IntrinsicNN(features,
+                                     self.targets,
+                                     self.latent_len,
+                                     plot_convergence=self.plot_convergence,
+                                     epochs=500)
+
                 individ_model.train(individ)
                 fitness = individ_model.trained_loss_values['combined_loss']
                 fitness = 1 / fitness

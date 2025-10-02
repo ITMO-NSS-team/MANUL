@@ -22,7 +22,7 @@ class Evolution:
         :param base_individ: DataStructureGraph class object as starting point
         :param population_size: number of individs in population to produce from base_individ with mutation
         :param iterations: number of iterations for evolution
-        :param model_to_optimize: ModelNN, for which the graph with best quality is searched
+        :param model_to_optimize: ModelNN, for which the graph with the best quality is searched
         :param evo_operators_params: dictionary with parameters for evolutionary operators for custom setting
         """
         self.evolution_history = None

@@ -18,14 +18,16 @@ class GradientIsomap:
                  epochs: int = 1000,
                  plot_convergence: bool = True,
                  checkpoint_each: [int, None] = 100,
-                 logs_folder: [str, None] = None
+                 logs_folder: [str, None] = None,
+                 stop_criteria_value: float = 0.001
                  ):
-        self.features = train_feature.astype(float)
+        self.features = train_feature
         self.targets = train_target
         self.epochs = epochs
         self.plot_convergence = plot_convergence
         self.latent_len = latent_len
         self.checkpoint_each = checkpoint_each
+        self.stop_criteria_value = stop_criteria_value
         self.device = self._init_device()
         self.logs_folder = self._init_logs_folder(logs_folder)
         self.best_loss = np.inf
@@ -103,7 +105,10 @@ class GradientIsomap:
             epochs_list.append(epoch)
             time_list.append(current_time)
 
-            if self.checkpoint_each is not None and epoch % self.checkpoint_each == 0:
+            stop_criteria = self._check_stop_criteria(losses[-1])
+
+            if (self.checkpoint_each is not None and epoch % self.checkpoint_each == 0 or
+                    epoch == (self.epochs - 1) or stop_criteria):
                 # Saving visualizations and logs each epoch checkpoint
                 reproj_features = reproj_features.cpu().detach().numpy()
                 output = output.cpu().detach().numpy()
@@ -128,8 +133,14 @@ class GradientIsomap:
 
                 torch.save(self.best_isomap_model.state_dict(), f'{self.logs_folder}/best_isomap_model.pt')
 
+            if stop_criteria:
+                break
+
         torch.save(self.best_isomap_model.state_dict(), f'{self.logs_folder}/best_isomap_model.pt')
         print(f'Train finished in {time_list[-1]}, logs folder: {self.logs_folder}')
+
+    def _check_stop_criteria(self, loss_value: float):
+        return loss_value <= self.stop_criteria_value
 
     def _isomap_weights(self, isomap_model):
         weights_matrix = isomap_model.distances_matrix.cpu().detach().clone().numpy()
@@ -137,7 +148,6 @@ class GradientIsomap:
         upper_tri_indices = torch.triu_indices(rows, cols, offset=1)
         isomap_weights = weights_matrix[upper_tri_indices[0], upper_tri_indices[1]]
         return isomap_weights.cpu().detach().numpy() if hasattr(isomap_weights, 'cpu') else isomap_weights
-
 
     def _stable_eigenvalues(self, isomap_eigenvalues, isomap_optim):
         if abs(isomap_eigenvalues[0]) < 0.01:
