@@ -7,10 +7,13 @@ from sklearn.manifold import Isomap
 
 class DataStructureGraph:
     def __init__(self, dimensionality: int,
+                 targets: np.ndarray,
                  distances_matrix: np.ndarray = None,
                  features: np.ndarray = None
                  ):
 
+        self.features = None
+        self.targets = targets
         self.dimensionality = dimensionality
         self._init_structure(distances_matrix, features)
 
@@ -21,17 +24,27 @@ class DataStructureGraph:
         self.level = None
 
     def _init_structure(self, distances_matrix: np.ndarray, features: np.ndarray):
-        if distances_matrix is None and features is None:
-            raise Exception('No data for building graph! distances_matrix or features should be specified!')
         if distances_matrix is None:
             # determine matrix by projection (actual for base individ)
-            print('Init graph as initial assumption on euclidean distances')
-            self.distances_matrix = pairwise_distances(features, features)
+            print('Init distance matrix for initial assumption')
+            #self.distances_matrix = pairwise_distances(features, features)
+            self.distances_matrix = self.generate_random_matrix(features.shape[0], dist_type='normal')
         if distances_matrix is not None:
             self.distances_matrix = distances_matrix
-            if features is not None:
-                print('Distance matrix is prior for graph building, specified features are ignored')
-            self.upd_features()
+        self.upd_features()
+
+    @staticmethod
+    def generate_random_matrix(n_samples, dist_type='normal'):
+        if dist_type == 'uniform':
+            matrix = np.random.rand(n_samples, n_samples)
+        elif dist_type == 'normal':
+            matrix = np.abs(np.random.randn(n_samples, n_samples))
+        elif dist_type == 'exp':
+            matrix = np.random.rand(n_samples, n_samples) ** 2
+
+        matrix = (matrix + matrix.T) / 2
+        np.fill_diagonal(matrix, 0)
+        return matrix / matrix.max()
 
     def upd_features(self):
         """Building features projection from distance matrix via Isomap"""
@@ -85,6 +98,7 @@ class DataStructureGraph:
         :param node: int - index of the node whose connections with neighbours will be changed
         :param new_edges : indices of new neighbours for the node
         """
+        new_edges = new_edges.flatten()
         # Remove all existing connections to this node
         self.distances_matrix[node, :] = 0
         self.distances_matrix[:, node] = 0
@@ -101,6 +115,10 @@ class DataStructureGraph:
         self.distances_matrix[new_edges, node] = distances
 
     @property
+    def eigenvalues(self):
+        return np.linalg.eigh(self.distances_matrix)[0][:2]
+
+    @property
     def number_of_edges(self):
         """
         Property return number of edges in individ graph
@@ -114,9 +132,9 @@ class DataStructureGraph:
         """
         return self.distances_matrix.shape[0]
 
-    def visualize(self, alpha=0.7, s=2, line_alpha=0.1):
+    def visualize(self, alpha=0.7, s=5, line_alpha=0.1):
         """
-        Lightweight visualization for large graphs using pure matplotlib
+        Ultra-fast visualization using LineCollection
         """
         if self.features.shape[1] > 2:
             from sklearn.decomposition import PCA
@@ -128,20 +146,25 @@ class DataStructureGraph:
             features_2d = self.features
             projection_info = ''
 
-        plt.figure(figsize=(10, 5))
+        plt.figure(figsize=(5, 6))
+
+        # Plot nodes (fast)
         plt.scatter(features_2d[:, 0], features_2d[:, 1],
-                    s=s, alpha=alpha, c='red')
+                    s=s, alpha=alpha, c=self.targets)
 
+        # Get edges efficiently
         rows, cols = np.where(np.triu(self.distances_matrix) > 0)
-        for i, j in zip(rows, cols):
-            plt.plot([features_2d[i, 0], features_2d[j, 0]],
-                     [features_2d[i, 1], features_2d[j, 1]],
-                     'gray', alpha=line_alpha, linewidth=0.5)
 
-        plt.title(f'Graph Visualization: {self.number_of_nodes} nodes, {self.number_of_edges}{projection_info}')
+        # Use LineCollection for batch plotting (MUCH faster)
+        if len(rows) > 0:
+            from matplotlib.collections import LineCollection
+            segments = np.array([[features_2d[i], features_2d[j]] for i, j in zip(rows, cols)])
+            lc = LineCollection(segments, colors='gray', alpha=line_alpha, linewidths=0.5)
+            plt.gca().add_collection(lc)
+
+        plt.title(f'Graph: {self.number_of_nodes} nodes, {self.number_of_edges} edges{projection_info}, \neigh {self.eigenvalues}')
         plt.xlabel('X')
         plt.ylabel('Y')
         plt.grid(True, alpha=0.3)
-
         plt.tight_layout()
         plt.show()

@@ -62,6 +62,8 @@ class IntrinsicNN:
         """
         Function for training loop with compact NN for manifold approximation
         """
+        self.features = self.features.to(torch.float32).to(self.device)
+        self.targets = self.targets.to(torch.float32).to(self.device)
 
         optim = torch.optim.AdamW(params=self.model.parameters(), lr=0.01)
         criterion = nn.MSELoss()
