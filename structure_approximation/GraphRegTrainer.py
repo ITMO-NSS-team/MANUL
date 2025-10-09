@@ -349,6 +349,7 @@ class GraphRegTrainer:
 
         Y_batch = self.Y_all[batch_indices]
         distances = euclidean_distances(Y_batch, Y_batch)
+        sigma = np.median(distances[distances > 0]) if np.any(distances > 0) else 1.0
         W_batch = distances / np.max(distances) if np.max(distances) > 0 else distances
         #W_batch = np.exp(-distances ** 2 / (2 * sigma ** 2))
         D_batch = np.diag(np.sum(W_batch, axis=1))
@@ -358,12 +359,13 @@ class GraphRegTrainer:
         loss = np.dot(part_1, predictions)
         return loss.reshape(-1)[0]
 
-    def train(self, plot_convergence: bool = False):
+    def train(self, plot_convergence: bool = False, adaptive_lambda: bool = False):
         """
         Train the model with combined loss (model loss + graph regularization loss).
 
         Args:
             plot_convergence: whether to plot convergence graphs after training
+            adaptive_lambda: whether to use adaptive lambda (computed once after 10% of epochs)
 
         Returns:
             self: trained model instance
@@ -372,6 +374,10 @@ class GraphRegTrainer:
         model_losses = []
         graph_losses = []
         combined_losses = []
+
+        lam_nn = 1
+        lam_graph = self.lambda_graph
+        lmds_epochs = int(self.num_epochs * 0.1)
 
         for epoch in range(self.num_epochs):
             if self.verbose:
@@ -399,7 +405,7 @@ class GraphRegTrainer:
                 graph_loss_value = self._compute_graph_loss(predictions_np, batch_indices)
                 graph_loss = torch.tensor(graph_loss_value, dtype=fl64).to(self.device)
 
-                combined_loss = model_loss + self.lambda_graph * graph_loss
+                combined_loss = lam_nn * model_loss + lam_graph * graph_loss
 
                 combined_loss.backward()
                 self.optimizer.step()
@@ -412,9 +418,14 @@ class GraphRegTrainer:
             graph_losses.append(np.mean(epoch_graph_losses))
             combined_losses.append(np.mean(epoch_combined_losses))
 
+            if adaptive_lambda and epoch == lmds_epochs:
+                lam_nn, lam_graph = _get_adaptive_lambda(combined_losses, model_losses, graph_losses)
+
+
+
             if self.verbose:
                 print(f'  Model loss: {model_losses[-1]:.6f}, Graph loss: {graph_losses[-1]:.6f}, Combined: {combined_losses[-1]:.6f}')
-
+                print(f' Adaptive lambdas: lam_nn={lam_nn:.6f}, lam_graph={lam_graph:.6f}')
         self.trained_loss_values['model_loss'] = model_losses
         self.trained_loss_values['graph_loss'] = graph_losses
         self.trained_loss_values['combined_loss'] = combined_losses
