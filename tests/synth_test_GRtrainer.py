@@ -33,18 +33,16 @@ trainer = GraphRegTrainer(
     weights_matrix=weights_matrix,
     basis_indices=basis_indices,
     model=None,
-    num_epochs=50,
+    num_epochs=100,
     batch_size=32,
-    lambda_graph=1,
-    n_neighbors=5,
+    lambda_graph=0.000001,
+    n_neighbors=10,
     method='ensemble_knn',
     verbose=True
 )
 
 print("\nTraining model...")
-trainer.train(plot_convergence=True)
-
-# 4. Prediction and evaluation
+trainer.train(plot_convergence=True, adaptive_lambda=True)
 print("\nEvaluating on test set")
 mse = trainer.evaluate(X_test, y_test)
 print(f"Test MSE: {mse:.4f}")
