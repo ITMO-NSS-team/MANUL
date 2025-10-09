@@ -1,6 +1,9 @@
+<!-- 
 ---
 mathjax: true
 ---
+-->
+
 
 # Manifold Und Learning - MANUL
 
