@@ -43,7 +43,7 @@ To formulate the neighborhood graph learning problem, the manifold regularizatio
 
 $$L^* = \min \limits_{G_n \in \mathcal{G}} \left[\min \limits_{f \in H_k} \mathcal{L}(f)+\lambda(f^T l(G_n) f) \right]$$
 
-The Dirichlet energy term \( E_{G_n}(f) = f^T L(G_n) f \) now depends on the distance graph \( G_n \), which is subject to minimization.
+The Dirichlet energy term $$\( E_{G_n}(f) = f^T L(G_n) f \)$$ now depends on the distance graph \( G_n \), which is subject to minimization.
 We are looking for a graph that minimizes the energy value for a given manifold regularization problem.
 
 
