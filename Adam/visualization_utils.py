@@ -32,18 +32,23 @@ class DataVisualizer:
 
     def create_scatter_plot(self, ax, data, colors, title, cmap='viridis'):
         """Create scatter plot adapted to data dimensionality"""
+        scatter_kwargs = {
+            'c': colors,
+            'cmap': cmap,
+            'alpha': 0.7,
+            's': 20
+        }
+
         if self.dimensionality == 3:
-            sc = ax.scatter(data[:, 0], data[:, 1], data[:, 2],
-                            c=colors, cmap=cmap, alpha=0.7, s=20)
+            sc = ax.scatter(data[:, 0], data[:, 1], data[:, 2], **scatter_kwargs)
             ax.set_zlabel('Component 3')
         elif self.dimensionality == 2:
-            sc = ax.scatter(data[:, 0], data[:, 1],
-                            c=colors, cmap=cmap, alpha=0.7, s=20)
-        else:  # 1D
-            sc = ax.scatter(data[:, 0], np.zeros_like(data[:, 0]),
-                            c=colors, cmap=cmap, alpha=0.7, s=20)
+            sc = ax.scatter(data[:, 0], data[:, 1], **scatter_kwargs)
+        else:
+            sc = ax.scatter(data[:, 0], np.zeros_like(data[:, 0]), **scatter_kwargs)
             ax.set_yticks([])
 
+        ax.set_title(title)
         return sc
 
     def get_projection_type(self):
@@ -56,6 +61,62 @@ class DataVisualizer:
             return f"PCA Explained variance: {self.explained_variance:.3f}"
         else:
             return f"Original {self.n_features}D data"
+
+
+def original_visualization_simple(features, targets, predictions, figsize=(12, 8), save_path='None'):
+    """
+    Simplified comparison visualization with proper 3D handling
+    """
+    visualizer = DataVisualizer(features)
+    features_proj = visualizer.project_data(features)
+
+    # Create subplots with proper projection for 3D
+    if visualizer.dimensionality == 3:
+        fig = plt.figure(figsize=figsize)
+
+        # Create 3D subplots
+        ax1 = fig.add_subplot(2, 2, 1, projection='3d')
+        ax2 = fig.add_subplot(2, 2, 2, projection='3d')
+        ax3 = fig.add_subplot(2, 2, 3, projection='3d')
+        ax4 = fig.add_subplot(2, 2, 4)
+
+        axes = [ax1, ax2, ax3, ax4]
+    else:
+        fig, axes = plt.subplots(2, 2, figsize=figsize)
+        axes = axes.flatten()
+
+    # 1. True targets
+    sc1 = visualizer.create_scatter_plot(axes[0], features_proj, targets,
+                                         'True Targets', 'viridis')
+    plt.colorbar(sc1, ax=axes[0])
+
+    # 2. Predictions
+    sc2 = visualizer.create_scatter_plot(axes[1], features_proj, predictions,
+                                         'Predictions', 'viridis')
+    plt.colorbar(sc2, ax=axes[1])
+
+    # 3. Prediction error
+    error = np.abs(predictions - targets)
+    sc3 = visualizer.create_scatter_plot(axes[2], features_proj, error,
+                                         'Prediction Error', 'hot')
+    plt.colorbar(sc3, ax=axes[2])
+
+    # 4. Predictions vs True (always 2D)
+    axes[3].scatter(targets, predictions, alpha=0.6, s=20)
+    min_val = min(targets.min(), predictions.min())
+    max_val = max(targets.max(), predictions.max())
+    axes[3].plot([min_val, max_val], [min_val, max_val], 'r--', alpha=0.8)
+    axes[3].set_xlabel('True Values')
+    axes[3].set_ylabel('Predictions')
+    axes[3].set_title(f'Predictions vs True\nR² = {np.corrcoef(targets, predictions)[0, 1] ** 2:.3f}')
+    axes[3].grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    if save_path is not None:
+        plt.savefig(save_path, dpi=100, bbox_inches='tight')
+        plt.close()
+    else:
+        plt.show()
 
 
 def create_visualization(epoch, losses, best_epoch, best_loss, best_reproj_features,

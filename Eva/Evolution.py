@@ -5,9 +5,9 @@ import numpy as np
 import pickle
 from matplotlib import pyplot as plt
 
-from Eva.PopulationEvoOperators_new import PopulationEvoOperators
-from Eva.IndividStructures_new import DataStructureGraph
-from Eva.PopulationStructures_new import Population
+from Eva.PopulationEvoOperators import PopulationEvoOperators
+from Eva.IndividStructures import DataStructureGraph
+from Eva.PopulationStructures import Population
 
 
 class Evolution:

@@ -7,7 +7,7 @@ import torch
 from torch import float32, nn
 
 from Adam.Isomap import IsomapNN
-from Adam.visualization_utils import create_visualization
+from Adam.visualization_utils import create_visualization, original_visualization_simple
 from structure_approximation.IntrinsicNN import IntrinsicNN
 
 
@@ -32,6 +32,7 @@ class GradientIsomap:
         self.logs_folder = self._init_logs_folder(logs_folder)
         self.best_loss = np.inf
         self.best_isomap_model = None
+        self.best_distances_matrix = None
 
     def _init_logs_folder(self, folder: [str, None]):
         if folder is None:
@@ -90,6 +91,7 @@ class GradientIsomap:
                 best_epoch = epoch
                 best_loss = losses[-1]
                 self.best_isomap_model = isomap_model
+                self.best_distances_matrix = self._isomap_weights(isomap_model)
                 best_reproj_features = reproj_features.cpu().detach().numpy()
                 best_outputs = output.cpu().detach().numpy()
 
@@ -132,12 +134,29 @@ class GradientIsomap:
                 df.to_csv(f'{self.logs_folder}/convergence_log.csv', index=False)
 
                 torch.save(self.best_isomap_model.state_dict(), f'{self.logs_folder}/best_isomap_model.pt')
+                np.save(f'{self.logs_folder}/best_mapping.npy', best_reproj_features)
+                np.save(f'{self.logs_folder}/best_distance_matrix.npy', self.best_distances_matrix)
 
             if stop_criteria:
                 break
 
         torch.save(self.best_isomap_model.state_dict(), f'{self.logs_folder}/best_isomap_model.pt')
         print(f'Train finished in {time_list[-1]}, logs folder: {self.logs_folder}')
+
+    def visualize_trained(self):
+        proj_features = self.best_isomap_model().to(float32)
+        features = proj_features.detach().clone()
+        task_model = IntrinsicNN(features,
+                                 self.targets,
+                                 self.latent_len,
+                                 plot_convergence=self.plot_convergence,
+                                 epochs=500)
+        task_model.train()
+        output = task_model.model(features).flatten().cpu().detach().numpy()
+        original_visualization_simple(self.features.cpu().detach().numpy(),
+                                      self.targets.cpu().detach().numpy(),
+                                      output,
+                                      save_path=f'{self.logs_folder}/prediction_train.png')
 
     def _check_stop_criteria(self, loss_value: float):
         return loss_value <= self.stop_criteria_value

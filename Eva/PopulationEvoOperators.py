@@ -1,7 +1,7 @@
 import numpy as np
 
-from Eva.IndividEvoOperators_new import IndividEvoOperators
-from Eva.PopulationStructures_new import Population
+from Eva.IndividEvoOperators import IndividEvoOperators
+from Eva.PopulationStructures import Population
 
 
 class PopulationEvoOperators:

@@ -3,7 +3,7 @@ import math
 import numpy as np
 from copy import deepcopy
 
-from Eva.IndividStructures_new import DataStructureGraph
+from Eva.IndividStructures import DataStructureGraph
 
 
 class IndividEvoOperators:

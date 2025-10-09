@@ -4,7 +4,7 @@ import numpy as np
 import torch
 from matplotlib import pyplot as plt
 
-from Eva.PopulationEvoOperators_new import IndividEvoOperators
+from Eva.PopulationEvoOperators import IndividEvoOperators
 from structure_approximation.IntrinsicNN import IntrinsicNN
 
 
