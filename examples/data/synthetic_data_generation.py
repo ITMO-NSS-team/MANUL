@@ -91,7 +91,6 @@ def sphere(n_samples=1000, normalize=True):
     colors = v_
 
     colors = (colors - colors.min()) / (colors.max() - colors.min())
-    #plot_data(points_euq[:n_samples], colors[:n_samples])
     return points_euq[:n_samples], colors[:n_samples]
 
 
@@ -116,7 +115,6 @@ def pseudosphere(n_samples=1000, normalize=True):
         points_euq = normalize_points(points_euq)
     colors = v_
     colors = (colors - colors.min()) / (colors.max() - colors.min())
-    #plot_data(points_euq[:n_samples], colors[:n_samples])
     return points_euq[:n_samples], colors[:n_samples]
 
 
@@ -144,7 +142,6 @@ def hyperboloid_of_one_sheet(n_samples=1000, normalize=True):
     colors = v_
 
     colors = (colors - colors.min()) / (colors.max() - colors.min())
-    #plot_data(points_euq[:n_samples], colors[:n_samples])
     return points_euq[:n_samples], colors[:n_samples]
 
 

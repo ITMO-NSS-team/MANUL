@@ -1,8 +1,8 @@
-
 import numpy as np
+import torch
 from matplotlib import pyplot as plt
-from sklearn.metrics.pairwise import pairwise_distances
-from sklearn.manifold import Isomap
+
+from Adam.Isomap import IsomapNN
 
 
 class DataStructureGraph:
@@ -48,9 +48,9 @@ class DataStructureGraph:
 
     def upd_features(self):
         """Building features projection from distance matrix via Isomap"""
-        isomap = Isomap(n_components=self.dimensionality, n_neighbors=15, metric='precomputed')
-        features = isomap.fit_transform(self.distances_matrix)
-        self.features = features
+        isomap_model = IsomapNN(torch.Tensor(self.distances_matrix).to('cuda'), n_components=self.dimensionality, eigval_choice='MDS')
+        features = isomap_model()
+        self.features = features.cpu().detach().numpy()
 
     def add_edges(self, edges_list: np.ndarray):
         """
@@ -119,6 +119,10 @@ class DataStructureGraph:
         return np.linalg.eigh(self.distances_matrix)[0][:2]
 
     @property
+    def valid_eigenvalues(self):
+        return abs(self.eigenvalues[0] - self.eigenvalues[1]) >= 0.1
+
+    @property
     def number_of_edges(self):
         """
         Property return number of edges in individ graph
@@ -132,10 +136,7 @@ class DataStructureGraph:
         """
         return self.distances_matrix.shape[0]
 
-    def visualize(self, alpha=0.7, s=5, line_alpha=0.1):
-        """
-        Ultra-fast visualization using LineCollection
-        """
+    def visualize(self, save_path: str = None):
         if self.features.shape[1] > 2:
             from sklearn.decomposition import PCA
             pca = PCA(n_components=2)
@@ -146,25 +147,27 @@ class DataStructureGraph:
             features_2d = self.features
             projection_info = ''
 
-        plt.figure(figsize=(5, 6))
+        plt.figure(figsize=(6, 4))
 
-        # Plot nodes (fast)
         plt.scatter(features_2d[:, 0], features_2d[:, 1],
-                    s=s, alpha=alpha, c=self.targets)
+                    s=5, alpha=0.7, c=self.targets)
 
-        # Get edges efficiently
         rows, cols = np.where(np.triu(self.distances_matrix) > 0)
 
-        # Use LineCollection for batch plotting (MUCH faster)
         if len(rows) > 0:
             from matplotlib.collections import LineCollection
             segments = np.array([[features_2d[i], features_2d[j]] for i, j in zip(rows, cols)])
-            lc = LineCollection(segments, colors='gray', alpha=line_alpha, linewidths=0.5)
+            lc = LineCollection(segments, colors='gray', alpha=0.1, linewidths=0.5)
             plt.gca().add_collection(lc)
 
-        plt.title(f'Graph: {self.number_of_nodes} nodes, {self.number_of_edges} edges{projection_info}, \neigh {self.eigenvalues}')
+        plt.title(
+            f'Graph: {self.number_of_nodes} nodes, {self.number_of_edges} edges{projection_info}, \neigh {self.eigenvalues}')
         plt.xlabel('X')
         plt.ylabel('Y')
         plt.grid(True, alpha=0.3)
         plt.tight_layout()
-        plt.show()
+        if save_path is not None:
+            plt.savefig(f'{save_path}')
+            plt.close()
+        else:
+            plt.show()

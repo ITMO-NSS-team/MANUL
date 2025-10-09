@@ -4,7 +4,7 @@ import torch
 from torch import float32
 
 from examples.data.synthetic_data_generation import geometries
-from gradient_isomap.GradientIsomap import GradientIsomap
+from Adam.GradientIsomap import GradientIsomap
 
 device = 'cuda'
 for geometry in geometries.keys():

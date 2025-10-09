@@ -1,6 +1,6 @@
 import torch
 from torch import nn
-from gradient_isomap.KernelPCA import KernelPCA
+from Adam.KernelPCA import KernelPCA
 
 
 device = 'cuda'

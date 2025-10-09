@@ -6,8 +6,8 @@ import pandas as pd
 import torch
 from torch import float32, nn
 
-from gradient_isomap.Isomap import IsomapNN
-from gradient_isomap.visualization_utils import create_visualization
+from Adam.Isomap import IsomapNN
+from Adam.visualization_utils import create_visualization
 from structure_approximation.IntrinsicNN import IntrinsicNN
 
 

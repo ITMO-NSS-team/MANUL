@@ -25,10 +25,10 @@ jobs:
           pip install pytest
           pip install pytest-cov
       
-      - name: Tests with pytest evolution block
+      - name: Tests with pytest Eva block
         run: |
           pytest --cov=evolution
 
-      - name: Test with pytest regularizator block
+      - name: Test with pytest structure_approximation block
         run: |
           pytest --cov=regularizator
