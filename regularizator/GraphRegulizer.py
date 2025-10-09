@@ -39,7 +39,7 @@ class GraphRegularizer:
 
 
         non_basis_indices = np.setdiff1d(np.arange(N), self.basis_indices)
-        nbrs = NearestNeighbors(n_neighbours=self.n_neighbors, metric='euclidean').fit(self.source_data[self.basis_indices]) # подумать надо ли заменить на fit(self.roj[self.basis_indices])
+        nbrs = NearestNeighbors(n_neighbours=self.n_neighbors, metric='euclidean').fit(self.source_data[self.basis_indices]) # подумать надо ли заменить на fit(self.proj[self.basis_indices])
         distances, neighbor_indices = nbrs.kneighbors(self.source_data[non_basis_indices])
 
         for i, point_idx in enumerate(non_basis_indices):
