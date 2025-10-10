@@ -1,6 +1,6 @@
 import torch
 from torch import nn
-from regularizator.KernelPCA import KernelPCA
+from structure_approximation.KernelPCA import KernelPCA
 
 
 device = 'cuda'

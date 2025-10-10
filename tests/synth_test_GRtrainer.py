@@ -5,7 +5,7 @@ from regularizator.GraphRegTrainer import GraphRegTrainer
 from sklearn.metrics.pairwise import euclidean_distances
 
 
-X, y = make_regression(n_samples=500, n_features=10, n_informative=8,
+X, y = make_regression(n_samples=10000, n_features=10, n_informative=8,
                        noise=10, random_state=42)
 
 
@@ -13,7 +13,7 @@ X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_
 
 print(f"Train size: {X_train.shape[0]}, Test size: {X_test.shape[0]}")
 
-n_basis = 100
+n_basis = 1000
 basis_indices = np.random.choice(X_train.shape[0], size=n_basis, replace=False)
 basis_indices = np.sort(basis_indices)
 
@@ -42,7 +42,7 @@ trainer = GraphRegTrainer(
 )
 
 print("\nTraining model...")
-trainer.train(plot_convergence=True, adaptive_lambda=True)
+trainer.train(plot_convergence=True, adaptive_lambda=False)
 print("\nEvaluating on test set")
 mse = trainer.evaluate(X_test, y_test)
 print(f"Test MSE: {mse:.4f}")

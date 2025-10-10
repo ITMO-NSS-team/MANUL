@@ -16,7 +16,7 @@ from tqdm import tqdm
 from matplotlib import pyplot as plt
 from SALib import ProblemSpec
 
-from regularizator.Isomap import IsomapNN
+from structure_approximation.Isomap import IsomapNN
 
 
 def project_krr_optimized(X_sparse, Y_sparse, X_all, batch_size=1000):
@@ -207,14 +207,14 @@ class GraphRegTrainer:
             'combined_loss': None
         }
 
-        self.device = self.init_device(device)
+        self.device = self._init_device(device)
         self.proj_base_features = self._compute_base_projections()
         self.Y_all = self.compute_all_projections(method=self.method)
         self.init_model(model)
         self._init_training_settings(criterion, optimizer, lr)
         self._init_target_metric(target_metric)
 
-    def init_device(self, device: str = None):
+    def _init_device(self, device: str = None):
         """
         Initialize computing device (CUDA or CPU).
 
@@ -230,6 +230,7 @@ class GraphRegTrainer:
                 device = 'cuda'
             else:
                 device = 'cpu'
+        print(f'Device is {device}')
         return device
 
     def _compute_base_projections(self):
