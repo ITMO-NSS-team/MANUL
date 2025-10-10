@@ -16,7 +16,7 @@ from tqdm import tqdm
 from matplotlib import pyplot as plt
 from SALib import ProblemSpec
 
-from regularizator.Isomap import IsomapNN
+from Adam.Isomap import IsomapNN
 
 
 def project_krr_optimized(X_sparse, Y_sparse, X_all, batch_size=1000):
@@ -91,7 +91,7 @@ def _get_adaptive_lambda(combines_loss, nn_loss, graph_loss):
     :param graph_loss: matrix m x n where m - epochs number, n - batch size with nn losses
     :return: list [float, float] - list with coefficients to multiply with nn loss and graph loss
     """
-    n_samples = 1  # can be changed to use more elements of lists
+    n_samples = 5  # can be changed to use more elements of lists
     sampling_D = 2  # as combine 2 features
 
     if n_samples * (sampling_D * 2 + 2) > len(combines_loss):
@@ -425,7 +425,7 @@ class GraphRegTrainer:
 
             if self.verbose:
                 print(f'  Model loss: {model_losses[-1]:.6f}, Graph loss: {graph_losses[-1]:.6f}, Combined: {combined_losses[-1]:.6f}')
-                print(f' Adaptive lambdas: lam_nn={lam_nn:.6f}, lam_graph={lam_graph:.6f}')
+                print(f'  Adaptive lambdas: lam_nn={lam_nn:.6f}, lam_graph={lam_graph:.6f}')
         self.trained_loss_values['model_loss'] = model_losses
         self.trained_loss_values['graph_loss'] = graph_losses
         self.trained_loss_values['combined_loss'] = combined_losses
