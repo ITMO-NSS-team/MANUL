@@ -425,7 +425,7 @@ class GraphRegTrainer:
 
             if self.verbose:
                 print(f'  Model loss: {model_losses[-1]:.6f}, Graph loss: {graph_losses[-1]:.6f}, Combined: {combined_losses[-1]:.6f}')
-                print(f'  Adaptive lambdas: lam_nn={lam_nn:.6f}, lam_graph={lam_graph:.6f}')
+                print(f' Adaptive lambdas: lam_nn={lam_nn:.6f}, lam_graph={lam_graph:.6f}')
         self.trained_loss_values['model_loss'] = model_losses
         self.trained_loss_values['graph_loss'] = graph_losses
         self.trained_loss_values['combined_loss'] = combined_losses
