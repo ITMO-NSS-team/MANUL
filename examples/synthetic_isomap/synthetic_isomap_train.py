@@ -23,3 +23,5 @@ for geometry in ['swiss_roll']:
     isomap.train()
     isomap.visualize_trained()
     matrix = isomap.best_distances_matrix
+    proj_features = isomap.best_isomap_model()
+    proj_features

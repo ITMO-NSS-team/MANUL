@@ -46,7 +46,7 @@ def memory_efficient_fps(features, n_samples, batch_size=1000):
     min_distances = np.linalg.norm(features - features[current_point], axis=1)
 
     while len(selected_indices) < n_samples:
-        print(f"Selected {len(selected_indices)}/{n_samples} points", end='\r')
+        print(f"Selected {len(selected_indices)}/{n_samples} points\r")
         farthest_point = np.argmax(min_distances)
         selected_indices.append(farthest_point)
 

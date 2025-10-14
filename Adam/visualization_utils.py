@@ -98,7 +98,7 @@ def original_visualization_simple(features, targets, predictions, figsize=(12, 8
     # 3. Prediction error
     error = np.abs(predictions - targets)
     sc3 = visualizer.create_scatter_plot(axes[2], features_proj, error,
-                                         'Prediction Error', 'hot')
+                                         'Prediction Error', 'hot_r')
     plt.colorbar(sc3, ax=axes[2])
 
     # 4. Predictions vs True (always 2D)
