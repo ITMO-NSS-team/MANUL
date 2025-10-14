@@ -111,7 +111,7 @@ class DimensionalityAnalyser:
             print(f"  Threshold {thresh:.2f}...")
             local_dims = local_pca_dimension(
                 X, n_neighbors=n_neighbors, n_samples=n_samples,
-                threshold=thresh, with_eigenvalues=False
+                threshold=thresh, with_eigenvalues=True
             )
             dims_by_threshold[np.round(thresh, 2)] = local_dims
             median_dims.append(np.median(local_dims))

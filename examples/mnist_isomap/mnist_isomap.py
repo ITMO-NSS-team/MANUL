@@ -1,4 +1,5 @@
 import os.path
+from datetime import datetime
 
 import numpy as np
 import torch
@@ -14,8 +15,8 @@ def mnist_manifold_learning_example():
     """
     MNIST manifold learning example with FPS sampling and local PCA dimension estimation.
     """
-    #working_folder = f'mnist_{datetime.now().strftime("%d%m%Y-%H.%M")}'
-    working_folder = f'mnist_test2'
+    working_folder = f'mnist_{datetime.now().strftime("%d%m%Y-%H.%M")}'
+    #working_folder = f'mnist_test2'
     if not os.path.exists(working_folder):
         os.makedirs(working_folder)
     # Load MNIST data
@@ -82,7 +83,7 @@ def mnist_manifold_learning_example():
         checkpoint_each=100,
         logs_folder=working_folder,
         plot_convergence=False,
-        epochs=200
+        epochs=20000
     )
 
     isomap.train()

@@ -135,9 +135,9 @@ class GradientIsomap:
 
                 torch.save(self.best_isomap_model.state_dict(), f'{self.logs_folder}/best_isomap_model.pt')
                 np.save(f'{self.logs_folder}/best_mapping.npy', best_reproj_features)
-                np.save(f'{self.logs_folder}/best_distance_matrix.npy', self.best_distances_matrix)
+                np.save(f'{self.logs_folder}/best_distances_matrix.npy', self.best_distances_matrix)
                 print(f'Mapping saved: f"{self.logs_folder}/best_mapping.npy"'
-                      f'\nDistances matrix saved:{self.logs_folder}/best_distance_matrix.npy')
+                      f'\nDistances matrix saved:{self.logs_folder}/best_distances_matrix.npy')
 
             if stop_criteria:
                 break
