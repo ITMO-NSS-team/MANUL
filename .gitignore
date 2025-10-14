@@ -2,8 +2,3 @@
 .coverage
 .vscode
 **cache**
-**cash**
-mammoth_n_runs_results/
-examples/mnist_custom_nn/
-examples/data/MNIST/
-examples/data/*_mnist.npy
