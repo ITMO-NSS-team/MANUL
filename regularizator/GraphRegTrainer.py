@@ -19,71 +19,6 @@ from SALib import ProblemSpec
 from Adam.Isomap import IsomapNN
 
 
-def project_krr_optimized(X_sparse, Y_sparse, X_all, batch_size=1000):
-    """Optimized Kernel Ridge Regression"""
-    param_grid = {'alpha': [0.1, 1.0, 10.0], 'gamma': [0.01, 0.1, 1.0]}
-    krr = KernelRidge(kernel='rbf')
-
-    if len(X_sparse) > 1000:
-        subset_idx = np.random.choice(len(X_sparse), 1000, replace=False)
-        X_tune, Y_tune = X_sparse[subset_idx], Y_sparse[subset_idx]
-    else:
-        X_tune, Y_tune = X_sparse, Y_sparse
-
-    grid_search = GridSearchCV(krr, param_grid, cv=3, n_jobs=-1, verbose=0)
-    grid_search.fit(X_tune, Y_tune)
-    best_krr = grid_search.best_estimator_
-    best_krr.fit(X_sparse, Y_sparse)
-
-    Y_projected = []
-    for i in range(0, len(X_all), batch_size):
-        batch = X_all[i:i + batch_size]
-        Y_projected.append(best_krr.predict(batch))
-
-    return np.concatenate(Y_projected, axis=0)
-
-
-def project_ensemble_knn(X_sparse, Y_sparse, X_all):
-    """Ensemble KNN regression"""
-    estimators = [
-        ('knn5', KNeighborsRegressor(n_neighbors=5, weights='distance', n_jobs=-1)),
-        ('knn10', KNeighborsRegressor(n_neighbors=10, weights='distance', n_jobs=-1)),
-        ('knn15', KNeighborsRegressor(n_neighbors=15, weights='distance', n_jobs=-1)),
-    ]
-
-    n_components = Y_sparse.shape[1]
-    Y_projected = np.zeros((len(X_all), n_components))
-
-    for dim in range(n_components):
-        ensemble = VotingRegressor(estimators, n_jobs=-1)
-        ensemble.fit(X_sparse, Y_sparse[:, dim])
-        Y_projected[:, dim] = ensemble.predict(X_all)
-
-    return Y_projected
-
-
-def project_random_forest(X_sparse, Y_sparse, X_all, batch_size=1000):
-    """Random Forest regression"""
-    n_components = Y_sparse.shape[1]
-    Y_projected = np.zeros((len(X_all), n_components))
-
-    for dim in range(n_components):
-        rf = RandomForestRegressor(
-            n_estimators=100, max_depth=None,
-            min_samples_split=5, n_jobs=-1, random_state=42
-        )
-        rf.fit(X_sparse, Y_sparse[:, dim])
-
-        dim_pred = []
-        for i in range(0, len(X_all), batch_size):
-            batch = X_all[i:i + batch_size]
-            dim_pred.append(rf.predict(batch))
-
-        Y_projected[:, dim] = np.concatenate(dim_pred)
-
-    return Y_projected
-
-
 def _get_adaptive_lambda(combines_loss, nn_loss, graph_loss):
     """
     :param combines_loss:  matrix m x n where m - epochs number, n - batch size with sum of nn and graph losses
@@ -159,7 +94,9 @@ class GraphRegTrainer:
                  method: str = 'ensemble_knn',
                  device: str = None,
                  cache_folder: str = None,
-                 verbose: bool = True):
+                 verbose: bool = True,
+                 precomputed_base_projections: np.ndarray = None,
+                 precomputed_all_projections: np.ndarray = None):
         """
         Args:
             train_features: training features [N, features]
@@ -179,6 +116,10 @@ class GraphRegTrainer:
             device: 'cuda', 'cpu' or None (auto)
             cache_folder: folder for saving models
             verbose: show training progress
+            precomputed_base_projections: precomputed projections of basis points [base_dim, proj_dim]
+                                          If provided, skips Isomap computation
+            precomputed_all_projections: precomputed projections of ALL points [N, proj_dim]
+                                         If provided, skips KNN RF KRR
         """
         self.features = train_features.astype(float)
         self.target = train_target
@@ -208,8 +149,27 @@ class GraphRegTrainer:
         }
 
         self.device = self.init_device(device)
-        self.proj_base_features = self._compute_base_projections()
-        self.Y_all = self.compute_all_projections(method=self.method)
+
+        # Use precomputed base projections if provided, otherwise compute them
+        if precomputed_base_projections is not None:
+            if self.verbose:
+                print(f"Using precomputed base projections: {precomputed_base_projections.shape}")
+            self.proj_base_features = precomputed_base_projections
+        else:
+            if self.verbose:
+                print("Computing base projections with Isomap...")
+            self.proj_base_features = self._compute_base_projections()
+
+        # Use precomputed all projections if provided, otherwise compute them
+        if precomputed_all_projections is not None:
+            if self.verbose:
+                print(f"Using precomputed all projections: {precomputed_all_projections.shape}")
+            self.Y_all = precomputed_all_projections
+        else:
+            if self.verbose:
+                print(f"Computing projections for all {len(train_features)} points...")
+            self.Y_all = self.compute_all_projections(method=self.method)
+
         self.init_model(model)
         self._init_training_settings(criterion, optimizer, lr)
         self._init_target_metric(target_metric)
@@ -253,34 +213,6 @@ class GraphRegTrainer:
         projections = isomap.fit_transform(weights_tensor)
 
         return projections.detach().cpu().numpy()
-
-
-    def compute_all_projections(self, method='ensemble_knn'):
-        """
-        Projects ALL points from Euclidean space to hidden geometry.
-
-        Args:
-            method: projection method ('krr', 'ensemble_knn', 'random_forest')
-
-        Returns:
-            proj_all: projections of all points [N, proj_dim]
-        """
-        X_basis = self.source_data[self.basis_indices]
-        Y_basis = self.proj_base_features
-        X_all = self.source_data
-
-        if method == 'krr':
-            Y_all = project_krr_optimized(X_basis, Y_basis, X_all, batch_size=self.batch_size)
-        elif method == 'ensemble_knn':
-            Y_all = project_ensemble_knn(X_basis, Y_basis, X_all)
-        elif method == 'random_forest':
-            Y_all = project_random_forest(X_basis, Y_basis, X_all, batch_size=self.batch_size)
-        else:
-            raise ValueError(f"Unknown projection method: {method}")
-
-        Y_all[self.basis_indices] = Y_basis
-
-        return Y_all
 
     def init_model(self, model):
         """
@@ -393,13 +325,21 @@ class GraphRegTrainer:
                 batch_indices = indices[i:i + self.batch_size]
 
                 batch_x = torch.tensor(self.features[batch_indices], dtype=fl64).to(self.device)
-                batch_y = torch.tensor(self.target[batch_indices], dtype=fl64).to(self.device)
+
+
+                if isinstance(self.criterion, nn.CrossEntropyLoss):
+                    batch_y = torch.tensor(self.target[batch_indices], dtype=torch.long).to(self.device)
+                else:
+                    batch_y = torch.tensor(self.target[batch_indices], dtype=fl64).to(self.device)
 
                 self.optimizer.zero_grad()
 
                 output = self.model(batch_x)
 
-                model_loss = self.criterion(output, batch_y.reshape_as(output))
+                if isinstance(self.criterion, nn.CrossEntropyLoss):
+                    model_loss = self.criterion(output, batch_y)
+                else:
+                    model_loss = self.criterion(output, batch_y.reshape_as(output))
 
                 predictions_np = output.detach().cpu().numpy()
                 graph_loss_value = self._compute_graph_loss(predictions_np, batch_indices)
