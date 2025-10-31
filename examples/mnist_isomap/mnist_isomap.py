@@ -16,7 +16,7 @@ def mnist_manifold_learning_example():
     MNIST manifold learning example with FPS sampling and local PCA dimension estimation.
     """
     # Number of basis points (FPS samples)
-    n_samples = 500
+    n_samples = 2000
     latent_len = 300  # precomp latent dimension for Isomap
 
     #working_folder = f'mnist_{datetime.now().strftime("%d%m%Y-%H.%M")}'
@@ -32,34 +32,40 @@ def mnist_manifold_learning_example():
     X = mnist_dataset.data.numpy().reshape(len(mnist_dataset), -1)  # (60000, 784)
     y = mnist_dataset.targets.numpy()
 
-    # Split train/test (80/20)
-    print("Splitting data...")
-    X_train, X_test, y_train, y_test = train_test_split(
+    # Split train/val/test (64/16/20)
+    print("Splitting data into train/val/test...")
+    # First split: 80% train+val, 20% test
+    X_trainval, X_test, y_trainval, y_test = train_test_split(
         X, y, test_size=0.2, random_state=42, stratify=y
+    )
+    # Second split: 80% train, 20% val (of the 80%)
+    X_train, X_val, y_train, y_val = train_test_split(
+        X_trainval, y_trainval, test_size=0.2, random_state=42, stratify=y_trainval
     )
 
     # Normalize the data
     X_train = X_train / 255.0
+    X_val = X_val / 255.0
     X_test = X_test / 255.0
 
-    print(f"Training set: {X_train.shape}, Test set: {X_test.shape}")
+    print(f"Training set: {X_train.shape}, Validation set: {X_val.shape}, Test set: {X_test.shape}")
 
 
-    # print("\n=== DIMENSIONALITY ANALYSIS ===")
-    # analyser = DimensionalityAnalyser()
-    #
-    # analyser.analyse_dimensions(
-    #     X_train,
-    #     method='both',
-    #     n_samples=1000
-    # )
-    # analyser.plot_dimension_histograms(dataset_name="MNIST",
-    #                                                  save_path=f'{working_folder}/hist_plot.png')
-    # _, _ = analyser.plot_variance_threshold_analysis(X_train,
-    #                                                  dataset_name="MNIST",
-    #                                                  n_samples=1000,
-    #                                                  save_path=f'{working_folder}/variance_plot.png')
-    # latent_len = analyser.get_latent_dim(method='eigenvalue')
+    print("\n=== DIMENSIONALITY ANALYSIS ===")
+    analyser = DimensionalityAnalyser()
+
+    analyser.analyse_dimensions(
+        X_train,
+        method='both',
+        n_samples=1000
+    )
+    analyser.plot_dimension_histograms(dataset_name="MNIST",
+                                                     save_path=f'{working_folder}/hist_plot.png')
+    _, _ = analyser.plot_variance_threshold_analysis(X_train,
+                                                     dataset_name="MNIST",
+                                                     n_samples=1000,
+                                                     save_path=f'{working_folder}/variance_plot.png')
+    latent_len = analyser.get_latent_dim(method='eigenvalue')
 
     # Apply FPS to extract 2000 key points from training data
     if not os.path.exists(f'{working_folder}/fps_indices.npy'):
@@ -87,7 +93,7 @@ def mnist_manifold_learning_example():
         checkpoint_each=100,
         logs_folder=working_folder,
         plot_convergence=False,
-        epochs=20
+        epochs=15000
     )
 
     isomap.train()
@@ -112,7 +118,9 @@ def mnist_manifold_learning_example():
             idx += 1
     print(f"Reconstructed distance matrix: {weights_matrix.shape}")
 
-    # Create Projector and compute all projections
+
+    # Create Projector and compute projections for train
+    print("Computing projections for training data...")
     projector = Projector(
         source_data=X_train,
         weights_matrix=weights_matrix,
@@ -123,20 +131,42 @@ def mnist_manifold_learning_example():
         precomputed_base_projections=base_projections,
         verbose=True
     )
-
-    # Compute projections for all training points
     projector.compute_all_projections()
+    train_projections = projector.all_projections
+
+    print("Computing projections for validation data...")
+    # For validation, use the trained projector to project new points
+    # basis_indices refer to training data, so we need to use projection method
+    X_basis = X_train[fps_indices]  # Basis points from training data
+    Y_basis = base_projections      # Their projections
+
+    if projector.method == 'ensemble_knn':
+        from regularizator.GraphRegTrainer import project_ensemble_knn
+        val_projections = project_ensemble_knn(X_basis, Y_basis, X_val)
+    elif projector.method == 'krr':
+        from regularizator.GraphRegTrainer import project_krr_optimized
+        val_projections = project_krr_optimized(X_basis, Y_basis, X_val, batch_size=128)
+    elif projector.method == 'random_forest':
+        from regularizator.GraphRegTrainer import project_random_forest
+        val_projections = project_random_forest(X_basis, Y_basis, X_val, batch_size=128)
+
+    print(f"  Val projections computed: {val_projections.shape}")
 
     # Save data for graph regularization training
     print("\n=== SAVING DATA FOR GRAPH REGULARIZATION ===")
     np.save(f'{working_folder}/X_train.npy', X_train)
+    np.save(f'{working_folder}/X_val.npy', X_val)
     np.save(f'{working_folder}/X_test.npy', X_test)
     np.save(f'{working_folder}/y_train.npy', y_train)
+    np.save(f'{working_folder}/y_val.npy', y_val)
     np.save(f'{working_folder}/y_test.npy', y_test)
     np.save(f'{working_folder}/latent_dim.npy', latent_len)
+    np.save(f'{working_folder}/train_projections.npy', train_projections)
+    np.save(f'{working_folder}/val_projections.npy', val_projections)
 
-    # Save projections using Projector
-    projector.save(working_folder)
+    # Save base projections and distance matrix
+    np.save(f'{working_folder}/base_projections.npy', base_projections)
+    np.save(f'{working_folder}/best_distance_matrix.npy', best_distances_matrix)
 
     print(f"\nAll data saved to {working_folder}/")
 

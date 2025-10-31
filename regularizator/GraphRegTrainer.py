@@ -19,6 +19,71 @@ from SALib import ProblemSpec
 from Adam.Isomap import IsomapNN
 
 
+def project_krr_optimized(X_sparse, Y_sparse, X_all, batch_size=1000):
+    """Optimized Kernel Ridge Regression"""
+    param_grid = {'alpha': [0.1, 1.0, 10.0], 'gamma': [0.01, 0.1, 1.0]}
+    krr = KernelRidge(kernel='rbf')
+
+    if len(X_sparse) > 1000:
+        subset_idx = np.random.choice(len(X_sparse), 1000, replace=False)
+        X_tune, Y_tune = X_sparse[subset_idx], Y_sparse[subset_idx]
+    else:
+        X_tune, Y_tune = X_sparse, Y_sparse
+
+    grid_search = GridSearchCV(krr, param_grid, cv=3, n_jobs=-1, verbose=0)
+    grid_search.fit(X_tune, Y_tune)
+    best_krr = grid_search.best_estimator_
+    best_krr.fit(X_sparse, Y_sparse)
+
+    Y_projected = []
+    for i in range(0, len(X_all), batch_size):
+        batch = X_all[i:i + batch_size]
+        Y_projected.append(best_krr.predict(batch))
+
+    return np.concatenate(Y_projected, axis=0)
+
+
+def project_ensemble_knn(X_sparse, Y_sparse, X_all):
+    """Ensemble KNN regression"""
+    estimators = [
+        ('knn5', KNeighborsRegressor(n_neighbors=5, weights='distance', n_jobs=-1)),
+        ('knn10', KNeighborsRegressor(n_neighbors=10, weights='distance', n_jobs=-1)),
+        ('knn15', KNeighborsRegressor(n_neighbors=15, weights='distance', n_jobs=-1)),
+    ]
+
+    n_components = Y_sparse.shape[1]
+    Y_projected = np.zeros((len(X_all), n_components))
+
+    for dim in range(n_components):
+        ensemble = VotingRegressor(estimators, n_jobs=-1)
+        ensemble.fit(X_sparse, Y_sparse[:, dim])
+        Y_projected[:, dim] = ensemble.predict(X_all)
+
+    return Y_projected
+
+
+def project_random_forest(X_sparse, Y_sparse, X_all, batch_size=1000):
+    """Random Forest regression"""
+    n_components = Y_sparse.shape[1]
+    Y_projected = np.zeros((len(X_all), n_components))
+
+    for dim in range(n_components):
+        rf = RandomForestRegressor(
+            n_estimators=100, max_depth=None,
+            min_samples_split=5, n_jobs=-1, random_state=42
+        )
+        rf.fit(X_sparse, Y_sparse[:, dim])
+
+        dim_pred = []
+        for i in range(0, len(X_all), batch_size):
+            batch = X_all[i:i + batch_size]
+            dim_pred.append(rf.predict(batch))
+
+        Y_projected[:, dim] = np.concatenate(dim_pred)
+
+    return Y_projected
+
+
 def _get_adaptive_lambda(combines_loss, nn_loss, graph_loss):
     """
     :param combines_loss:  matrix m x n where m - epochs number, n - batch size with sum of nn and graph losses
@@ -117,9 +182,9 @@ class GraphRegTrainer:
             cache_folder: folder for saving models
             verbose: show training progress
             precomputed_base_projections: precomputed projections of basis points [base_dim, proj_dim]
-                                          If provided, skips Isomap computation
+                                          If provided, skips expensive Isomap computation
             precomputed_all_projections: precomputed projections of ALL points [N, proj_dim]
-                                         If provided, skips KNN RF KRR
+                                         If provided, skips expensive KNN interpolation
         """
         self.features = train_features.astype(float)
         self.target = train_target
@@ -214,6 +279,34 @@ class GraphRegTrainer:
 
         return projections.detach().cpu().numpy()
 
+
+    def compute_all_projections(self, method='ensemble_knn'):
+        """
+        Projects ALL points from Euclidean space to hidden geometry.
+
+        Args:
+            method: projection method ('krr', 'ensemble_knn', 'random_forest')
+
+        Returns:
+            proj_all: projections of all points [N, proj_dim]
+        """
+        X_basis = self.source_data[self.basis_indices]
+        Y_basis = self.proj_base_features
+        X_all = self.source_data
+
+        if method == 'krr':
+            Y_all = project_krr_optimized(X_basis, Y_basis, X_all, batch_size=self.batch_size)
+        elif method == 'ensemble_knn':
+            Y_all = project_ensemble_knn(X_basis, Y_basis, X_all)
+        elif method == 'random_forest':
+            Y_all = project_random_forest(X_basis, Y_basis, X_all, batch_size=self.batch_size)
+        else:
+            raise ValueError(f"Unknown projection method: {method}")
+
+        Y_all[self.basis_indices] = Y_basis
+
+        return Y_all
+
     def init_model(self, model):
         """
         Initialize neural network model.
@@ -291,13 +384,19 @@ class GraphRegTrainer:
         loss = np.dot(part_1, predictions)
         return loss.reshape(-1)[0]
 
-    def train(self, plot_convergence: bool = False, adaptive_lambda: bool = False):
+    def train(self, plot_convergence: bool = False, adaptive_lambda: bool = False,
+              early_stopping_patience: int = None, val_features: np.ndarray = None,
+              val_target: np.ndarray = None, val_projections: np.ndarray = None):
         """
         Train the model with combined loss (model loss + graph regularization loss).
 
         Args:
             plot_convergence: whether to plot convergence graphs after training
             adaptive_lambda: whether to use adaptive lambda (computed once after 10% of epochs)
+            early_stopping_patience: number of epochs to wait for improvement before stopping (None = no early stopping)
+            val_features: validation features for early stopping
+            val_target: validation target for early stopping
+            val_projections: validation projections for graph loss computation
 
         Returns:
             self: trained model instance
@@ -306,6 +405,13 @@ class GraphRegTrainer:
         model_losses = []
         graph_losses = []
         combined_losses = []
+        val_losses = []
+
+        # Early stopping setup
+        best_val_loss = float('inf')
+        patience_counter = 0
+        self.best_model_state = None
+        self.best_epoch = 0
 
         lam_nn = 1
         lam_graph = self.lambda_graph
@@ -321,12 +427,15 @@ class GraphRegTrainer:
             epoch_graph_losses = []
             epoch_combined_losses = []
 
+            # Training phase
+            self.model.train()
             for i in range(0, len(indices), self.batch_size):
                 batch_indices = indices[i:i + self.batch_size]
 
                 batch_x = torch.tensor(self.features[batch_indices], dtype=fl64).to(self.device)
 
-
+                # For classification: target should be long dtype, shape [batch_size]
+                # For regression: target should be float64, shape can be [batch_size] or [batch_size, output_dim]
                 if isinstance(self.criterion, nn.CrossEntropyLoss):
                     batch_y = torch.tensor(self.target[batch_indices], dtype=torch.long).to(self.device)
                 else:
@@ -336,6 +445,8 @@ class GraphRegTrainer:
 
                 output = self.model(batch_x)
 
+                # For CrossEntropyLoss: target should be [batch_size] with class indices
+                # For other losses: might need reshape_as
                 if isinstance(self.criterion, nn.CrossEntropyLoss):
                     model_loss = self.criterion(output, batch_y)
                 else:
@@ -358,17 +469,49 @@ class GraphRegTrainer:
             graph_losses.append(np.mean(epoch_graph_losses))
             combined_losses.append(np.mean(epoch_combined_losses))
 
+            # Validation phase
+            if val_features is not None and val_target is not None:
+                self.model.eval()
+                val_model_loss = self._compute_validation_loss(val_features, val_target)
+                val_losses.append(val_model_loss)
+
+                if self.verbose:
+                    print(f'  Train - Model loss: {model_losses[-1]:.6f}, Graph loss: {graph_losses[-1]:.6f}, Combined: {combined_losses[-1]:.6f}')
+                    print(f'  Val   - Model loss: {val_model_loss:.6f}')
+                    print(f'  Adaptive lambdas: lam_nn={lam_nn:.6f}, lam_graph={lam_graph:.6f}')
+
+                # Early stopping check
+                if early_stopping_patience is not None:
+                    if val_model_loss < best_val_loss:
+                        best_val_loss = val_model_loss
+                        patience_counter = 0
+                        self.best_model_state = self.model.state_dict().copy()
+                        self.best_epoch = epoch + 1
+                        if self.verbose:
+                            print(f'  New best model saved (val loss: {best_val_loss:.6f})')
+                    else:
+                        patience_counter += 1
+                        if self.verbose:
+                            print(f'  Patience: {patience_counter}/{early_stopping_patience}')
+
+                        if patience_counter >= early_stopping_patience:
+                            if self.verbose:
+                                print(f'\nEarly stopping triggered at epoch {epoch + 1}')
+                                print(f'Best model was at epoch {self.best_epoch} with val loss {best_val_loss:.6f}')
+                            break
+            else:
+                if self.verbose:
+                    print(f'  Model loss: {model_losses[-1]:.6f}, Graph loss: {graph_losses[-1]:.6f}, Combined: {combined_losses[-1]:.6f}')
+                    print(f'  Adaptive lambdas: lam_nn={lam_nn:.6f}, lam_graph={lam_graph:.6f}')
+
             if adaptive_lambda and epoch == lmds_epochs:
                 lam_nn, lam_graph = _get_adaptive_lambda(combined_losses, model_losses, graph_losses)
 
-
-
-            if self.verbose:
-                print(f'  Model loss: {model_losses[-1]:.6f}, Graph loss: {graph_losses[-1]:.6f}, Combined: {combined_losses[-1]:.6f}')
-                print(f' Adaptive lambdas: lam_nn={lam_nn:.6f}, lam_graph={lam_graph:.6f}')
         self.trained_loss_values['model_loss'] = model_losses
         self.trained_loss_values['graph_loss'] = graph_losses
         self.trained_loss_values['combined_loss'] = combined_losses
+        if val_features is not None:
+            self.trained_loss_values['val_loss'] = val_losses
 
         if plot_convergence:
             self._plot_convergence(combined_losses, None, model_losses, graph_losses)
@@ -428,6 +571,48 @@ class GraphRegTrainer:
         torch.save(self.model.state_dict(), path)
         if self.verbose:
             print(f"Model weights saved to {path}")
+
+    def load_best_weights(self):
+        """
+        Load the best model weights saved during training (from early stopping).
+        If no best weights were saved, keeps current weights.
+        """
+        if hasattr(self, 'best_model_state') and self.best_model_state is not None:
+            self.model.load_state_dict(self.best_model_state)
+            if self.verbose:
+                print(f"Loaded best model weights from epoch {self.best_epoch}")
+        else:
+            if self.verbose:
+                print("No best weights saved, using current model weights")
+
+    def _compute_validation_loss(self, val_features: np.ndarray, val_target: np.ndarray) -> float:
+        """
+        Compute validation loss (model loss only, without graph regularization).
+
+        Args:
+            val_features: validation features [N_val, features]
+            val_target: validation target [N_val, ] or [N_val, output_dim]
+
+        Returns:
+            val_loss: validation loss value
+        """
+        self.model.eval()
+        with torch.no_grad():
+            val_x = torch.tensor(val_features, dtype=fl64).to(self.device)
+
+            if isinstance(self.criterion, nn.CrossEntropyLoss):
+                val_y = torch.tensor(val_target, dtype=torch.long).to(self.device)
+            else:
+                val_y = torch.tensor(val_target, dtype=fl64).to(self.device)
+
+            output = self.model(val_x)
+
+            if isinstance(self.criterion, nn.CrossEntropyLoss):
+                val_loss = self.criterion(output, val_y)
+            else:
+                val_loss = self.criterion(output, val_y.reshape_as(output))
+
+        return val_loss.item()
 
     def _plot_convergence(self, losses, lmds_epoch, nn_losses=None, graph_losses=None):
         """

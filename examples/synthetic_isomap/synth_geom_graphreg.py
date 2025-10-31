@@ -1,21 +1,35 @@
+"""
+Stage 2: Graph Regularization Training for Synthetic Geometries
+
+This script trains regression models with graph regularization on synthetic geometries.
+It follows the MNIST pipeline but adapted for regression tasks:
+1. Load preprocessed data from Stage 1
+2. Train baseline model (lambda_graph=0.0)
+3. Train regularized model (lambda_graph=0.0001)
+4. Compare results with comprehensive visualizations
+5. Generate summary table across all geometries
+"""
+
 import os
 import json
 from datetime import datetime
 import numpy as np
 import torch
 import torch.nn as nn
-from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
+
+from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 
 from regularizator.GraphRegTrainer import GraphRegTrainer
 
 
 def load_data_from_folder(folder_path):
     """
-    Load all necessary data from the folder created by mnist_isomap.py
+    Load all necessary data from the folder created by synthetic_geometry_manifold_learning.py
 
     Args:
         folder_path: path to the folder with saved data
@@ -23,9 +37,8 @@ def load_data_from_folder(folder_path):
     Returns:
         dict with all loaded data
     """
-    print(f"Loading data from {folder_path}...")
+    print(f"\nLoading data from {folder_path}...")
 
-    # Load training, validation and test data
     X_train = np.load(f'{folder_path}/X_train.npy')
     X_val = np.load(f'{folder_path}/X_val.npy')
     X_test = np.load(f'{folder_path}/X_test.npy')
@@ -33,34 +46,25 @@ def load_data_from_folder(folder_path):
     y_val = np.load(f'{folder_path}/y_val.npy')
     y_test = np.load(f'{folder_path}/y_test.npy')
 
-    # Load distance matrix (upper triangular form)
     best_distances_matrix = np.load(f'{folder_path}/best_distance_matrix.npy')
 
-    # Load FPS indices (basis points)
     fps_indices = np.load(f'{folder_path}/fps_indices.npy')
 
-    # Load latent dimension
     latent_dim = int(np.load(f'{folder_path}/latent_dim.npy'))
 
-    # Load precomputed base projections (from GradientIsomap)
     base_projections = np.load(f'{folder_path}/base_projections.npy')
 
-    # Load precomputed projections (from Projector)
     train_projections = np.load(f'{folder_path}/train_projections.npy')
     val_projections = np.load(f'{folder_path}/val_projections.npy')
 
-    print(f"  X_train: {X_train.shape}")
-    print(f"  X_val: {X_val.shape}")
-    print(f"  X_test: {X_test.shape}")
-    print(f"  y_train: {y_train.shape}")
-    print(f"  y_val: {y_val.shape}")
-    print(f"  y_test: {y_test.shape}")
+    print(f"  X_train: {X_train.shape}, y_train: {y_train.shape}")
+    print(f"  X_val: {X_val.shape}, y_val: {y_val.shape}")
+    print(f"  X_test: {X_test.shape}, y_test: {y_test.shape}")
     print(f"  FPS indices: {len(fps_indices)} basis points")
     print(f"  Latent dim: {latent_dim}")
-    print(f"  Distance matrix: {best_distances_matrix.shape}")
-    print(f"  Base projections: {base_projections.shape} precomputed")
-    print(f"  Train projections: {train_projections.shape} precomputed")
-    print(f"  Val projections: {val_projections.shape} precomputed")
+    print(f"  Base projections: {base_projections.shape}")
+    print(f"  Train projections: {train_projections.shape}")
+    print(f"  Val projections: {val_projections.shape}")
 
     return {
         'X_train': X_train,
@@ -90,7 +94,7 @@ def reconstruct_distance_matrix(best_distances_matrix, n_basis):
     Returns:
         weights_matrix: full symmetric distance matrix [n_basis, n_basis]
     """
-    print("\nReconstructing full distance matrix...")
+    print("  Reconstructing full distance matrix...")
     weights_matrix = np.zeros((n_basis, n_basis))
     idx = 0
     for i in range(n_basis):
@@ -99,19 +103,21 @@ def reconstruct_distance_matrix(best_distances_matrix, n_basis):
             weights_matrix[j, i] = best_distances_matrix[idx]
             idx += 1
 
-    print(f"  Reconstructed matrix shape: {weights_matrix.shape}")
+    print(f"    Matrix shape: {weights_matrix.shape}")
     return weights_matrix
 
 
-class MNISTClassifier(nn.Module):
-
-    def __init__(self, input_dim=784, num_classes=10):
+class RegressionModel(nn.Module):
+    """
+    Simple neural network for regression task
+    """
+    def __init__(self, input_dim=3, hidden_dims=[64, 32], output_dim=1):
         super().__init__()
-        self.fc1 = nn.Linear(input_dim, 128, dtype=torch.float64)
+        self.fc1 = nn.Linear(input_dim, hidden_dims[0], dtype=torch.float64)
         self.relu1 = nn.ReLU()
-        self.fc2 = nn.Linear(128, 64, dtype=torch.float64)
+        self.fc2 = nn.Linear(hidden_dims[0], hidden_dims[1], dtype=torch.float64)
         self.relu2 = nn.ReLU()
-        self.fc3 = nn.Linear(64, num_classes, dtype=torch.float64)
+        self.fc3 = nn.Linear(hidden_dims[1], output_dim, dtype=torch.float64)
 
     def forward(self, x):
         x = self.relu1(self.fc1(x))
@@ -125,9 +131,9 @@ def train_and_evaluate_model(X_train, y_train, X_val, y_val, X_test, y_test,
                              train_projections, val_projections,
                              lambda_graph, model_name,
                              cache_folder, num_epochs, batch_size,
-                             learning_rate, early_stopping_patience, adaptive_lambda=False):
+                             learning_rate, early_stopping_patience):
     """
-    Train and evaluate a model with specified graph regularization
+    Train and evaluate a regression model with specified graph regularization
 
     Args:
         X_train, y_train: training data
@@ -142,19 +148,22 @@ def train_and_evaluate_model(X_train, y_train, X_val, y_val, X_test, y_test,
         model_name: name for logging
         cache_folder: folder to save results
         num_epochs: number of training epochs
-        batch_size: batch size
+        batch_size: batch size for training
         learning_rate: learning rate
         early_stopping_patience: patience for early stopping
-        adaptive_lambda: whether to use adaptive lambda
 
     Returns:
-        dict with accuracy and predictions
+        dict with metrics, predictions, and trainer
     """
-    print(f"\n--- Training {model_name} (lambda_graph={lambda_graph}) ---")
-    print(f"  Train: {len(X_train)}, Validation: {len(X_val)}, Test: {len(X_test)}")
+    print(f"\n  --- Training {model_name} (lambda_graph={lambda_graph}) ---")
 
-    model = MNISTClassifier()
-    criterion = nn.CrossEntropyLoss()
+    if len(y_train.shape) == 1:
+        y_train = y_train.reshape(-1, 1)
+        y_val = y_val.reshape(-1, 1)
+        y_test = y_test.reshape(-1, 1)
+
+    model = RegressionModel(input_dim=X_train.shape[1], hidden_dims=[64, 32], output_dim=1)
+    criterion = nn.MSELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
     trainer = GraphRegTrainer(
@@ -178,39 +187,44 @@ def train_and_evaluate_model(X_train, y_train, X_val, y_val, X_test, y_test,
 
     trainer.train(
         plot_convergence=True,
-        adaptive_lambda=adaptive_lambda,
+        adaptive_lambda=False,
         early_stopping_patience=early_stopping_patience,
         val_features=X_val,
         val_target=y_val,
         val_projections=val_projections
     )
 
-    # Load best weights (saved during training)
     trainer.load_best_weights()
 
     # Evaluate on validation set
-    pred_val = trainer.predict(X_val)
-    pred_val_classes = np.argmax(pred_val, axis=1)
-    val_accuracy = accuracy_score(y_val, pred_val_classes)
-    print(f"\n{model_name} Validation Accuracy: {val_accuracy:.4f}")
+    pred_val = trainer.predict(X_val).flatten()
+    y_val_flat = y_val.flatten()
+    val_mse = mean_squared_error(y_val_flat, pred_val)
+    val_mae = mean_absolute_error(y_val_flat, pred_val)
+    val_r2 = r2_score(y_val_flat, pred_val)
 
-    # Evaluate on test set
-    pred = trainer.predict(X_test)
-    pred_classes = np.argmax(pred, axis=1)
-    accuracy = accuracy_score(y_test, pred_classes)
+    print(f"    {model_name} Validation - MSE: {val_mse:.6f}, MAE: {val_mae:.6f}, R²: {val_r2:.6f}")
 
-    print(f"\n{model_name} Test Accuracy: {accuracy:.4f}")
-    print(f"\n{model_name} Classification Report:")
-    print(classification_report(y_test, pred_classes, digits=4))
+    pred_test = trainer.predict(X_test).flatten()
+    y_test_flat = y_test.flatten()
+    test_mse = mean_squared_error(y_test_flat, pred_test)
+    test_mae = mean_absolute_error(y_test_flat, pred_test)
+    test_r2 = r2_score(y_test_flat, pred_test)
 
-    # Store losses for visualization
+    print(f"    {model_name} Test - MSE: {test_mse:.6f}, MAE: {test_mae:.6f}, R²: {test_r2:.6f}")
+
     train_losses = trainer.trained_loss_values.get('model_loss', [])
     val_losses = trainer.trained_loss_values.get('val_loss', [])
 
     return {
-        'accuracy': accuracy,
-        'val_accuracy': val_accuracy,
-        'predictions': pred_classes,
+        'val_mse': val_mse,
+        'val_mae': val_mae,
+        'val_r2': val_r2,
+        'test_mse': test_mse,
+        'test_mae': test_mae,
+        'test_r2': test_r2,
+        'predictions_val': pred_val,
+        'predictions_test': pred_test,
         'trainer': trainer,
         'train_losses': train_losses,
         'val_losses': val_losses,
@@ -218,31 +232,32 @@ def train_and_evaluate_model(X_train, y_train, X_val, y_val, X_test, y_test,
     }
 
 
-def create_mnist_comparison_visualization(X_test, y_test, baseline_results, reg_results, save_path):
+def create_comparison_visualization(geometry_name, X_test, y_test,
+                                   baseline_results, reg_results, save_path):
     """
-    Create comparison visualization for MNIST with 2 subplots:
+    Create comparison visualization with 2 subplots:
     1. Training loss curves (baseline vs regularized)
     2. Validation loss curves (baseline vs regularized)
 
     Args:
-        X_test: test data (flattened images)
-        y_test: ground truth labels
+        geometry_name: name of the geometry
+        X_test: test data (3D coordinates)
+        y_test: ground truth targets
         baseline_results: results from baseline model
         reg_results: results from regularized model
         save_path: path to save the figure
     """
     fig, axes = plt.subplots(1, 2, figsize=(15, 5))
 
+    y_test_flat = y_test.flatten()
+    pred_baseline = baseline_results['predictions_test']
+    pred_reg = reg_results['predictions_test']
+
+    ax1 = axes[0]
+
     baseline_train_losses = baseline_results.get('train_losses', [])
     reg_train_losses = reg_results.get('train_losses', [])
-    baseline_val_losses = baseline_results.get('val_losses', [])
-    reg_val_losses = reg_results.get('val_losses', [])
 
-    baseline_acc = baseline_results['accuracy']
-    reg_acc = reg_results['accuracy']
-
-    # 1. Training loss curves
-    ax1 = axes[0]
     if len(baseline_train_losses) > 0 and len(reg_train_losses) > 0:
         ax1.plot(baseline_train_losses, label='Baseline', linewidth=2, alpha=0.8, color='blue')
         ax1.plot(reg_train_losses, label='Regularized', linewidth=2, alpha=0.8, color='red')
@@ -253,8 +268,11 @@ def create_mnist_comparison_visualization(X_test, y_test, baseline_results, reg_
         ax1.grid(True, alpha=0.3)
         ax1.set_yscale('log')
 
-    # 2. Validation loss curves
     ax2 = axes[1]
+
+    baseline_val_losses = baseline_results.get('val_losses', [])
+    reg_val_losses = reg_results.get('val_losses', [])
+
     if len(baseline_val_losses) > 0 and len(reg_val_losses) > 0:
         ax2.plot(baseline_val_losses, label='Baseline', linewidth=2, alpha=0.8, color='blue')
         ax2.plot(reg_val_losses, label='Regularized', linewidth=2, alpha=0.8, color='red')
@@ -266,23 +284,27 @@ def create_mnist_comparison_visualization(X_test, y_test, baseline_results, reg_
         ax2.set_yscale('log')
 
     # Overall title
-    improvement = (reg_acc - baseline_acc) * 100
-    fig.suptitle(f'MNIST Classification: Baseline vs Regularized Comparison\n' +
-                f'Test Accuracy Improvement: {improvement:+.2f}% (Baseline: {baseline_acc:.4f}, Regularized: {reg_acc:.4f})',
+    mse_base = baseline_results['test_mse']
+    mse_reg = reg_results['test_mse']
+    improvement = ((mse_base - mse_reg) / mse_base * 100)
+
+    fig.suptitle(f'{geometry_name.upper()} - Baseline vs Regularized Comparison\n'
+                f'Test MSE Improvement: {improvement:.2f}% (Baseline: {mse_base:.6f}, Regularized: {mse_reg:.6f})',
                 fontsize=14, fontweight='bold')
 
     plt.tight_layout()
     plt.savefig(save_path, dpi=150, bbox_inches='tight')
     plt.close()
-    print(f"    Comparison visualization saved to {save_path}")
+    print(f"    Visualization saved to {save_path}")
 
 
-def save_experiment_config(experiment_folder, baseline_params, reg_params, results):
+def save_experiment_config(experiment_folder, geometry_name, baseline_params, reg_params, results):
     """
     Save experiment configuration and results to JSON file
 
     Args:
         experiment_folder: folder to save config
+        geometry_name: name of geometry
         baseline_params: dict with baseline model parameters
         reg_params: dict with regularized model parameters
         results: dict with experiment results
@@ -290,8 +312,8 @@ def save_experiment_config(experiment_folder, baseline_params, reg_params, resul
     config = {
         'experiment_info': {
             'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-            'dataset': 'MNIST',
-            'architecture': '128-64-10 (simplified)'
+            'geometry': geometry_name,
+            'architecture': '64-32-1 (regression)'
         },
         'baseline_model': baseline_params,
         'regularized_model': reg_params,
@@ -305,35 +327,41 @@ def save_experiment_config(experiment_folder, baseline_params, reg_params, resul
     print(f"\nExperiment config saved to {config_path}")
 
 
-def mnist_graph_regularization(folder_path='mnist_test2',
-                               baseline_lambda=0.0,
-                               reg_lambda=0.00001,
-                               num_epochs=4000,
-                               batch_size=128,
-                               learning_rate=1e-5,
-                               early_stopping_patience=500):
+def process_geometry(geometry_name,
+                    results_base_path='examples/synthetic_isomap/results',
+                    baseline_lambda=0.0,
+                    reg_lambda=0.0001,
+                    num_epochs=15000,
+                    batch_size=256,
+                    learning_rate=1e-3,
+                    early_stopping_patience=20000):
     """
-    Main function to train MNIST classifier with graph regularization
+    Process a single geometry: train models and create visualizations
 
     Args:
-        folder_path: path to folder with data from mnist_isomap.py
+        geometry_name: name of the geometry
+        results_base_path: base path to results folders
         baseline_lambda: lambda for baseline model
         reg_lambda: lambda for regularized model
         num_epochs: number of training epochs
-        batch_size: batch size for training
-        learning_rate: learning rate for optimizer
-        early_stopping_patience: patience for early stopping
+        batch_size: batch size
+        learning_rate: learning rate
+        early_stopping_patience: early stopping patience
+
+    Returns:
+        dict with comparison metrics
     """
-    # Create experiment folder with timestamp
+    print(f"\n{'='*80}")
+    print(f"PROCESSING: {geometry_name.upper()}")
+    print(f"{'='*80}")
+
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    folder_path = os.path.join(results_base_path, geometry_name)
     experiment_folder = os.path.join(folder_path, f'experiment_{timestamp}')
     os.makedirs(experiment_folder, exist_ok=True)
 
-    print(f"\n{'='*60}")
     print(f"EXPERIMENT FOLDER: {experiment_folder}")
-    print(f"{'='*60}\n")
 
-    # Load all data
     data = load_data_from_folder(folder_path)
 
     X_train = data['X_train']
@@ -342,38 +370,34 @@ def mnist_graph_regularization(folder_path='mnist_test2',
     y_train = data['y_train']
     y_val = data['y_val']
     y_test = data['y_test']
-    best_distances_matrix = data['best_distances_matrix']
     fps_indices = data['fps_indices']
-    latent_dim = data['latent_dim']
     base_projections = data['base_projections']
     train_projections = data['train_projections']
     val_projections = data['val_projections']
+    best_distances_matrix = data['best_distances_matrix']
+    latent_dim = data['latent_dim']
 
-    # Reconstruct full distance matrix
+    # Reconstruct distance matrix
     n_basis = len(fps_indices)
     weights_matrix = reconstruct_distance_matrix(best_distances_matrix, n_basis)
 
-    print("\n" + "="*60)
-    print("TRAINING CLASSIFIER WITH GRAPH REGULARIZATION")
-    print("="*60)
-    print(f"Using precomputed projections")
-
     # Train baseline model
+    print("\n  Training baseline model (no regularization)...")
     baseline_results = train_and_evaluate_model(
         X_train, y_train, X_val, y_val, X_test, y_test,
         weights_matrix, fps_indices, base_projections,
         train_projections, val_projections,
         lambda_graph=baseline_lambda,
-        model_name="Baseline",
+        model_name="BASELINE",
         cache_folder=os.path.join(experiment_folder, 'baseline'),
         num_epochs=num_epochs,
         batch_size=batch_size,
         learning_rate=learning_rate,
-        early_stopping_patience=early_stopping_patience,
-        adaptive_lambda=False
+        early_stopping_patience=early_stopping_patience
     )
 
     # Train regularized model
+    print(f"\n  Training regularized model (lambda={reg_lambda})...")
     reg_results = train_and_evaluate_model(
         X_train, y_train, X_val, y_val, X_test, y_test,
         weights_matrix, fps_indices, base_projections,
@@ -384,29 +408,17 @@ def mnist_graph_regularization(folder_path='mnist_test2',
         num_epochs=num_epochs,
         batch_size=batch_size,
         learning_rate=learning_rate,
-        early_stopping_patience=early_stopping_patience,
-        adaptive_lambda=False
+        early_stopping_patience=early_stopping_patience
     )
-
-    # Compare results
-    print("\n" + "="*60)
-    print("COMPARISON RESULTS")
-    print("="*60)
-    baseline_acc = baseline_results['accuracy']
-    reg_acc = reg_results['accuracy']
-
-    print(f"Baseline Accuracy:    {baseline_acc:.4f}")
-    print(f"Regularized Accuracy: {reg_acc:.4f}")
 
     # Create comparison visualization
     print("\n  Creating comparison visualization...")
-    viz_path = os.path.join(experiment_folder, 'mnist_comparison.png')
-    create_mnist_comparison_visualization(
-        X_test, y_test,
+    viz_path = os.path.join(experiment_folder, f'{geometry_name}_comparison.png')
+    create_comparison_visualization(
+        geometry_name, X_test, y_test,
         baseline_results, reg_results, viz_path
     )
 
-    # Prepare parameters and results for saving
     baseline_params = {
         'lambda_graph': baseline_lambda,
         'num_epochs': num_epochs,
@@ -426,11 +438,16 @@ def mnist_graph_regularization(folder_path='mnist_test2',
     }
 
     results = {
-        'baseline_test_accuracy': float(baseline_acc),
-        'baseline_val_accuracy': float(baseline_results['val_accuracy']),
-        'regularized_test_accuracy': float(reg_acc),
-        'regularized_val_accuracy': float(reg_results['val_accuracy']),
-        'accuracy_improvement_percent': float((reg_acc - baseline_acc) * 100),
+        'baseline_test_mse': float(baseline_results['test_mse']),
+        'baseline_test_mae': float(baseline_results['test_mae']),
+        'baseline_test_r2': float(baseline_results['test_r2']),
+        'baseline_val_mse': float(baseline_results['val_mse']),
+        'regularized_test_mse': float(reg_results['test_mse']),
+        'regularized_test_mae': float(reg_results['test_mae']),
+        'regularized_test_r2': float(reg_results['test_r2']),
+        'regularized_val_mse': float(reg_results['val_mse']),
+        'mse_improvement_percent': float(((baseline_results['test_mse'] - reg_results['test_mse']) /
+                                          baseline_results['test_mse'] * 100)),
         'latent_dim': int(latent_dim),
         'n_basis_points': int(n_basis),
         'n_train_samples': len(X_train),
@@ -439,22 +456,94 @@ def mnist_graph_regularization(folder_path='mnist_test2',
     }
 
     # Save experiment configuration
-    save_experiment_config(experiment_folder, baseline_params, reg_params, results)
+    save_experiment_config(experiment_folder, geometry_name, baseline_params, reg_params, results)
 
-    # Save comparison results
-    np.save(os.path.join(experiment_folder, 'comparison_results.npy'), results)
-    print(f"Comparison results saved to {experiment_folder}/comparison_results.npy")
+    # Save comparison metrics
+    comparison_metrics = {
+        'geometry': geometry_name,
+        'baseline_test_mse': baseline_results['test_mse'],
+        'baseline_test_mae': baseline_results['test_mae'],
+        'baseline_test_r2': baseline_results['test_r2'],
+        'regularized_test_mse': reg_results['test_mse'],
+        'regularized_test_mae': reg_results['test_mae'],
+        'regularized_test_r2': reg_results['test_r2'],
+        'mse_improvement_percent': ((baseline_results['test_mse'] - reg_results['test_mse']) /
+                                   baseline_results['test_mse'] * 100),
+    }
 
-    return results
+    np.save(os.path.join(experiment_folder, 'comparison_metrics.npy'), comparison_metrics)
+    print(f"  ✓ Metrics saved to {experiment_folder}/comparison_metrics.npy")
 
-folder_path = os.path.join('mnist_isomap', 'mnist_2000')
+    return comparison_metrics
 
-results = mnist_graph_regularization(
-    folder_path=folder_path,
-    baseline_lambda=0.0,
-    reg_lambda=0.00001,
-    num_epochs=4000,
-    batch_size=128,
-    learning_rate=1e-5,
-    early_stopping_patience=500
-)
+
+def create_summary_table(all_metrics, save_path):
+    """
+    Create and save summary table for all geometries
+
+    Args:
+        all_metrics: list of comparison metrics dicts
+        save_path: path to save the summary
+    """
+    print("\n" + "="*80)
+    print("SUMMARY TABLE - ALL GEOMETRIES")
+    print("="*80)
+
+    header = f"{'Geometry':<20} {'Baseline MSE':<15} {'Regularized MSE':<15} {'Improvement':<12} {'R² (Base)':<12} {'R² (Reg)':<12}"
+    print(header)
+    print("-" * len(header))
+
+    summary_lines = [header, "-" * len(header)]
+
+    for metrics in all_metrics:
+        line = (f"{metrics['geometry']:<20} "
+               f"{metrics['baseline_test_mse']:<15.6f} "
+               f"{metrics['regularized_test_mse']:<15.6f} "
+               f"{metrics['mse_improvement_percent']:>10.2f}% "
+               f"{metrics['baseline_test_r2']:>11.4f} "
+               f"{metrics['regularized_test_r2']:>11.4f}")
+        print(line)
+        summary_lines.append(line)
+
+    with open(save_path, 'w') as f:
+        f.write('\n'.join(summary_lines))
+
+    print(f"\n✓ Summary table saved to {save_path}")
+
+
+
+
+print("="*80)
+print("SYNTHETIC GEOMETRY GRAPH REGULARIZATION PIPELINE - STAGE 2")
+print("="*80)
+
+geometries_to_process = ['torus']
+results_base_path = os.path.join('examples', 'synthetic_isomap', 'results')
+
+all_metrics = []
+
+for geom in geometries_to_process:
+    try:
+        metrics = process_geometry(
+            geom,
+            results_base_path,
+            baseline_lambda=0.0,
+            reg_lambda=0.0001,
+            num_epochs=15000,
+            batch_size=256,
+            learning_rate=1e-3,
+            early_stopping_patience=20000
+        )
+        all_metrics.append(metrics)
+    except Exception as e:
+        print(f"\n✗ Error processing {geom}: {e}")
+        import traceback
+        traceback.print_exc()
+
+if all_metrics:
+    summary_path = os.path.join(results_base_path, 'summary_table.txt')
+    create_summary_table(all_metrics, summary_path)
+
+
+
+
