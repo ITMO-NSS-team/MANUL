@@ -32,13 +32,10 @@ def mnist_manifold_learning_example():
     X = mnist_dataset.data.numpy().reshape(len(mnist_dataset), -1)  # (60000, 784)
     y = mnist_dataset.targets.numpy()
 
-    # Split train/val/test (64/16/20)
     print("Splitting data into train/val/test...")
-    # First split: 80% train+val, 20% test
     X_trainval, X_test, y_trainval, y_test = train_test_split(
         X, y, test_size=0.2, random_state=42, stratify=y
     )
-    # Second split: 80% train, 20% val (of the 80%)
     X_train, X_val, y_train, y_val = train_test_split(
         X_trainval, y_trainval, test_size=0.2, random_state=42, stratify=y_trainval
     )
@@ -103,7 +100,6 @@ def mnist_manifold_learning_example():
     best_distances_matrix = isomap.best_distances_matrix
     proj_features = isomap.best_isomap_model()
 
-    # Get projections from Isomap - these are already computed!
     base_projections = proj_features.detach().cpu().numpy()
 
     # Reconstruct full distance matrix from upper triangular form
