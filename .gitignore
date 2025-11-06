@@ -1,4 +1,27 @@
+# Data
+examples/data/data/MNIST/
+data/*.npy
+
+# Outputs
+outputs/
+
+# Python
 **/__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.ipynb_checkpoints/
+*.pth
+*.pt
 .coverage
-.vscode
 **cache**
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

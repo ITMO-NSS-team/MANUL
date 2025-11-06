@@ -11,6 +11,9 @@ It follows the MNIST pipeline but adapted for regression tasks:
 """
 
 import os
+import sys
+sys.path.append('../../..')
+
 import json
 from datetime import datetime
 import numpy as np
@@ -25,6 +28,7 @@ from matplotlib.gridspec import GridSpec
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 
 from regularizator.GraphRegTrainer import GraphRegTrainer
+from utils.cache_utils import check_required_files
 
 
 def load_data_from_folder(folder_path):
@@ -39,23 +43,19 @@ def load_data_from_folder(folder_path):
     """
     print(f"\nLoading data from {folder_path}...")
 
-    X_train = np.load(f'{folder_path}/X_train.npy')
-    X_val = np.load(f'{folder_path}/X_val.npy')
-    X_test = np.load(f'{folder_path}/X_test.npy')
-    y_train = np.load(f'{folder_path}/y_train.npy')
-    y_val = np.load(f'{folder_path}/y_val.npy')
-    y_test = np.load(f'{folder_path}/y_test.npy')
+    X_train = np.load(os.path.join(folder_path, 'X_train.npy'))
+    X_val = np.load(os.path.join(folder_path, 'X_val.npy'))
+    X_test = np.load(os.path.join(folder_path, 'X_test.npy'))
+    y_train = np.load(os.path.join(folder_path, 'y_train.npy'))
+    y_val = np.load(os.path.join(folder_path, 'y_val.npy'))
+    y_test = np.load(os.path.join(folder_path, 'y_test.npy'))
 
-    best_distances_matrix = np.load(f'{folder_path}/best_distance_matrix.npy')
-
-    fps_indices = np.load(f'{folder_path}/fps_indices.npy')
-
-    latent_dim = int(np.load(f'{folder_path}/latent_dim.npy'))
-
-    base_projections = np.load(f'{folder_path}/base_projections.npy')
-
-    train_projections = np.load(f'{folder_path}/train_projections.npy')
-    val_projections = np.load(f'{folder_path}/val_projections.npy')
+    best_distances_matrix = np.load(os.path.join(folder_path, 'best_distance_matrix.npy'))
+    fps_indices = np.load(os.path.join(folder_path, 'fps_indices.npy'))
+    latent_dim = int(np.load(os.path.join(folder_path, 'latent_dim.npy')))
+    base_projections = np.load(os.path.join(folder_path, 'base_projections.npy'))
+    train_projections = np.load(os.path.join(folder_path, 'train_projections.npy'))
+    val_projections = np.load(os.path.join(folder_path, 'val_projections.npy'))
 
     print(f"  X_train: {X_train.shape}, y_train: {y_train.shape}")
     print(f"  X_val: {X_val.shape}, y_val: {y_val.shape}")
@@ -283,7 +283,6 @@ def create_comparison_visualization(geometry_name, X_test, y_test,
         ax2.grid(True, alpha=0.3)
         ax2.set_yscale('log')
 
-    # Overall title
     mse_base = baseline_results['test_mse']
     mse_reg = reg_results['test_mse']
     improvement = ((mse_base - mse_reg) / mse_base * 100)
@@ -328,7 +327,7 @@ def save_experiment_config(experiment_folder, geometry_name, baseline_params, re
 
 
 def process_geometry(geometry_name,
-                    results_base_path='examples/synthetic_isomap/results',
+                    results_base_path='synthetic_isomap/results',
                     baseline_lambda=0.0,
                     reg_lambda=0.0001,
                     num_epochs=15000,
@@ -366,6 +365,7 @@ def process_geometry(geometry_name,
 
     X_train = data['X_train']
     X_val = data['X_val']
+
     X_test = data['X_test']
     y_train = data['y_train']
     y_val = data['y_val']
@@ -377,11 +377,9 @@ def process_geometry(geometry_name,
     best_distances_matrix = data['best_distances_matrix']
     latent_dim = data['latent_dim']
 
-    # Reconstruct distance matrix
     n_basis = len(fps_indices)
     weights_matrix = reconstruct_distance_matrix(best_distances_matrix, n_basis)
 
-    # Train baseline model
     print("\n  Training baseline model (no regularization)...")
     baseline_results = train_and_evaluate_model(
         X_train, y_train, X_val, y_val, X_test, y_test,
@@ -396,7 +394,6 @@ def process_geometry(geometry_name,
         early_stopping_patience=early_stopping_patience
     )
 
-    # Train regularized model
     print(f"\n  Training regularized model (lambda={reg_lambda})...")
     reg_results = train_and_evaluate_model(
         X_train, y_train, X_val, y_val, X_test, y_test,
@@ -411,7 +408,6 @@ def process_geometry(geometry_name,
         early_stopping_patience=early_stopping_patience
     )
 
-    # Create comparison visualization
     print("\n  Creating comparison visualization...")
     viz_path = os.path.join(experiment_folder, f'{geometry_name}_comparison.png')
     create_comparison_visualization(
@@ -455,10 +451,8 @@ def process_geometry(geometry_name,
         'n_test_samples': len(X_test)
     }
 
-    # Save experiment configuration
     save_experiment_config(experiment_folder, geometry_name, baseline_params, reg_params, results)
 
-    # Save comparison metrics
     comparison_metrics = {
         'geometry': geometry_name,
         'baseline_test_mse': baseline_results['test_mse'],
@@ -472,7 +466,7 @@ def process_geometry(geometry_name,
     }
 
     np.save(os.path.join(experiment_folder, 'comparison_metrics.npy'), comparison_metrics)
-    print(f"  ✓ Metrics saved to {experiment_folder}/comparison_metrics.npy")
+    print(f" Metrics saved to {experiment_folder}/comparison_metrics.npy")
 
     return comparison_metrics
 
@@ -513,36 +507,43 @@ def create_summary_table(all_metrics, save_path):
 
 
 
-print("="*80)
-print("SYNTHETIC GEOMETRY GRAPH REGULARIZATION PIPELINE - STAGE 2")
-print("="*80)
+if __name__ == "__main__":
+    import os
+    SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+    PROJECT_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, '../../../..'))
+    results_base_path = os.path.join(PROJECT_ROOT, 'outputs')
 
-geometries_to_process = ['torus']
-results_base_path = os.path.join('examples', 'synthetic_isomap', 'results')
+    print(f"Script location: {SCRIPT_DIR}")
+    print(f"Looking for data in: {results_base_path}")
+    print("="*80)
+    print("SYNTHETIC GEOMETRY GRAPH REGULARIZATION PIPELINE - STAGE 2")
+    print("="*80)
 
-all_metrics = []
+    geometries_to_process = ['torus']
 
-for geom in geometries_to_process:
-    try:
-        metrics = process_geometry(
-            geom,
-            results_base_path,
-            baseline_lambda=0.0,
-            reg_lambda=0.0001,
-            num_epochs=15000,
-            batch_size=256,
-            learning_rate=1e-3,
-            early_stopping_patience=20000
-        )
-        all_metrics.append(metrics)
-    except Exception as e:
-        print(f"\n✗ Error processing {geom}: {e}")
-        import traceback
-        traceback.print_exc()
+    all_metrics = []
 
-if all_metrics:
-    summary_path = os.path.join(results_base_path, 'summary_table.txt')
-    create_summary_table(all_metrics, summary_path)
+    for geom in geometries_to_process:
+        try:
+            metrics = process_geometry(
+                geom,
+                results_base_path,
+                baseline_lambda=0.0,
+                reg_lambda=0.00001,
+                num_epochs=20000,
+                batch_size=1024,
+                learning_rate=1e-3,
+                early_stopping_patience=20000
+            )
+            all_metrics.append(metrics)
+        except Exception as e:
+            print(f"\n Error processing {geom}: {e}")
+            import traceback
+            traceback.print_exc()
+
+    if all_metrics:
+        summary_path = os.path.join(results_base_path, 'summary_table.txt')
+        create_summary_table(all_metrics, summary_path)
 
 
 
