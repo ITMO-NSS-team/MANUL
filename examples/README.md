@@ -105,10 +105,10 @@ python examples/gradient_isomap/synthetic/run_pipeline.py
 ```bash
 # Stage 1: Manifold Learning
 cd examples/gradient_isomap/mnist/stages
-python 01_manifold_learning.py
+python first_stage.py
 
 # Stage 2: Graph Regularization (after Stage 1 completes)
-python 02_graph_regularization.py
+python second_stage.py
 ```
 
 You can run stages independently
