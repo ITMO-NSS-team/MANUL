@@ -27,9 +27,9 @@ class DimensionalityAnalyser:
                 Which method(s) to use
         """
         if self.max_neighbors is None:
-            self.max_neighbors = X.shape[1] - 1
+            self.max_neighbors = min(X.shape[1] - 1, len(X) - 1)
 
-        n_neighbors = min(self.max_neighbors, X.shape[1] - 1)
+        n_neighbors = min(self.max_neighbors, len(X) - 1)
         print(f"Using n_neighbors: {n_neighbors}")
 
         if method in ['eigenvalue', 'both']:
