@@ -5,28 +5,12 @@ Full Synthetic Geometry Pipeline
 Runs both stages sequentially:
   Stage 1: Manifold Learning with GradientIsomap
   Stage 2: Regression with Graph Regularization
-
-Usage:
-    python run_pipeline.py
 """
-import subprocess
 import sys
 import os
 
-def run_stage(stage_name, script_path):
-    """Execute a pipeline stage script."""
-    print(f"\n{'='*60}")
-    print(f"Running {stage_name}")
-    print(f"{'='*60}\n")
-
-    result = subprocess.run([sys.executable, script_path])
-
-    if result.returncode != 0:
-        print(f"\nError: {stage_name} failed with code {result.returncode}")
-        sys.exit(1)
-
-    print(f"\n{stage_name} completed successfully")
-    return result.returncode
+from stages.first_stage import synthetic_manifold_learning_pipeline
+from stages.second_stage import synthetic_graph_regularization
 
 if __name__ == "__main__":
     print("="*60)
@@ -37,15 +21,25 @@ if __name__ == "__main__":
     print("  Stage 2: Graph Regularization (Regressor Training)")
     print()
 
-    run_stage(
-        stage_name="Stage 1: Manifold Learning",
-        script_path="stages/01_manifold_learning.py"
-    )
+    print(f"\n{'='*60}")
+    print("Running Stage 1: Manifold Learning")
+    print(f"{'='*60}\n")
 
-    run_stage(
-        stage_name="Stage 2: Graph Regularization",
-        script_path="stages/02_graph_regularization.py"
-    )
+    stage1_results = synthetic_manifold_learning_pipeline()
+    print(f"\nStage 1 completed successfully")
+
+    print(f"\n{'='*60}")
+    print("Running Stage 2: Graph Regularization")
+    print(f"{'='*60}\n")
+
+    if stage1_results and 'geometry_folders' in stage1_results:
+        for geometry_name, folder_path in stage1_results['geometry_folders'].items():
+            print(f"\n{'='*40}")
+            print(f"Processing geometry: {geometry_name}")
+            print(f"{'='*40}\n")
+
+            stage2_results = synthetic_graph_regularization(folder_path=folder_path)
+            print(f"\nStage 2 for {geometry_name} completed successfully")
 
     print("\n" + "="*60)
     print("Full pipeline completed successfully!")

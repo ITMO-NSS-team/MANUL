@@ -1,10 +1,9 @@
 import os
 import sys
-sys.path.append('../../..')
-
+from datetime import datetime
 import numpy as np
 import torch
-from torchvision import datasets, transforms
+from torchvision import datasets
 from sklearn.model_selection import train_test_split
 
 from Adam.GradientIsomap import GradientIsomap
@@ -13,38 +12,31 @@ from utils.fps_implementation import memory_efficient_fps
 from utils.Projector import Projector
 from utils.cache_utils import load_or_compute_fps, load_or_train_isomap, load_or_compute_projections
 
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-PROJECT_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, '../../../..'))
-OUTPUTS_DIR = os.path.join(PROJECT_ROOT, 'outputs')
-DATA_DIR = os.path.join(PROJECT_ROOT, 'data')
-
 
 def mnist_manifold_learning_example():
     """
     MNIST manifold learning example with FPS sampling and local PCA dimension estimation.
     """
     n_samples = 2000
-    latent_len = 300  # precomp latent dimension for Isomap
 
-    working_folder = os.path.join(OUTPUTS_DIR, f'mnist_{n_samples}')
-    if not os.path.exists(working_folder):
-        os.makedirs(working_folder)
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    experiment_dir = os.path.abspath(os.path.join(script_dir, '..'))
+    project_root = os.path.abspath(os.path.join(script_dir, '../../../..'))
+
+    outputs_dir = os.path.join(experiment_dir, 'outputs')
+    data_dir = os.path.join(project_root, 'data')
+
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    working_folder = os.path.join(outputs_dir, f'run_{timestamp}_n{n_samples}')
+    os.makedirs(working_folder, exist_ok=True)
 
     print(f"Working folder: {working_folder}")
     print("Loading MNIST data...")
 
-    mnist_raw_path = os.path.join(DATA_DIR, 'MNIST', 'raw')
-    mnist_exists = os.path.exists(mnist_raw_path) and len(os.listdir(mnist_raw_path)) > 0
 
-    if mnist_exists:
-        print(f"  Found existing MNIST data in {mnist_raw_path}")
-    else:
-        print(f"  MNIST data not found, will download to {DATA_DIR}")
+    mnist_dataset = datasets.MNIST(root=data_dir, train=True, download=True)
 
-    transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.5,), (0.5,))])
-    mnist_dataset = datasets.MNIST(root=DATA_DIR, train=True, download=not mnist_exists, transform=transform)
-
-    X = mnist_dataset.data.numpy().reshape(len(mnist_dataset), -1)
+    X = mnist_dataset.data.numpy().reshape(len(mnist_dataset), -1).astype(np.float32) / 255.0
     y = mnist_dataset.targets.numpy()
 
     print("Splitting data into train/val/test...")
@@ -54,10 +46,6 @@ def mnist_manifold_learning_example():
     X_train, X_val, y_train, y_val = train_test_split(
         X_trainval, y_trainval, test_size=0.2, random_state=42, stratify=y_trainval
     )
-
-    X_train = X_train / 255.0
-    X_val = X_val / 255.0
-    X_test = X_test / 255.0
 
     print(f"Training set: {X_train.shape}, Validation set: {X_val.shape}, Test set: {X_test.shape}")
 

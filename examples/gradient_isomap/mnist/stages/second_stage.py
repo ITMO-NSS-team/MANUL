@@ -1,7 +1,5 @@
 import os
 import sys
-sys.path.append('../../..')
-
 import json
 from datetime import datetime
 import numpy as np
@@ -243,7 +241,7 @@ def save_experiment_config(experiment_folder, baseline_params, reg_params, resul
     print(f"\nExperiment config saved to {config_path}")
 
 
-def mnist_graph_regularization(folder_path='../../../outputs/mnist_2000',
+def mnist_graph_regularization(folder_path=None,
                                baseline_lambda=0.0,
                                reg_lambda=0.00001,
                                num_epochs=4000,
@@ -392,13 +390,22 @@ def mnist_graph_regularization(folder_path='../../../outputs/mnist_2000',
 
 
 if __name__ == "__main__":
-    import os
+
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    project_root = os.path.abspath(os.path.join(script_dir, '../../../..'))
-    folder_path = os.path.join(project_root, 'outputs', 'mnist_2000')
+    experiment_dir = os.path.abspath(os.path.join(script_dir, '..'))  # mnist/
+
+    # Set your run folder name
+    run_folder_name = 'mnist_2000'
+    folder_path = os.path.join(experiment_dir, 'outputs', run_folder_name)
+
     print(f"Script location: {script_dir}")
-    print(f"Project root: {project_root}")
+    print(f"Experiment dir: {experiment_dir}")
     print(f"Looking for data in: {folder_path}")
+
+    if not os.path.exists(folder_path):
+        print(f"\nError: Folder not found: {folder_path}")
+        print("\nPlease update 'run_folder_name' in this script or run first_stage.py")
+        sys.exit(1)
 
     results = mnist_graph_regularization(
         folder_path=folder_path,

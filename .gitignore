@@ -1,8 +1,7 @@
 # Data
-examples/data/data/MNIST/
+data/MNIST/
 data/*.npy
 
-# Outputs
 outputs/
 
 # Python

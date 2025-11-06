@@ -12,8 +12,6 @@ It follows the MNIST pipeline but adapted for regression tasks:
 
 import os
 import sys
-sys.path.append('../../..')
-
 import json
 from datetime import datetime
 import numpy as np
@@ -283,6 +281,7 @@ def create_comparison_visualization(geometry_name, X_test, y_test,
         ax2.grid(True, alpha=0.3)
         ax2.set_yscale('log')
 
+    # Overall title
     mse_base = baseline_results['test_mse']
     mse_reg = reg_results['test_mse']
     improvement = ((mse_base - mse_reg) / mse_base * 100)
@@ -507,43 +506,178 @@ def create_summary_table(all_metrics, save_path):
 
 
 
+def synthetic_graph_regularization(folder_path=None,
+                                    baseline_lambda=0.0,
+                                    reg_lambda=0.00001,
+                                    num_epochs=20000,
+                                    batch_size=1024,
+                                    learning_rate=1e-3,
+                                    early_stopping_patience=20000):
+    """
+    Main function to train regression model with graph regularization for synthetic geometries
+
+    Args:
+        folder_path: path to folder with data from Stage 1
+        baseline_lambda: lambda for baseline model
+        reg_lambda: lambda for regularized model
+        num_epochs: number of training epochs
+        batch_size: batch size for training
+        learning_rate: learning rate for optimizer
+        early_stopping_patience: patience for early stopping
+    """
+    required_files = [
+        'fps_indices.npy',
+        'best_distance_matrix.npy',
+        'X_train.npy',
+        'y_train.npy',
+        'train_projections.npy',
+        'val_projections.npy',
+        'base_projections.npy',
+        'latent_dim.npy'
+    ]
+
+    if not check_required_files(folder_path, required_files):
+        print("\nPlease run Stage 1 (first_stage.py) first")
+        return None
+
+    geometry_name = os.path.basename(folder_path).split('_')[-1]  # e.g., run_20250106_143022_torus -> torus
+
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    experiment_folder = os.path.join(folder_path, f'experiment_{timestamp}')
+    os.makedirs(experiment_folder, exist_ok=True)
+
+    print(f"\n{'='*60}")
+    print(f"EXPERIMENT FOLDER: {experiment_folder}")
+    print(f"{'='*60}\n")
+
+    data = load_data_from_folder(folder_path)
+
+    X_train = data['X_train']
+    X_val = data['X_val']
+    X_test = data['X_test']
+    y_train = data['y_train']
+    y_val = data['y_val']
+    y_test = data['y_test']
+    best_distances_matrix = data['best_distances_matrix']
+    fps_indices = data['fps_indices']
+    latent_dim = data['latent_dim']
+    base_projections = data['base_projections']
+    train_projections = data['train_projections']
+    val_projections = data['val_projections']
+
+    n_basis = len(fps_indices)
+    weights_matrix = reconstruct_distance_matrix(best_distances_matrix, n_basis)
+
+    print("\n" + "="*60)
+    print("TRAINING REGRESSOR WITH GRAPH REGULARIZATION")
+    print("="*60)
+
+    baseline_results = train_and_evaluate_model(
+        X_train, y_train, X_val, y_val, X_test, y_test,
+        weights_matrix, fps_indices, base_projections,
+        train_projections, val_projections,
+        lambda_graph=baseline_lambda,
+        model_name="Baseline",
+        cache_folder=os.path.join(experiment_folder, 'baseline'),
+        num_epochs=num_epochs,
+        batch_size=batch_size,
+        learning_rate=learning_rate,
+        early_stopping_patience=early_stopping_patience
+    )
+
+    reg_results = train_and_evaluate_model(
+        X_train, y_train, X_val, y_val, X_test, y_test,
+        weights_matrix, fps_indices, base_projections,
+        train_projections, val_projections,
+        lambda_graph=reg_lambda,
+        model_name="REGULARIZED",
+        cache_folder=os.path.join(experiment_folder, 'regularized'),
+        num_epochs=num_epochs,
+        batch_size=batch_size,
+        learning_rate=learning_rate,
+        early_stopping_patience=early_stopping_patience
+    )
+
+    print("\n" + "="*60)
+    print("COMPARISON RESULTS")
+    print("="*60)
+    print(f"Baseline Test MSE:    {baseline_results['test_mse']:.6f}")
+    print(f"Regularized Test MSE: {reg_results['test_mse']:.6f}")
+
+    print("\n  Creating comparison visualization...")
+    viz_path = os.path.join(experiment_folder, f'{geometry_name}_comparison.png')
+    create_comparison_visualization(
+        geometry_name, X_test, y_test,
+        baseline_results, reg_results, viz_path
+    )
+
+    baseline_params = {
+        'lambda_graph': baseline_lambda,
+        'num_epochs': num_epochs,
+        'batch_size': batch_size,
+        'learning_rate': learning_rate,
+        'early_stopping_patience': early_stopping_patience,
+        'best_epoch': baseline_results.get('best_epoch', num_epochs)
+    }
+
+    reg_params = {
+        'lambda_graph': reg_lambda,
+        'num_epochs': num_epochs,
+        'batch_size': batch_size,
+        'learning_rate': learning_rate,
+        'early_stopping_patience': early_stopping_patience,
+        'best_epoch': reg_results.get('best_epoch', num_epochs)
+    }
+
+    results = {
+        'baseline_test_mse': float(baseline_results['test_mse']),
+        'baseline_val_mse': float(baseline_results['val_mse']),
+        'regularized_test_mse': float(reg_results['test_mse']),
+        'regularized_val_mse': float(reg_results['val_mse']),
+        'mse_improvement_percent': float((baseline_results['test_mse'] - reg_results['test_mse']) /
+                                        baseline_results['test_mse'] * 100),
+        'latent_dim': int(latent_dim),
+        'n_basis_points': int(n_basis),
+        'n_train_samples': len(X_train),
+        'n_val_samples': len(X_val),
+        'n_test_samples': len(X_test)
+    }
+
+    save_experiment_config(experiment_folder, geometry_name, baseline_params, reg_params, results)
+
+    np.save(os.path.join(experiment_folder, 'comparison_results.npy'), results)
+    print(f"Comparison results saved to {experiment_folder}/comparison_results.npy")
+
+    return results
+
+
 if __name__ == "__main__":
-    import os
-    SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-    PROJECT_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, '../../../..'))
-    results_base_path = os.path.join(PROJECT_ROOT, 'outputs')
+    # Specify the run folder to use
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    experiment_dir = os.path.abspath(os.path.join(script_dir, '..'))  # synthetic/
 
-    print(f"Script location: {SCRIPT_DIR}")
-    print(f"Looking for data in: {results_base_path}")
-    print("="*80)
-    print("SYNTHETIC GEOMETRY GRAPH REGULARIZATION PIPELINE - STAGE 2")
-    print("="*80)
+    # Set your run folder name
+    run_folder_name = 'torus'
+    folder_path = os.path.join(experiment_dir, 'outputs', run_folder_name)
 
-    geometries_to_process = ['torus']
+    print(f"Script location: {script_dir}")
+    print(f"Experiment dir: {experiment_dir}")
+    print(f"Looking for data in: {folder_path}")
 
-    all_metrics = []
+    if not os.path.exists(folder_path):
+        print(f"\nError: Folder not found: {folder_path}")
+        print("\nPlease update 'run_folder_name' in this script or run first_stage.py first!")
+        sys.exit(1)
 
-    for geom in geometries_to_process:
-        try:
-            metrics = process_geometry(
-                geom,
-                results_base_path,
-                baseline_lambda=0.0,
-                reg_lambda=0.00001,
-                num_epochs=20000,
-                batch_size=1024,
-                learning_rate=1e-3,
-                early_stopping_patience=20000
-            )
-            all_metrics.append(metrics)
-        except Exception as e:
-            print(f"\n Error processing {geom}: {e}")
-            import traceback
-            traceback.print_exc()
-
-    if all_metrics:
-        summary_path = os.path.join(results_base_path, 'summary_table.txt')
-        create_summary_table(all_metrics, summary_path)
+    results = synthetic_graph_regularization(
+        folder_path=folder_path,
+        baseline_lambda=0.0,
+        reg_lambda=0.00001,
+        num_epochs=20000,
+        batch_size=1024,
+        learning_rate=1e-3,
+        early_stopping_patience=20000
+    )
 
 
 

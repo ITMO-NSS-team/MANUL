@@ -20,19 +20,22 @@ MANUL-main/
 ├── examples/
 │   └── gradient_isomap/
 │       ├── mnist/                     # MNIST classification example
+│       │   ├── outputs/               # Experiment outputs (timestamped runs)
+│       │   │   └── run_20251106_143022_n2000/
+│       │   │       ├── *.npy (Stage 1 outputs)
+│       │   │       └── experiment_20251106_145530/  # Stage 2 results
 │       │   ├── run_pipeline.py        # Full pipeline runner
 │       │   └── stages/
-│       │       ├── 01_manifold_learning.py
-│       │       └── 02_graph_regularization.py
+│       │       ├── first_stage.py     # Stage 1: Manifold Learning
+│       │       └── second_stage.py    # Stage 2: Graph Regularization
 │       └── synthetic/                 # Synthetic geometry regression example
-│           ├── run_pipeline.py        # Full pipeline runner
+│           ├── outputs/               # Experiment outputs
+│           │   └── run_20251106_182030_torus/
+│           ├── run_pipeline.py
 │           └── stages/
-│               ├── 01_manifold_learning.py
-│               └── 02_graph_regularization.py
-├── outputs/                           # Stage 1 → Stage 2 data transfer
-│   ├── mnist_2000/                    # MNIST with 2000 samples
-│   └── torus/                         # Torus geometry
-└── data/                              # Raw datasets
+│               ├── first_stage.py
+│               └── second_stage.py
+└── data/                              # Raw datasets (shared across experiments)
     └── MNIST/                         # Downloaded MNIST data
 ```
 
@@ -99,8 +102,6 @@ python examples/gradient_isomap/synthetic/run_pipeline.py
 
 ### Option 2: Run Stages Manually
 
-Run stages independently
-
 ```bash
 # Stage 1: Manifold Learning
 cd examples/gradient_isomap/mnist/stages
@@ -110,11 +111,13 @@ python 01_manifold_learning.py
 python 02_graph_regularization.py
 ```
 
-**Or from project root:**
-```bash
-python examples/gradient_isomap/mnist/stages/01_manifold_learning.py
-python examples/gradient_isomap/mnist/stages/02_graph_regularization.py
-```
+You can run stages independently
+**Important for Stage 2:**
+- When running `run_pipeline.py`: Stage 2 automatically uses the output from Stage 1
+- When running `second_stage.py` directly: You must specify the run folder name in the script:
+  ```python
+  run_folder_name = 'mnist_2000'  # Change to your specific run folder
+  ```
 
 
 
@@ -160,10 +163,11 @@ python examples/gradient_isomap/mnist/run_pipeline.py
 python examples/gradient_isomap/synthetic/run_pipeline.py
 ```
 
-**Customize geometry** (edit `01_manifold_learning.py` line 225):
+**Customize geometry** (edit `first_stage.py`):
 ```python
 geometries_to_process = ['torus']  # Change to 'sphere', 'swiss_roll', etc.
 ```
 
 ---
+
 

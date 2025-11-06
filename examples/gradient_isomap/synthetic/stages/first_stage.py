@@ -13,8 +13,7 @@ following the same pipeline as MNIST:
 
 import os
 import sys
-sys.path.append('../../..')
-
+from datetime import datetime
 import numpy as np
 import torch
 from sklearn.model_selection import train_test_split
@@ -26,11 +25,8 @@ from Adam.GradientIsomap import GradientIsomap
 from utils.fps_implementation import memory_efficient_fps
 from utils.Projector import Projector
 from utils.cache_utils import load_or_compute_fps
-from examples.data.data.synthetic_geometries import geometries, noisy_manifold
+from data.synthetic_geometries import geometries, noisy_manifold
 
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-PROJECT_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, '../../../..'))
-OUTPUTS_DIR = os.path.join(PROJECT_ROOT, 'outputs')
 
 
 def process_geometry(geometry_name, n_samples=1000, n_basis_points=200,
@@ -61,9 +57,17 @@ def process_geometry(geometry_name, n_samples=1000, n_basis_points=200,
     print(f"PROCESSING GEOMETRY: {geometry_name.upper()}")
     print(f"{'='*80}\n")
 
-    working_folder = os.path.join(OUTPUTS_DIR, geometry_name)
-    if not os.path.exists(working_folder):
-        os.makedirs(working_folder)
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    experiment_dir = os.path.abspath(os.path.join(script_dir, '..'))
+    project_root = os.path.abspath(os.path.join(script_dir, '../../../..'))
+
+    outputs_dir = os.path.join(experiment_dir, 'outputs')
+    data_dir = os.path.join(project_root, 'data')
+
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    working_folder = os.path.join(outputs_dir, f'run_{timestamp}_n{n_samples}')
+    os.makedirs(working_folder, exist_ok=True)
+
 
     print(f"Working folder: {working_folder}")
 
@@ -270,3 +274,48 @@ if __name__ == "__main__":
 
     print("\nAll geometries processed successfully!")
     print("Ready for Stage 2: Graph Regularization Training")
+
+
+def synthetic_manifold_learning_pipeline():
+    """
+    Main pipeline function for use by run_pipeline.py
+    """
+    geometries_to_process = ['torus']
+    n_samples = 5000
+    n_basis_points = 1000
+    noise_percent = 0.05
+    latent_dim = 2
+    epochs = 10000
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
+    print("=" * 80)
+    print("SYNTHETIC GEOMETRY MANIFOLD LEARNING PIPELINE")
+    print("=" * 80)
+    print(f"\nConfiguration:")
+    print(f"  Geometries: {geometries_to_process}")
+    print(f"  Total samples per geometry: {n_samples}")
+    print(f"  Basis points (FPS): {n_basis_points}")
+    print(f"  Noise level: {noise_percent * 100}%")
+    print(f"  Latent dimension: {latent_dim}")
+    print(f"  GradientIsomap epochs: {epochs}")
+    print(f"  Device: {device}")
+
+    geometry_folders = {}
+    for geom in geometries_to_process:
+        try:
+            result = process_geometry(
+                geometry_name=geom,
+                n_samples=n_samples,
+                n_basis_points=n_basis_points,
+                noise_percent=noise_percent,
+                latent_dim=latent_dim,
+                epochs=epochs,
+                device=device
+            )
+            geometry_folders[geom] = result['working_folder']
+        except Exception as e:
+            print(f"\nError processing {geom}: {e}")
+            import traceback
+            traceback.print_exc()
+
+    return {'geometry_folders': geometry_folders}
