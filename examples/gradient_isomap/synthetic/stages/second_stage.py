@@ -155,6 +155,14 @@ def train_and_evaluate_model(X_train, y_train, X_val, y_val, X_test, y_test,
     """
     print(f"\n  --- Training {model_name} (lambda_graph={lambda_graph}) ---")
 
+    np.random.seed(42)
+    torch.manual_seed(42)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(42)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+
+
     if len(y_train.shape) == 1:
         y_train = y_train.reshape(-1, 1)
         y_val = y_val.reshape(-1, 1)
@@ -672,11 +680,11 @@ if __name__ == "__main__":
     results = synthetic_graph_regularization(
         folder_path=folder_path,
         baseline_lambda=0.0,
-        reg_lambda=0.00001,
-        num_epochs=20000,
+        reg_lambda=0.0000001,
+        num_epochs=1000,
         batch_size=1024,
         learning_rate=1e-3,
-        early_stopping_patience=20000
+        early_stopping_patience=40000
     )
 
 

@@ -65,7 +65,7 @@ def process_geometry(geometry_name, n_samples=1000, n_basis_points=200,
     data_dir = os.path.join(project_root, 'data')
 
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    working_folder = os.path.join(outputs_dir, f'run_{timestamp}_n{n_samples}')
+    working_folder = os.path.join(outputs_dir, f'{geometry_name}_run_{timestamp}_n{n_samples}')
     os.makedirs(working_folder, exist_ok=True)
 
 
@@ -224,7 +224,7 @@ def process_geometry(geometry_name, n_samples=1000, n_basis_points=200,
 
 
 if __name__ == "__main__":
-    geometries_to_process = ['torus']
+    geometries_to_process = ['sphere',]
     n_samples = 5000
     n_basis_points = 1000
     noise_percent = 0.05

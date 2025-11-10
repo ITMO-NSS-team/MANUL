@@ -359,7 +359,7 @@ class GraphRegTrainer:
         """
         self.target_metric = target_metric
 
-    def _compute_graph_loss(self, predictions: np.ndarray, batch_indices: np.ndarray) -> float:
+    def _compute_graph_loss(self, predictions: torch.Tensor, batch_indices: np.ndarray) -> torch.Tensor:
         """
         Compute graph regularization loss for a batch of predictions.
 
@@ -370,19 +370,23 @@ class GraphRegTrainer:
         Returns:
             loss: graph loss value
         """
-        from sklearn.metrics.pairwise import euclidean_distances
 
-        Y_batch = self.Y_all[batch_indices]
-        distances = euclidean_distances(Y_batch, Y_batch)
-        sigma = np.median(distances[distances > 0]) if np.any(distances > 0) else 1.0
-        W_batch = distances / np.max(distances) if np.max(distances) > 0 else distances
-        #W_batch = np.exp(-distances ** 2 / (2 * sigma ** 2))
-        D_batch = np.diag(np.sum(W_batch, axis=1))
+        Y_batch = torch.tensor(self.Y_all[batch_indices], dtype=torch.float64).to(self.device)
+
+        distances = torch.cdist(Y_batch, Y_batch, p=2)
+
+        max_dist = torch.max(distances)
+        if max_dist > 0:
+            W_batch = distances / max_dist
+        else:
+            W_batch = distances
+
+        D_batch = torch.diag(torch.sum(W_batch, dim=1))
         L_batch = D_batch - W_batch
 
-        part_1 = np.dot(predictions.T, L_batch)
-        loss = np.dot(part_1, predictions)
-        return loss.reshape(-1)[0]
+        loss = torch.trace(predictions.T @ L_batch @ predictions)
+
+        return loss
 
     def train(self, plot_convergence: bool = False, adaptive_lambda: bool = False,
               early_stopping_patience: int = None, val_features: np.ndarray = None,
@@ -452,9 +456,7 @@ class GraphRegTrainer:
                 else:
                     model_loss = self.criterion(output, batch_y.reshape_as(output))
 
-                predictions_np = output.detach().cpu().numpy()
-                graph_loss_value = self._compute_graph_loss(predictions_np, batch_indices)
-                graph_loss = torch.tensor(graph_loss_value, dtype=fl64).to(self.device)
+                graph_loss = self._compute_graph_loss(output, batch_indices)
 
                 combined_loss = lam_nn * model_loss + lam_graph * graph_loss
 
@@ -462,7 +464,7 @@ class GraphRegTrainer:
                 self.optimizer.step()
 
                 epoch_model_losses.append(model_loss.item())
-                epoch_graph_losses.append(graph_loss_value)
+                epoch_graph_losses.append(graph_loss.item())
                 epoch_combined_losses.append(combined_loss.item())
 
             model_losses.append(np.mean(epoch_model_losses))

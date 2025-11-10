@@ -111,6 +111,13 @@ def train_and_evaluate_model(X_train, y_train, X_val, y_val, X_test, y_test,
     print(f"\n--- Training {model_name} (lambda_graph={lambda_graph}) ---")
     print(f"  Train: {len(X_train)}, Validation: {len(X_val)}, Test: {len(X_test)}")
 
+    np.random.seed(42)
+    torch.manual_seed(42)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(42)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+
     model = MNISTClassifier()
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
@@ -410,9 +417,9 @@ if __name__ == "__main__":
     results = mnist_graph_regularization(
         folder_path=folder_path,
         baseline_lambda=0.0,
-        reg_lambda=0.000001,
+        reg_lambda=0.1,
         num_epochs=10000,
         batch_size=128,
-        learning_rate=1e-6,
+        learning_rate=1e-5,
         early_stopping_patience=500
     )
