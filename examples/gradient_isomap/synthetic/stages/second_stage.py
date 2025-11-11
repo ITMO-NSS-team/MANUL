@@ -28,6 +28,13 @@ from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from regularizator.GraphRegTrainer import GraphRegTrainer
 from utils.cache_utils import check_required_files
 
+np.random.seed(42)
+torch.manual_seed(42)
+if torch.cuda.is_available():
+    torch.cuda.manual_seed(42)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
 
 def load_data_from_folder(folder_path):
     """
@@ -129,7 +136,7 @@ def train_and_evaluate_model(X_train, y_train, X_val, y_val, X_test, y_test,
                              train_projections, val_projections,
                              lambda_graph, model_name,
                              cache_folder, num_epochs, batch_size,
-                             learning_rate, early_stopping_patience):
+                             learning_rate, early_stopping_patience, adaptive_lambda=False):
     """
     Train and evaluate a regression model with specified graph regularization
 
@@ -154,13 +161,6 @@ def train_and_evaluate_model(X_train, y_train, X_val, y_val, X_test, y_test,
         dict with metrics, predictions, and trainer
     """
     print(f"\n  --- Training {model_name} (lambda_graph={lambda_graph}) ---")
-
-    np.random.seed(42)
-    torch.manual_seed(42)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed(42)
-        torch.backends.cudnn.deterministic = True
-        torch.backends.cudnn.benchmark = False
 
 
     if len(y_train.shape) == 1:
@@ -193,7 +193,7 @@ def train_and_evaluate_model(X_train, y_train, X_val, y_val, X_test, y_test,
 
     trainer.train(
         plot_convergence=True,
-        adaptive_lambda=False,
+        adaptive_lambda=adaptive_lambda,
         early_stopping_patience=early_stopping_patience,
         val_features=X_val,
         val_target=y_val,
@@ -520,7 +520,8 @@ def synthetic_graph_regularization(folder_path=None,
                                     num_epochs=20000,
                                     batch_size=1024,
                                     learning_rate=1e-3,
-                                    early_stopping_patience=20000):
+                                    early_stopping_patience=20000,
+                                    adaptive_lambda=True):
     """
     Main function to train regression model with graph regularization for synthetic geometries
 
@@ -590,7 +591,8 @@ def synthetic_graph_regularization(folder_path=None,
         num_epochs=num_epochs,
         batch_size=batch_size,
         learning_rate=learning_rate,
-        early_stopping_patience=early_stopping_patience
+        early_stopping_patience=early_stopping_patience,
+        adaptive_lambda=False
     )
 
     reg_results = train_and_evaluate_model(
@@ -603,7 +605,8 @@ def synthetic_graph_regularization(folder_path=None,
         num_epochs=num_epochs,
         batch_size=batch_size,
         learning_rate=learning_rate,
-        early_stopping_patience=early_stopping_patience
+        early_stopping_patience=early_stopping_patience,
+        adaptive_lambda=adaptive_lambda
     )
 
     print("\n" + "="*60)
@@ -613,7 +616,7 @@ def synthetic_graph_regularization(folder_path=None,
     print(f"Regularized Test MSE: {reg_results['test_mse']:.6f}")
 
     print("\n  Creating comparison visualization...")
-    viz_path = os.path.join(experiment_folder, f'{geometry_name}_comparison.png')
+    viz_path = os.path.join(experiment_folder, f'{geometry_name}_normalized_n^2_comparison.png')
     create_comparison_visualization(
         geometry_name, X_test, y_test,
         baseline_results, reg_results, viz_path
@@ -634,7 +637,8 @@ def synthetic_graph_regularization(folder_path=None,
         'batch_size': batch_size,
         'learning_rate': learning_rate,
         'early_stopping_patience': early_stopping_patience,
-        'best_epoch': reg_results.get('best_epoch', num_epochs)
+        'best_epoch': reg_results.get('best_epoch', num_epochs),
+        'adaptive lambda': adaptive_lambda
     }
 
     results = {
@@ -680,11 +684,12 @@ if __name__ == "__main__":
     results = synthetic_graph_regularization(
         folder_path=folder_path,
         baseline_lambda=0.0,
-        reg_lambda=0.0000001,
-        num_epochs=1000,
+        reg_lambda=1e-2,
+        num_epochs=15000,
         batch_size=1024,
         learning_rate=1e-3,
-        early_stopping_patience=40000
+        early_stopping_patience=40000,
+        adaptive_lambda=True
     )
 
 

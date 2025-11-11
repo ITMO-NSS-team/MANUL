@@ -13,6 +13,12 @@ import matplotlib.pyplot as plt
 from regularizator.GraphRegTrainer import GraphRegTrainer
 from utils.cache_utils import check_required_files
 
+np.random.seed(42)
+torch.manual_seed(42)
+if torch.cuda.is_available():
+    torch.cuda.manual_seed(42)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
 def load_data_from_folder(folder_path):
     """
@@ -417,9 +423,9 @@ if __name__ == "__main__":
     results = mnist_graph_regularization(
         folder_path=folder_path,
         baseline_lambda=0.0,
-        reg_lambda=0.1,
+        reg_lambda=0.0000001,
         num_epochs=10000,
         batch_size=128,
         learning_rate=1e-5,
-        early_stopping_patience=500
+        early_stopping_patience=5000
     )

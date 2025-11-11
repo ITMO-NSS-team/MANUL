@@ -359,34 +359,37 @@ class GraphRegTrainer:
         """
         self.target_metric = target_metric
 
-    def _compute_graph_loss(self, predictions: torch.Tensor, batch_indices: np.ndarray) -> torch.Tensor:
+    def _compute_graph_loss(self, predictions: torch.Tensor,
+                                                 batch_indices: np.ndarray) -> torch.Tensor:
         """
-        Compute graph regularization loss for a batch of predictions.
+        Compute graph regularization with symmetric normalized Laplacian.
 
-        Args:
-            predictions: model predictions for batch [batch_size, output_dim]
-            batch_indices: indices of batch elements in dataset
-
-        Returns:
-            loss: graph loss value
+        L_sym = D^(-1/2) (D - W) D^(-1/2) = I - D^(-1/2) W D^(-1/2)"
         """
-
         Y_batch = torch.tensor(self.Y_all[batch_indices], dtype=torch.float64).to(self.device)
 
-        distances = torch.cdist(Y_batch, Y_batch, p=2)
-
-        max_dist = torch.max(distances)
-        if max_dist > 0:
-            W_batch = distances / max_dist
+        distances_sq = torch.cdist(Y_batch, Y_batch, p=2) ** 2
+        nonzero_dists = distances_sq[distances_sq > 0]
+        if len(nonzero_dists) > 0:
+            sigma = torch.median(nonzero_dists).sqrt()
         else:
-            W_batch = distances
+            sigma = torch.tensor(1.0, device=self.device)
 
-        D_batch = torch.diag(torch.sum(W_batch, dim=1))
-        L_batch = D_batch - W_batch
+        W_batch = torch.exp(-distances_sq / (2 * sigma ** 2))
+        W_batch = W_batch - torch.diag(torch.diag(W_batch))
 
-        loss = torch.trace(predictions.T @ L_batch @ predictions)
+        D_diag = torch.sum(W_batch, dim=1)
 
+        D_inv_sqrt = torch.diag(torch.pow(D_diag + 1e-10, -0.5))
+
+        I = torch.eye(W_batch.shape[0], device=self.device, dtype=torch.float64)
+        L_sym = I - D_inv_sqrt @ W_batch @ D_inv_sqrt
+
+        loss = torch.trace(predictions.T @ L_sym @ predictions)
+        n = predictions.shape[0]
+        loss = loss / n
         return loss
+
 
     def train(self, plot_convergence: bool = False, adaptive_lambda: bool = False,
               early_stopping_patience: int = None, val_features: np.ndarray = None,
