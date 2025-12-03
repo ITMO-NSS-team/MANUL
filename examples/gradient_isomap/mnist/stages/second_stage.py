@@ -423,7 +423,7 @@ if __name__ == "__main__":
     results = mnist_graph_regularization(
         folder_path=folder_path,
         baseline_lambda=0.0,
-        reg_lambda=0.0000001,
+        reg_lambda=0.001,
         num_epochs=10000,
         batch_size=128,
         learning_rate=1e-5,

@@ -685,13 +685,12 @@ if __name__ == "__main__":
         folder_path=folder_path,
         baseline_lambda=0.0,
         reg_lambda=1e-2,
-        num_epochs=15000,
-        batch_size=1024,
-        learning_rate=1e-3,
-        early_stopping_patience=40000,
+        num_epochs=20000,
+        batch_size=512,
+        learning_rate=1e-5,
+        early_stopping_patience=10000,
         adaptive_lambda=True
     )
-
 
 
 
