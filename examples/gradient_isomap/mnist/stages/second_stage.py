@@ -2,6 +2,7 @@ import os
 import sys
 import json
 from datetime import datetime
+from typing import Union, Optional
 import numpy as np
 import torch
 import torch.nn as nn
@@ -152,8 +153,7 @@ def train_and_evaluate_model(X_train, y_train, X_val, y_val, X_test, y_test,
         adaptive_lambda=adaptive_lambda,
         early_stopping_patience=early_stopping_patience,
         val_features=X_val,
-        val_target=y_val,
-        val_projections=val_projections
+        val_target=y_val
     )
 
     trainer.load_best_weights()
@@ -300,14 +300,14 @@ def save_experiment_config(experiment_folder, baseline_params, reg_params, resul
     print(f"\nExperiment config saved to {config_path}")
 
 
-def mnist_graph_regularization(folder_path=None,
-                               baseline_lambda=0.0,
-                               reg_lambda=0.00001,
-                               num_epochs=4000,
-                               batch_size=128,
-                               learning_rate=1e-6,
-                               early_stopping_patience=10000,
-                               adaptive_lambda=False):
+def mnist_graph_regularization(folder_path: Optional[str] = None,
+                               baseline_lambda: float = 0.0,
+                               reg_lambda: float = 0.00001,
+                               num_epochs: int = 4000,
+                               batch_size: int = 128,
+                               learning_rate: float = 1e-6,
+                               early_stopping_patience: int = 10000,
+                               adaptive_lambda: Union[bool, str] = False):
     """
     Main function to train MNIST classifier with graph regularization
 
@@ -435,14 +435,14 @@ def mnist_graph_regularization(folder_path=None,
         adaptive_lambda_config = {
             'method': 'gradnorm',
             'alpha': 0.0001,
-            'lr_weights': 0.001,
+            'lr_weights': 0.0001,
             'initial_lambda_graph': reg_lambda
         }
     else:
         adaptive_lambda_config = {
             'method': 'disabled'
         }
-
+    # todo: определить в экспериментах какая нормализация рабочая и убрать нерабочие
     reg_params = {
         'lambda_graph': reg_lambda,
         'num_epochs': num_epochs,
@@ -451,6 +451,11 @@ def mnist_graph_regularization(folder_path=None,
         'early_stopping_patience': early_stopping_patience,
         'adaptive_lambda': adaptive_lambda_config,
         'accuracy_check_interval': 10,
+        'graph_normalization': {
+            'kernel': 'exponential (RBF)',
+            'normalization': 'D^(-1/2) symmetric normalization (L_sym = I - D^(-1/2) W D^(-1/2))'
+        },
+
         'best_epoch': reg_results.get('best_epoch', num_epochs)
     }
 
@@ -469,8 +474,8 @@ def mnist_graph_regularization(folder_path=None,
 
     save_experiment_config(experiment_folder, baseline_params, reg_params, results)
 
-    np.save(os.path.join(experiment_folder, 'comparison_results.npy'), results)
-    print(f"Comparison results saved to {experiment_folder}/comparison_results.npy")
+    np.save(os.path.join(experiment_folder, 'comparison_results.csv'), results)
+    print(f"Comparison results saved to {experiment_folder}/comparison_results.csv")
 
     return results
 
@@ -497,7 +502,7 @@ if __name__ == "__main__":
         folder_path=folder_path,
         baseline_lambda=0.0,
         reg_lambda=0.01,
-        num_epochs=300,
+        num_epochs=120,
         batch_size=128,
         learning_rate=1e-4,
         early_stopping_patience=5000,

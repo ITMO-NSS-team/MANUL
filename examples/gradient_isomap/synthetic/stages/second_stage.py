@@ -14,6 +14,7 @@ import os
 import sys
 import json
 from datetime import datetime
+from typing import Union, Optional
 import numpy as np
 import torch
 import torch.nn as nn
@@ -136,7 +137,7 @@ def train_and_evaluate_model(X_train, y_train, X_val, y_val, X_test, y_test,
                              train_projections, val_projections,
                              lambda_graph, model_name,
                              cache_folder, num_epochs, batch_size,
-                             learning_rate, early_stopping_patience, adaptive_lambda=False):
+                             learning_rate, early_stopping_patience, adaptive_lambda):
     """
     Train and evaluate a regression model with specified graph regularization
 
@@ -197,7 +198,6 @@ def train_and_evaluate_model(X_train, y_train, X_val, y_val, X_test, y_test,
         early_stopping_patience=early_stopping_patience,
         val_features=X_val,
         val_target=y_val,
-        val_projections=val_projections
     )
 
     trainer.load_best_weights()
@@ -238,7 +238,7 @@ def train_and_evaluate_model(X_train, y_train, X_val, y_val, X_test, y_test,
     }
 
 
-def create_comparison_visualization(geometry_name, X_test, y_test,
+def create_comparison_visualization(geometry_name, y_test,
                                    baseline_results, reg_results, save_path):
     """
     Create comparison visualization with 2 subplots:
@@ -247,7 +247,6 @@ def create_comparison_visualization(geometry_name, X_test, y_test,
 
     Args:
         geometry_name: name of the geometry
-        X_test: test data (3D coordinates)
         y_test: ground truth targets
         baseline_results: results from baseline model
         reg_results: results from regularized model
@@ -333,151 +332,6 @@ def save_experiment_config(experiment_folder, geometry_name, baseline_params, re
     print(f"\nExperiment config saved to {config_path}")
 
 
-def process_geometry(geometry_name,
-                    results_base_path='synthetic_isomap/results',
-                    baseline_lambda=0.0,
-                    reg_lambda=0.0001,
-                    num_epochs=15000,
-                    batch_size=256,
-                    learning_rate=1e-3,
-                    early_stopping_patience=20000):
-    """
-    Process a single geometry: train models and create visualizations
-
-    Args:
-        geometry_name: name of the geometry
-        results_base_path: base path to results folders
-        baseline_lambda: lambda for baseline model
-        reg_lambda: lambda for regularized model
-        num_epochs: number of training epochs
-        batch_size: batch size
-        learning_rate: learning rate
-        early_stopping_patience: early stopping patience
-
-    Returns:
-        dict with comparison metrics
-    """
-    print(f"\n{'='*80}")
-    print(f"PROCESSING: {geometry_name.upper()}")
-    print(f"{'='*80}")
-
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    folder_path = os.path.join(results_base_path, geometry_name)
-    experiment_folder = os.path.join(folder_path, f'experiment_{timestamp}')
-    os.makedirs(experiment_folder, exist_ok=True)
-
-    print(f"EXPERIMENT FOLDER: {experiment_folder}")
-
-    data = load_data_from_folder(folder_path)
-
-    X_train = data['X_train']
-    X_val = data['X_val']
-
-    X_test = data['X_test']
-    y_train = data['y_train']
-    y_val = data['y_val']
-    y_test = data['y_test']
-    fps_indices = data['fps_indices']
-    base_projections = data['base_projections']
-    train_projections = data['train_projections']
-    val_projections = data['val_projections']
-    best_distances_matrix = data['best_distances_matrix']
-    latent_dim = data['latent_dim']
-
-    n_basis = len(fps_indices)
-    weights_matrix = reconstruct_distance_matrix(best_distances_matrix, n_basis)
-
-    print("\n  Training baseline model (no regularization)...")
-    baseline_results = train_and_evaluate_model(
-        X_train, y_train, X_val, y_val, X_test, y_test,
-        weights_matrix, fps_indices, base_projections,
-        train_projections, val_projections,
-        lambda_graph=baseline_lambda,
-        model_name="BASELINE",
-        cache_folder=os.path.join(experiment_folder, 'baseline'),
-        num_epochs=num_epochs,
-        batch_size=batch_size,
-        learning_rate=learning_rate,
-        early_stopping_patience=early_stopping_patience
-    )
-
-    print(f"\n  Training regularized model (lambda={reg_lambda})...")
-    reg_results = train_and_evaluate_model(
-        X_train, y_train, X_val, y_val, X_test, y_test,
-        weights_matrix, fps_indices, base_projections,
-        train_projections, val_projections,
-        lambda_graph=reg_lambda,
-        model_name="REGULARIZED",
-        cache_folder=os.path.join(experiment_folder, 'regularized'),
-        num_epochs=num_epochs,
-        batch_size=batch_size,
-        learning_rate=learning_rate,
-        early_stopping_patience=early_stopping_patience
-    )
-
-    print("\n  Creating comparison visualization...")
-    viz_path = os.path.join(experiment_folder, f'{geometry_name}_comparison.png')
-    create_comparison_visualization(
-        geometry_name, X_test, y_test,
-        baseline_results, reg_results, viz_path
-    )
-
-    baseline_params = {
-        'lambda_graph': baseline_lambda,
-        'num_epochs': num_epochs,
-        'batch_size': batch_size,
-        'learning_rate': learning_rate,
-        'early_stopping_patience': early_stopping_patience,
-        'best_epoch': baseline_results.get('best_epoch', num_epochs)
-    }
-
-    reg_params = {
-        'lambda_graph': reg_lambda,
-        'num_epochs': num_epochs,
-        'batch_size': batch_size,
-        'learning_rate': learning_rate,
-        'early_stopping_patience': early_stopping_patience,
-        'best_epoch': reg_results.get('best_epoch', num_epochs)
-    }
-
-    results = {
-        'baseline_test_mse': float(baseline_results['test_mse']),
-        'baseline_test_mae': float(baseline_results['test_mae']),
-        'baseline_test_r2': float(baseline_results['test_r2']),
-        'baseline_val_mse': float(baseline_results['val_mse']),
-        'regularized_test_mse': float(reg_results['test_mse']),
-        'regularized_test_mae': float(reg_results['test_mae']),
-        'regularized_test_r2': float(reg_results['test_r2']),
-        'regularized_val_mse': float(reg_results['val_mse']),
-        'mse_improvement_percent': float(((baseline_results['test_mse'] - reg_results['test_mse']) /
-                                          baseline_results['test_mse'] * 100)),
-        'latent_dim': int(latent_dim),
-        'n_basis_points': int(n_basis),
-        'n_train_samples': len(X_train),
-        'n_val_samples': len(X_val),
-        'n_test_samples': len(X_test)
-    }
-
-    save_experiment_config(experiment_folder, geometry_name, baseline_params, reg_params, results)
-
-    comparison_metrics = {
-        'geometry': geometry_name,
-        'baseline_test_mse': baseline_results['test_mse'],
-        'baseline_test_mae': baseline_results['test_mae'],
-        'baseline_test_r2': baseline_results['test_r2'],
-        'regularized_test_mse': reg_results['test_mse'],
-        'regularized_test_mae': reg_results['test_mae'],
-        'regularized_test_r2': reg_results['test_r2'],
-        'mse_improvement_percent': ((baseline_results['test_mse'] - reg_results['test_mse']) /
-                                   baseline_results['test_mse'] * 100),
-    }
-
-    np.save(os.path.join(experiment_folder, 'comparison_metrics.npy'), comparison_metrics)
-    print(f" Metrics saved to {experiment_folder}/comparison_metrics.npy")
-
-    return comparison_metrics
-
-
 def create_summary_table(all_metrics, save_path):
     """
     Create and save summary table for all geometries
@@ -514,14 +368,14 @@ def create_summary_table(all_metrics, save_path):
 
 
 
-def synthetic_graph_regularization(folder_path=None,
-                                    baseline_lambda=0.0,
-                                    reg_lambda=0.00001,
-                                    num_epochs=20000,
-                                    batch_size=1024,
-                                    learning_rate=1e-3,
-                                    early_stopping_patience=20000,
-                                    adaptive_lambda=True):
+def synthetic_graph_regularization(folder_path: Optional[str] = None,
+                                    baseline_lambda: float = 0.0,
+                                    reg_lambda: float = 0.00001,
+                                    num_epochs: int = 20000,
+                                    batch_size: int = 1024,
+                                    learning_rate: float = 1e-3,
+                                    early_stopping_patience: int = 20000,
+                                    adaptive_lambda: Union[bool, str] = 'sobol'):
     """
     Main function to train regression model with graph regularization for synthetic geometries
 
@@ -549,7 +403,7 @@ def synthetic_graph_regularization(folder_path=None,
         print("\nPlease run Stage 1 (first_stage.py) first")
         return None
 
-    geometry_name = os.path.basename(folder_path).split('_')[-1]  # e.g., run_20250106_143022_torus -> torus
+    geometry_name = os.path.basename(folder_path).split('_')[-1]
 
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     experiment_folder = os.path.join(folder_path, f'experiment_{timestamp}')
@@ -616,9 +470,9 @@ def synthetic_graph_regularization(folder_path=None,
     print(f"Regularized Test MSE: {reg_results['test_mse']:.6f}")
 
     print("\n  Creating comparison visualization...")
-    viz_path = os.path.join(experiment_folder, f'{geometry_name}_normalized_n^2_comparison.png')
+    viz_path = os.path.join(experiment_folder, f'{geometry_name}_comparison.png')
     create_comparison_visualization(
-        geometry_name, X_test, y_test,
+        geometry_name, y_test,
         baseline_results, reg_results, viz_path
     )
 
@@ -628,17 +482,44 @@ def synthetic_graph_regularization(folder_path=None,
         'batch_size': batch_size,
         'learning_rate': learning_rate,
         'early_stopping_patience': early_stopping_patience,
+        'adaptive_lambda': False,
         'best_epoch': baseline_results.get('best_epoch', num_epochs)
     }
 
+    # Determine adaptive lambda config
+    adaptive_lambda_config = {}
+    if adaptive_lambda == 'sobol':
+        adaptive_lambda_config = {
+            'method': 'sobol',
+            'n_samples': 5,
+            'sampling_D': 2,
+            'warmup_fraction': 0.1
+        }
+    elif adaptive_lambda == 'gradnorm':
+        adaptive_lambda_config = {
+            'method': 'gradnorm',
+            'alpha': 0.0001,
+            'lr_weights': 0.001,
+            'initial_lambda_graph': reg_lambda
+        }
+    else:
+        adaptive_lambda_config = {
+            'method': 'disabled'
+        }
+    # todo: определить в экспериментах какая нормализация рабочая и убрать нерабочие
     reg_params = {
         'lambda_graph': reg_lambda,
         'num_epochs': num_epochs,
         'batch_size': batch_size,
         'learning_rate': learning_rate,
         'early_stopping_patience': early_stopping_patience,
-        'best_epoch': reg_results.get('best_epoch', num_epochs),
-        'adaptive lambda': adaptive_lambda
+        'adaptive_lambda': adaptive_lambda_config,
+        'graph_normalization': {
+            'kernel': 'none',
+            #'kernel': 'exponential (RBF)',
+            'normalization': 'D^(-1/2) symmetric normalization (L_sym = I - D^(-1/2) W D^(-1/2))'
+        },
+        'best_epoch': reg_results.get('best_epoch', num_epochs)
     }
 
     results = {
@@ -657,8 +538,9 @@ def synthetic_graph_regularization(folder_path=None,
 
     save_experiment_config(experiment_folder, geometry_name, baseline_params, reg_params, results)
 
-    np.save(os.path.join(experiment_folder, 'comparison_results.npy'), results)
-    print(f"Comparison results saved to {experiment_folder}/comparison_results.npy")
+    np.save(os.path.join(experiment_folder, 'comparison_results.csv'), results)
+    print(f"Comparison results saved to {experiment_folder}/comparison_results.csv")
+
 
     return results
 
@@ -686,8 +568,8 @@ if __name__ == "__main__":
         baseline_lambda=0.0,
         reg_lambda=1e-2,
         num_epochs=15000,
-        batch_size=1024,
+        batch_size=512,
         learning_rate=1e-3,
-        early_stopping_patience=150,
-        adaptive_lambda=True
+        early_stopping_patience=1500,
+        adaptive_lambda='gradnorm'
     )

@@ -473,8 +473,8 @@ class GraphRegTrainer:
             sigma = torch.median(nonzero_dists).sqrt()
         else:
             sigma = torch.tensor(1.0, device=self.device)
-
-        W_batch = torch.exp(-distances_sq / (2 * sigma ** 2))
+        W_batch = distances_sq
+        #W_batch = torch.exp(-distances_sq / (2 * sigma ** 2))
         W_batch = W_batch - torch.diag(torch.diag(W_batch))
 
         D_diag = torch.sum(W_batch, dim=1)
@@ -492,8 +492,7 @@ class GraphRegTrainer:
 
     def train(self, plot_convergence: bool = False, adaptive_lambda = False,
               early_stopping_patience: int = None, val_features: np.ndarray = None,
-              val_target: np.ndarray = None, val_projections: np.ndarray = None,
-              accuracy_check_interval: int = 10):
+              val_target: np.ndarray = None, accuracy_check_interval: int = 10):
         """
         Train the model with combined loss (model loss + graph regularization loss).
 
@@ -534,8 +533,8 @@ class GraphRegTrainer:
         if adaptive_lambda == 'gradnorm':
             gradnorm_state = _GradNormState(
                 initial_lambda_graph=self.lambda_graph,
-                alpha=0.0001,
-                lr_weights=0.001,
+                alpha=0.001,
+                lr_weights=0.01,
                 device=self.device
             )
 

@@ -31,7 +31,7 @@ from data.synthetic_geometries import geometries, noisy_manifold
 
 def process_geometry(geometry_name, n_samples=1000, n_basis_points=200,
                      noise_percent=0, latent_dim=2, epochs=500,
-                     device='cuda'):
+                     device='cuda', save_checkpoint_history=False):
     """
     Process a single geometry through the manifold learning pipeline.
 
@@ -133,6 +133,7 @@ def process_geometry(geometry_name, n_samples=1000, n_basis_points=200,
             train_target=train_target,
             latent_len=latent_dim,
             checkpoint_each=100,
+            save_checkpoint_history=save_checkpoint_history,
             logs_folder=working_folder,
             plot_convergence=False,
             epochs=epochs,
@@ -201,6 +202,8 @@ def process_geometry(geometry_name, n_samples=1000, n_basis_points=200,
 
     print(f"\nSaving data to {working_folder}/...")
     np.save(os.path.join(working_folder, 'X_train.npy'), X_train)
+    #todo: во второй stage написать небольшую функцию, которая все эти
+    # матрицы восстановит на основе исходных данных и индексов разбиения
     np.save(os.path.join(working_folder, 'X_val.npy'), X_val)
     np.save(os.path.join(working_folder, 'X_test.npy'), X_test)
     np.save(os.path.join(working_folder, 'y_train.npy'), y_train)
@@ -219,59 +222,6 @@ def process_geometry(geometry_name, n_samples=1000, n_basis_points=200,
         'val_size': X_val.shape[0],
         'test_size': X_test.shape[0]
     }
-
-
-if __name__ == "__main__":
-    geometries_to_process = ['sphere',]
-    n_samples = 5000
-    n_basis_points = 1000
-    noise_percent = 0.05
-    latent_dim = 2
-    epochs = 10000
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
-
-    print("=" * 80)
-    print("SYNTHETIC GEOMETRY MANIFOLD LEARNING PIPELINE")
-    print("=" * 80)
-    print(f"\nConfiguration:")
-    print(f"  Geometries: {geometries_to_process}")
-    print(f"  Total samples per geometry: {n_samples}")
-    print(f"  Basis points (FPS): {n_basis_points}")
-    print(f"  Noise level: {noise_percent * 100}%")
-    print(f"  Latent dimension: {latent_dim}")
-    print(f"  GradientIsomap epochs: {epochs}")
-    print(f"  Device: {device}")
-
-    results = []
-    for geom in geometries_to_process:
-        try:
-            result = process_geometry(
-                geometry_name=geom,
-                n_samples=n_samples,
-                n_basis_points=n_basis_points,
-                noise_percent=noise_percent,
-                latent_dim=latent_dim,
-                epochs=epochs,
-                device=device
-            )
-            results.append(result)
-        except Exception as e:
-            print(f"\nError processing {geom}: {e}")
-            import traceback
-            traceback.print_exc()
-
-    print("\n" + "=" * 80)
-    print("SUMMARY")
-    print("=" * 80)
-    for res in results:
-        print(f"\n{res['geometry']}:")
-        print(f"  Folder: {res['working_folder']}")
-        print(f"  Latent dim: {res['latent_dim']}")
-        print(f"  Basis points: {res['n_basis_points']}")
-        print(f"  Data splits: {res['train_size']} / {res['val_size']} / {res['test_size']}")
-
-    print("\nAll geometries processed successfully!")
-    print("Ready for Stage 2: Graph Regularization Training")
 
 
 def synthetic_manifold_learning_pipeline():
@@ -308,7 +258,8 @@ def synthetic_manifold_learning_pipeline():
                 noise_percent=noise_percent,
                 latent_dim=latent_dim,
                 epochs=epochs,
-                device=device
+                device=device,
+                save_checkpoint_history=False
             )
             geometry_folders[geom] = result['working_folder']
         except Exception as e:
@@ -317,3 +268,7 @@ def synthetic_manifold_learning_pipeline():
             traceback.print_exc()
 
     return {'geometry_folders': geometry_folders}
+
+
+if __name__ == "__main__":
+    synthetic_manifold_learning_pipeline()

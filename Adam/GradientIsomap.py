@@ -1,5 +1,6 @@
 import os
 import time
+import json
 from datetime import datetime
 import numpy as np
 import pandas as pd
@@ -18,6 +19,7 @@ class GradientIsomap:
                  epochs: int = 1000,
                  plot_convergence: bool = True,
                  checkpoint_each: [int, None] = 100,
+                 save_checkpoint_history: bool = False,
                  logs_folder: [str, None] = None,
                  stop_criteria_value: float = 0.001
                  ):
@@ -27,12 +29,20 @@ class GradientIsomap:
         self.plot_convergence = plot_convergence
         self.latent_len = latent_len
         self.checkpoint_each = checkpoint_each
+        self.save_checkpoint_history = save_checkpoint_history
         self.stop_criteria_value = stop_criteria_value
         self.device = self._init_device()
         self.logs_folder = self._init_logs_folder(logs_folder)
         self.best_loss = np.inf
         self.best_isomap_model = None
         self.best_distances_matrix = None
+        self.checkpoint_history_folder = None
+        self.checkpoint_metadata = []
+
+        if self.save_checkpoint_history and self.checkpoint_each is not None:
+            self.checkpoint_history_folder = os.path.join(self.logs_folder, 'checkpoint_history')
+            os.makedirs(self.checkpoint_history_folder, exist_ok=True)
+            print(f'Checkpoint history enabled. Saving to: {self.checkpoint_history_folder}')
 
     def _init_logs_folder(self, folder: [str, None]):
         if folder is None:
@@ -139,6 +149,9 @@ class GradientIsomap:
                 print(f'Mapping saved: f"{self.logs_folder}/best_mapping.npy"'
                       f'\nDistances matrix saved:{self.logs_folder}/best_distance_matrix.npy')
 
+                if self.save_checkpoint_history and self.checkpoint_history_folder is not None:
+                    self._save_checkpoint_history(epoch, isomap_weights, losses[-1])
+
             if stop_criteria:
                 break
 
@@ -159,6 +172,41 @@ class GradientIsomap:
                                       self.targets.cpu().detach().numpy(),
                                       output,
                                       save_path=f'{self.logs_folder}/prediction_train.png')
+
+    def _save_checkpoint_history(self, epoch: int, distance_matrix: np.ndarray, loss: float):
+        """
+        Save distance matrix for current checkpoint to history folder.
+
+        Args:
+            epoch: Current epoch number
+            distance_matrix: Distance matrix in upper triangular form (1D array)
+            loss: Current loss value
+        """
+        checkpoint_filename = f'epoch_{epoch:05d}_distance_matrix.npy'
+        checkpoint_path = os.path.join(self.checkpoint_history_folder, checkpoint_filename)
+
+        np.save(checkpoint_path, distance_matrix)
+
+        self.checkpoint_metadata.append({
+            'epoch': int(epoch),
+            'loss': float(loss),
+            'filename': checkpoint_filename,
+            'timestamp': time.strftime("%Y-%m-%d %H:%M:%S")
+        })
+
+        metadata_path = os.path.join(self.checkpoint_history_folder, 'metadata.json')
+        metadata = {
+            'checkpoint_each': self.checkpoint_each,
+            'total_epochs': self.epochs,
+            'n_basis_points': self.features.shape[0],
+            'checkpoints': self.checkpoint_metadata
+        }
+
+        with open(metadata_path, 'w') as f:
+            json.dump(metadata, f, indent=2)
+
+        if epoch % (self.checkpoint_each * 10) == 0:
+            print(f'  Checkpoint history saved: epoch {epoch}')
 
     def _check_stop_criteria(self, loss_value: float):
         return loss_value <= self.stop_criteria_value
@@ -191,3 +239,56 @@ class GradientIsomap:
         matrix = (matrix + matrix.T) / 2
         matrix.fill_diagonal_(0)
         return matrix / matrix.max()
+
+    @staticmethod
+    def load_checkpoint_history(checkpoint_history_folder: str):
+        """
+        Load all checkpoint distance matrices from history folder.
+
+        Args:
+            checkpoint_history_folder: Path to checkpoint_history folder
+
+        Returns:
+            dict with metadata and all distance matrices:
+            {
+                'metadata': {
+                    'checkpoint_each': 100,
+                    'total_epochs': 10000,
+                    'n_basis_points': 1000
+                },
+                'checkpoints': [
+                    {
+                        'epoch': 0,
+                        'loss': 0.5,
+                        'timestamp': '...',
+                        'distance_matrix': numpy array
+                    },
+                    ...
+                ]
+            }
+        """
+        metadata_path = os.path.join(checkpoint_history_folder, 'metadata.json')
+
+        if not os.path.exists(metadata_path):
+            raise FileNotFoundError(f"Metadata not found: {metadata_path}")
+
+        with open(metadata_path, 'r') as f:
+            metadata = json.load(f)
+
+        checkpoints = []
+        for checkpoint_info in metadata['checkpoints']:
+            checkpoint_path = os.path.join(checkpoint_history_folder, checkpoint_info['filename'])
+            distance_matrix = np.load(checkpoint_path)
+
+            checkpoints.append({
+                'epoch': checkpoint_info['epoch'],
+                'loss': checkpoint_info['loss'],
+                'timestamp': checkpoint_info['timestamp'],
+                'distance_matrix': distance_matrix
+            })
+
+        return {
+            'metadata': {k: v for k, v in metadata.items() if k != 'checkpoints'},
+            'checkpoints': checkpoints
+        }
+#todo: update readme with info about checpointing and adap lambdas options

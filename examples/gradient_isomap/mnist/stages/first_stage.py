@@ -13,7 +13,7 @@ from utils.Projector import Projector
 from utils.cache_utils import load_or_compute_fps, load_or_train_isomap, load_or_compute_projections
 
 
-def mnist_manifold_learning_example():
+def mnist_manifold_learning_example(save_checkpoint_history=False):
     """
     MNIST manifold learning example with FPS sampling and local PCA dimension estimation.
     """
@@ -105,12 +105,12 @@ def mnist_manifold_learning_example():
             train_target=train_target,
             latent_len=latent_len,
             checkpoint_each=100,
+            save_checkpoint_history=save_checkpoint_history,
             logs_folder=working_folder,
             plot_convergence=False,
             epochs=15000,
-            stop_criteria_value=0.001
+            stop_criteria_value=0.001,
         )
-
         isomap.train()
         isomap.visualize_trained()
 
@@ -149,7 +149,7 @@ def mnist_manifold_learning_example():
             weights_matrix=weights_matrix,
             basis_indices=fps_indices,
             n_neighbors=10,
-            method='ensemble_knn',
+            method='random_forest',
             batch_size=128,
             precomputed_base_projections=base_projections,
             verbose=True
@@ -187,4 +187,4 @@ def mnist_manifold_learning_example():
 
 
 if __name__ == "__main__":
-    results = mnist_manifold_learning_example()
+    results = mnist_manifold_learning_example(save_checkpoint_history=False)
