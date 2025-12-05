@@ -107,7 +107,8 @@ def mnist_manifold_learning_example():
             checkpoint_each=100,
             logs_folder=working_folder,
             plot_convergence=False,
-            epochs=15000
+            epochs=15000,
+            stop_criteria_value=0.001
         )
 
         isomap.train()
@@ -141,7 +142,6 @@ def mnist_manifold_learning_example():
 
     if os.path.exists(train_proj_path):
         print(f"Found cached train projections")
-        train_projections = np.load(train_proj_path)
     else:
         print("Computing projections for training data...")
         projector = Projector(
@@ -161,7 +161,6 @@ def mnist_manifold_learning_example():
 
     if os.path.exists(val_proj_path):
         print(f"Found cached val projections")
-        val_projections = np.load(val_proj_path)
     else:
         print("Computing projections for validation data...")
         from regularizator.GraphRegTrainer import project_ensemble_knn

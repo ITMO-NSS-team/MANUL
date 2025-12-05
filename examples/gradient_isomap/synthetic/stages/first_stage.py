@@ -30,7 +30,7 @@ from data.synthetic_geometries import geometries, noisy_manifold
 
 
 def process_geometry(geometry_name, n_samples=1000, n_basis_points=200,
-                     noise_percent=0.075, latent_dim=2, epochs=500,
+                     noise_percent=0, latent_dim=2, epochs=500,
                      device='cuda'):
     """
     Process a single geometry through the manifold learning pipeline.
@@ -62,7 +62,6 @@ def process_geometry(geometry_name, n_samples=1000, n_basis_points=200,
     project_root = os.path.abspath(os.path.join(script_dir, '../../../..'))
 
     outputs_dir = os.path.join(experiment_dir, 'outputs')
-    data_dir = os.path.join(project_root, 'data')
 
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     working_folder = os.path.join(outputs_dir, f'{geometry_name}_run_{timestamp}_n{n_samples}')
@@ -136,7 +135,8 @@ def process_geometry(geometry_name, n_samples=1000, n_basis_points=200,
             checkpoint_each=100,
             logs_folder=working_folder,
             plot_convergence=False,
-            epochs=epochs
+            epochs=epochs,
+            stop_criteria_value=0.001
         )
 
         isomap.train()
@@ -173,7 +173,6 @@ def process_geometry(geometry_name, n_samples=1000, n_basis_points=200,
 
     if os.path.exists(train_proj_path):
         print(f"Found cached train projections")
-        train_projections = np.load(train_proj_path)
     else:
         print("Computing projections for training data...")
         projector = Projector(
@@ -193,7 +192,6 @@ def process_geometry(geometry_name, n_samples=1000, n_basis_points=200,
 
     if os.path.exists(val_proj_path):
         print(f"Found cached val projections")
-        val_projections = np.load(val_proj_path)
     else:
         print("Computing projections for validation data...")
         from regularizator.GraphRegTrainer import project_ensemble_knn

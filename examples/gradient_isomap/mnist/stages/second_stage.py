@@ -173,6 +173,8 @@ def train_and_evaluate_model(X_train, y_train, X_val, y_val, X_test, y_test,
 
     train_losses = trainer.trained_loss_values.get('model_loss', [])
     val_losses = trainer.trained_loss_values.get('val_loss', [])
+    train_accuracies = trainer.trained_loss_values.get('train_accuracy', [])
+    val_accuracies = trainer.trained_loss_values.get('val_accuracy', [])
 
     return {
         'accuracy': accuracy,
@@ -181,25 +183,35 @@ def train_and_evaluate_model(X_train, y_train, X_val, y_val, X_test, y_test,
         'trainer': trainer,
         'train_losses': train_losses,
         'val_losses': val_losses,
+        'train_accuracies': train_accuracies,
+        'val_accuracies': val_accuracies,
         'best_epoch': trainer.best_epoch if hasattr(trainer, 'best_epoch') else num_epochs
     }
 
 
 def create_mnist_comparison_visualization(X_test, y_test, baseline_results, reg_results, save_path):
     """
-    Create comparison visualization for MNIST with 2 subplots
+    Create comparison visualization for MNIST with 4 subplots (losses and accuracies)
     """
-    fig, axes = plt.subplots(1, 2, figsize=(15, 5))
+    fig, axes = plt.subplots(2, 2, figsize=(16, 10))
 
     baseline_train_losses = baseline_results.get('train_losses', [])
     reg_train_losses = reg_results.get('train_losses', [])
     baseline_val_losses = baseline_results.get('val_losses', [])
     reg_val_losses = reg_results.get('val_losses', [])
 
-    baseline_acc = baseline_results['accuracy']
-    reg_acc = reg_results['accuracy']
+    baseline_train_accs = baseline_results.get('train_accuracies', [])
+    reg_train_accs = reg_results.get('train_accuracies', [])
+    baseline_val_accs = baseline_results.get('val_accuracies', [])
+    reg_val_accs = reg_results.get('val_accuracies', [])
 
-    ax1 = axes[0]
+    baseline_test_acc = baseline_results['accuracy']
+    reg_test_acc = reg_results['accuracy']
+    baseline_val_acc = baseline_results['val_accuracy']
+    reg_val_acc = reg_results['val_accuracy']
+
+    # Top-left: Training Loss
+    ax1 = axes[0, 0]
     if len(baseline_train_losses) > 0 and len(reg_train_losses) > 0:
         ax1.plot(baseline_train_losses, label='Baseline', linewidth=2, alpha=0.8, color='blue')
         ax1.plot(reg_train_losses, label='Regularized', linewidth=2, alpha=0.8, color='red')
@@ -210,7 +222,8 @@ def create_mnist_comparison_visualization(X_test, y_test, baseline_results, reg_
         ax1.grid(True, alpha=0.3)
         ax1.set_yscale('log')
 
-    ax2 = axes[1]
+
+    ax2 = axes[0, 1]
     if len(baseline_val_losses) > 0 and len(reg_val_losses) > 0:
         ax2.plot(baseline_val_losses, label='Baseline', linewidth=2, alpha=0.8, color='blue')
         ax2.plot(reg_val_losses, label='Regularized', linewidth=2, alpha=0.8, color='red')
@@ -221,9 +234,42 @@ def create_mnist_comparison_visualization(X_test, y_test, baseline_results, reg_
         ax2.grid(True, alpha=0.3)
         ax2.set_yscale('log')
 
-    improvement = (reg_acc - baseline_acc) * 100
+    ax3 = axes[1, 0]
+    if len(baseline_train_accs) > 0 and len(reg_train_accs) > 0:
+        # Create x-axis based on accuracy check interval (every 10 epochs)
+        accuracy_check_interval = max(1, len(baseline_train_losses) // len(baseline_train_accs))
+        epochs_acc = [i * accuracy_check_interval for i in range(len(baseline_train_accs))]
+
+        ax3.plot(epochs_acc, baseline_train_accs, label='Baseline', linewidth=2, alpha=0.8, color='blue', marker='o', markersize=3)
+        ax3.plot(epochs_acc, reg_train_accs, label='Regularized', linewidth=2, alpha=0.8, color='red', marker='s', markersize=3)
+        ax3.set_xlabel('Epoch', fontsize=11)
+        ax3.set_ylabel('Training Accuracy', fontsize=11)
+        ax3.set_title('Training Accuracy Comparison', fontsize=12, fontweight='bold')
+        ax3.legend(fontsize=10)
+        ax3.grid(True, alpha=0.3)
+        ax3.set_ylim([0, 1.05])
+
+    ax4 = axes[1, 1]
+    if len(baseline_val_accs) > 0 and len(reg_val_accs) > 0:
+        accuracy_check_interval = max(1, len(baseline_val_losses) // len(baseline_val_accs))
+        epochs_acc = [i * accuracy_check_interval for i in range(len(baseline_val_accs))]
+
+        ax4.plot(epochs_acc, baseline_val_accs, label='Baseline', linewidth=2, alpha=0.8, color='blue', marker='o', markersize=3)
+        ax4.plot(epochs_acc, reg_val_accs, label='Regularized', linewidth=2, alpha=0.8, color='red', marker='s', markersize=3)
+        ax4.set_xlabel('Epoch', fontsize=11)
+        ax4.set_ylabel('Validation Accuracy', fontsize=11)
+        ax4.set_title('Validation Accuracy Comparison', fontsize=12, fontweight='bold')
+        ax4.legend(fontsize=10)
+        ax4.grid(True, alpha=0.3)
+        ax4.set_ylim([0, 1.05])
+
+        ax4.text(0.02, 0.98, f'Final Val Acc:\nBaseline: {baseline_val_acc:.4f}\nRegularized: {reg_val_acc:.4f}',
+                transform=ax4.transAxes, fontsize=9, verticalalignment='top',
+                bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+
+    improvement = (reg_test_acc - baseline_test_acc) * 100
     fig.suptitle(f'MNIST Classification: Baseline vs Regularized Comparison\n' +
-                f'Test Accuracy Improvement: {improvement:+.2f}% (Baseline: {baseline_acc:.4f}, Regularized: {reg_acc:.4f})',
+                f'Test Accuracy: Baseline: {baseline_test_acc:.4f}, Regularized: {reg_test_acc:.4f} (Improvement: {improvement:+.2f}%)',
                 fontsize=14, fontweight='bold')
 
     plt.tight_layout()
@@ -260,7 +306,8 @@ def mnist_graph_regularization(folder_path=None,
                                num_epochs=4000,
                                batch_size=128,
                                learning_rate=1e-6,
-                               early_stopping_patience=10000):
+                               early_stopping_patience=10000,
+                               adaptive_lambda=False):
     """
     Main function to train MNIST classifier with graph regularization
 
@@ -272,6 +319,7 @@ def mnist_graph_regularization(folder_path=None,
         batch_size: batch size for training
         learning_rate: learning rate for optimizer
         early_stopping_patience: patience for early stopping
+        adaptive_lambda: 'sobol', 'gradnorm', False
     """
     required_files = [
         'fps_indices.npy',
@@ -344,7 +392,7 @@ def mnist_graph_regularization(folder_path=None,
         batch_size=batch_size,
         learning_rate=learning_rate,
         early_stopping_patience=early_stopping_patience,
-        adaptive_lambda=False
+        adaptive_lambda=adaptive_lambda
     )
 
     print("\n" + "="*60)
@@ -369,8 +417,31 @@ def mnist_graph_regularization(folder_path=None,
         'batch_size': batch_size,
         'learning_rate': learning_rate,
         'early_stopping_patience': early_stopping_patience,
+        'adaptive_lambda': False,
+        'accuracy_check_interval': 10,
         'best_epoch': baseline_results.get('best_epoch', num_epochs)
     }
+
+    # Determine adaptive lambda config
+    adaptive_lambda_config = {}
+    if adaptive_lambda == 'sobol':
+        adaptive_lambda_config = {
+            'method': 'sobol',
+            'n_samples': 5,
+            'sampling_D': 2,
+            'warmup_fraction': 0.1
+        }
+    elif adaptive_lambda == 'gradnorm':
+        adaptive_lambda_config = {
+            'method': 'gradnorm',
+            'alpha': 0.0001,
+            'lr_weights': 0.001,
+            'initial_lambda_graph': reg_lambda
+        }
+    else:
+        adaptive_lambda_config = {
+            'method': 'disabled'
+        }
 
     reg_params = {
         'lambda_graph': reg_lambda,
@@ -378,6 +449,8 @@ def mnist_graph_regularization(folder_path=None,
         'batch_size': batch_size,
         'learning_rate': learning_rate,
         'early_stopping_patience': early_stopping_patience,
+        'adaptive_lambda': adaptive_lambda_config,
+        'accuracy_check_interval': 10,
         'best_epoch': reg_results.get('best_epoch', num_epochs)
     }
 
@@ -423,9 +496,10 @@ if __name__ == "__main__":
     results = mnist_graph_regularization(
         folder_path=folder_path,
         baseline_lambda=0.0,
-        reg_lambda=0.0000001,
-        num_epochs=10000,
+        reg_lambda=0.01,
+        num_epochs=300,
         batch_size=128,
-        learning_rate=1e-5,
-        early_stopping_patience=5000
+        learning_rate=1e-4,
+        early_stopping_patience=5000,
+        adaptive_lambda='gradnorm'  # Options: False, 'sobol', 'gradnorm'
     )

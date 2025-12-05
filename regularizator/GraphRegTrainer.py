@@ -84,8 +84,10 @@ def project_random_forest(X_sparse, Y_sparse, X_all, batch_size=1000):
     return Y_projected
 
 
-def _get_adaptive_lambda(combines_loss, nn_loss, graph_loss):
+def _get_adaptive_lambda_sobol(combines_loss, nn_loss, graph_loss):
     """
+    Sobol Sensitivity Analysis for adaptive lambda computation.
+
     :param combines_loss:  matrix m x n where m - epochs number, n - batch size with sum of nn and graph losses
     :param nn_loss: matrix m x n where m - epochs number, n - batch size with graph losses
     :param graph_loss: matrix m x n where m - epochs number, n - batch size with nn losses
@@ -95,8 +97,8 @@ def _get_adaptive_lambda(combines_loss, nn_loss, graph_loss):
     sampling_D = 2  # as combine 2 features
 
     if n_samples * (sampling_D * 2 + 2) > len(combines_loss):
-        print('Epochs number is too small to calculate adaptive lambda')
-        return [1, 1]
+        print('  [Sobol] Epochs number is too small to calculate adaptive lambda')
+        return [1, 0.01]
 
     combines_loss = np.array(combines_loss)
     nn_loss = np.expand_dims(np.array(nn_loss), axis=1)
@@ -122,17 +124,115 @@ def _get_adaptive_lambda(combines_loss, nn_loss, graph_loss):
     graph_disp = sum(ST[nn_loss.shape[1]:])
 
     if nn_disp == 0 or graph_disp == 0:
-        print(f'Lambda search failed: nn_disp={nn_disp}, graph_disp={graph_disp}')
+        print(f'  [Sobol] Lambda search failed: nn_disp={nn_disp}, graph_disp={graph_disp}')
         return [1, 1]
 
     lam_nn = total_disp / nn_disp
     lam_graph = total_disp / graph_disp
 
     if np.isnan(lam_nn) or np.isnan(lam_graph):
-        print(f'Lambda search failed: nn_disp={lam_nn}, graph_disp={lam_graph}')
+        print(f'  [Sobol] Lambda search failed: nn_disp={lam_nn}, graph_disp={lam_graph}')
         return [1, 1]
 
     return [lam_nn / (np.nanmax([lam_nn, lam_graph])), lam_graph / (np.nanmax([lam_nn, lam_graph]))]
+
+
+class _GradNormState:
+    """State for GradNorm optimizer"""
+    def __init__(self, initial_lambda_graph: float, alpha: float, lr_weights: float, device: str):
+        self.alpha = alpha
+        self.lr_weights = lr_weights
+        self.device = device
+
+        # Learnable weights in log space
+        self._log_weights = torch.nn.Parameter(
+            torch.tensor([0.0, np.log(initial_lambda_graph)], dtype=torch.float64, device=device)
+        )
+        self._weights_optimizer = torch.optim.Adam([self._log_weights], lr=lr_weights)
+
+        # Initial losses for computing relative rates
+        self._initial_model_loss = None
+        self._initial_graph_loss = None
+
+        # Gradient norms from last backward pass
+        self._last_grad_model = None
+        self._last_grad_graph = None
+
+    def get_lambdas(self):
+        """Get current lambda values"""
+        with torch.no_grad():
+            weights = torch.exp(self._log_weights)
+            weights = weights / weights.sum() * 2
+            return weights[0].item(), weights[1].item()
+
+    def store_gradients(self, grad_model_norm: torch.Tensor, grad_graph_norm: torch.Tensor):
+        """Store gradient norms for GradNorm update"""
+        self._last_grad_model = grad_model_norm.detach()
+        self._last_grad_graph = grad_graph_norm.detach()
+
+    def update(self, model_loss: float, graph_loss: float):
+        """Update weights using GradNorm"""
+        # Initialize on first call
+        if self._initial_model_loss is None:
+            self._initial_model_loss = model_loss
+            self._initial_graph_loss = graph_loss
+            return
+
+        # If no gradients available, use simple update
+        if self._last_grad_model is None or self._last_grad_graph is None:
+            self._update_simple(model_loss, graph_loss)
+            return
+
+        # Full GradNorm update with gradients
+        self._update_gradnorm(model_loss, graph_loss)
+
+    def _update_simple(self, model_loss: float, graph_loss: float):
+        """Simple update without gradient information"""
+        r_model = model_loss / (self._initial_model_loss + 1e-10)
+        r_graph = graph_loss / (self._initial_graph_loss + 1e-10)
+        r_mean = (r_model + r_graph) / 2
+
+        target_model = (r_model / r_mean) ** self.alpha
+        target_graph = (r_graph / r_mean) ** self.alpha
+
+        with torch.no_grad():
+            current_weights = torch.exp(self._log_weights)
+            target_weights = torch.tensor([target_model, target_graph], dtype=torch.float64, device=self.device)
+            target_weights = target_weights / target_weights.sum() * 2
+
+            new_weights = current_weights + self.lr_weights * (target_weights - current_weights)
+            self._log_weights.data = torch.log(new_weights + 1e-10)
+
+    def _update_gradnorm(self, model_loss: float, graph_loss: float):
+        """Full GradNorm update with gradient norms"""
+        r_model = model_loss / (self._initial_model_loss + 1e-10)
+        r_graph = graph_loss / (self._initial_graph_loss + 1e-10)
+        r_mean = (r_model + r_graph) / 2
+
+        weights = torch.exp(self._log_weights)
+        G_model = self._last_grad_model * weights[0]
+        G_graph = self._last_grad_graph * weights[1]
+        G_mean = (G_model + G_graph) / 2
+
+        target_model = G_mean * (r_model / r_mean) ** self.alpha
+        target_graph = G_mean * (r_graph / r_mean) ** self.alpha
+
+        gradnorm_loss = (torch.abs(G_model - target_model) +
+                        torch.abs(G_graph - target_graph))
+
+        self._weights_optimizer.zero_grad()
+        gradnorm_loss.backward()
+        self._weights_optimizer.step()
+
+        # Normalize weights
+        with torch.no_grad():
+            weights = torch.exp(self._log_weights)
+            weights = weights / weights.sum() * 2
+            self._log_weights.data = torch.log(weights + 1e-10)
+
+        # Clear gradients
+        self._last_grad_model = None
+        self._last_grad_graph = None
 
 
 class GraphRegTrainer:
@@ -246,8 +346,7 @@ class GraphRegTrainer:
         Args:
             device: device name ('cuda', 'cpu', or None for auto-detection)
 
-        Returns
-        :
+        Returns:
             device: selected device name
         """
         if device is None:
@@ -391,19 +490,22 @@ class GraphRegTrainer:
         return loss
 
 
-    def train(self, plot_convergence: bool = False, adaptive_lambda: bool = False,
+    def train(self, plot_convergence: bool = False, adaptive_lambda = False,
               early_stopping_patience: int = None, val_features: np.ndarray = None,
-              val_target: np.ndarray = None, val_projections: np.ndarray = None):
+              val_target: np.ndarray = None, val_projections: np.ndarray = None,
+              accuracy_check_interval: int = 10):
         """
         Train the model with combined loss (model loss + graph regularization loss).
 
         Args:
             plot_convergence: whether to plot convergence graphs after training
-            adaptive_lambda: whether to use adaptive lambda (computed once after 10% of epochs)
+            adaptive_lambda: adaptive lambda method - False (disabled), 'sobol' (once after 10% epochs),
+                           or 'gradnorm' (updated every epoch)
             early_stopping_patience: number of epochs to wait for improvement before stopping (None = no early stopping)
             val_features: validation features for early stopping
             val_target: validation target for early stopping
             val_projections: validation projections for graph loss computation
+            accuracy_check_interval: compute accuracy every N epochs (default: 10)
 
         Returns:
             self: trained model instance
@@ -413,6 +515,8 @@ class GraphRegTrainer:
         graph_losses = []
         combined_losses = []
         val_losses = []
+        train_accuracies = []
+        val_accuracies = []
 
         # Early stopping setup
         best_val_loss = float('inf')
@@ -423,6 +527,17 @@ class GraphRegTrainer:
         lam_nn = 1
         lam_graph = self.lambda_graph
         lmds_epochs = int(self.num_epochs * 0.1)
+        lambdas_adapted = False
+
+        # Initialize GradNorm state if needed
+        gradnorm_state = None
+        if adaptive_lambda == 'gradnorm':
+            gradnorm_state = _GradNormState(
+                initial_lambda_graph=self.lambda_graph,
+                alpha=0.0001,
+                lr_weights=0.001,
+                device=self.device
+            )
 
         for epoch in range(self.num_epochs):
             if self.verbose:
@@ -461,8 +576,32 @@ class GraphRegTrainer:
 
                 graph_loss = self._compute_graph_loss(output, batch_indices)
 
-                combined_loss = lam_nn * model_loss + lam_graph * graph_loss
+                # If using GradNorm, compute gradient norms
+                if gradnorm_state is not None:
+                    # Compute gradients for model_loss
+                    self.optimizer.zero_grad()
+                    model_loss.backward(retain_graph=True)
+                    grad_model_norm = torch.tensor(0.0, dtype=torch.float64, device=self.device)
+                    for param in self.model.parameters():
+                        if param.grad is not None:
+                            grad_model_norm += (param.grad ** 2).sum()
+                    grad_model_norm = torch.sqrt(grad_model_norm)
 
+                    # Compute gradients for graph_loss
+                    self.optimizer.zero_grad()
+                    graph_loss.backward(retain_graph=True)
+                    grad_graph_norm = torch.tensor(0.0, dtype=torch.float64, device=self.device)
+                    for param in self.model.parameters():
+                        if param.grad is not None:
+                            grad_graph_norm += (param.grad ** 2).sum()
+                    grad_graph_norm = torch.sqrt(grad_graph_norm)
+
+                    # Store gradients for GradNorm update
+                    gradnorm_state.store_gradients(grad_model_norm, grad_graph_norm)
+
+                # Compute combined loss and backprop
+                self.optimizer.zero_grad()
+                combined_loss = lam_nn * model_loss + lam_graph * graph_loss
                 combined_loss.backward()
                 self.optimizer.step()
 
@@ -474,6 +613,22 @@ class GraphRegTrainer:
             graph_losses.append(np.mean(epoch_graph_losses))
             combined_losses.append(np.mean(epoch_combined_losses))
 
+            if epoch % accuracy_check_interval == 0 or epoch == self.num_epochs - 1:
+                if isinstance(self.criterion, nn.CrossEntropyLoss):
+                    self.model.eval()
+                    with torch.no_grad():
+                        # Train accuracy
+                        train_pred = self.predict(self.features)
+                        train_pred_classes = np.argmax(train_pred, axis=1)
+                        train_acc = np.mean(train_pred_classes == self.target)
+                        train_accuracies.append(train_acc)
+
+                        if val_features is not None and val_target is not None:
+                            val_pred = self.predict(val_features)
+                            val_pred_classes = np.argmax(val_pred, axis=1)
+                            val_acc = np.mean(val_pred_classes == val_target)
+                            val_accuracies.append(val_acc)
+
             # Validation phase
             if val_features is not None and val_target is not None:
                 self.model.eval()
@@ -483,7 +638,14 @@ class GraphRegTrainer:
                 if self.verbose:
                     print(f'  Train - Model loss: {model_losses[-1]:.6f}, Graph loss: {graph_losses[-1]:.6f}, Combined: {combined_losses[-1]:.6f}')
                     print(f'  Val   - Model loss: {val_model_loss:.6f}')
-                    print(f'  Adaptive lambdas: lam_nn={lam_nn:.6f}, lam_graph={lam_graph:.6f}')
+                    if lambdas_adapted:
+                        print(f'  Adaptive lambdas: lam_nn={lam_nn:.6f}, lam_graph={lam_graph:.6f}')
+                    else:
+                        print(f'  Lambdas: lam_nn={lam_nn:.6f}, lam_graph={lam_graph:.6f}')
+
+                    if isinstance(self.criterion, nn.CrossEntropyLoss) and len(train_accuracies) > 0:
+                        if epoch % accuracy_check_interval == 0 or epoch == self.num_epochs - 1:
+                            print(f'  Train Accuracy: {train_accuracies[-1]:.4f}, Val Accuracy: {val_accuracies[-1]:.4f}')
 
                 # Early stopping check
                 if early_stopping_patience is not None:
@@ -507,16 +669,36 @@ class GraphRegTrainer:
             else:
                 if self.verbose:
                     print(f'  Model loss: {model_losses[-1]:.6f}, Graph loss: {graph_losses[-1]:.6f}, Combined: {combined_losses[-1]:.6f}')
-                    print(f'  Adaptive lambdas: lam_nn={lam_nn:.6f}, lam_graph={lam_graph:.6f}')
+                    if lambdas_adapted:
+                        print(f'  Adaptive lambdas: lam_nn={lam_nn:.6f}, lam_graph={lam_graph:.6f}')
+                    else:
+                        print(f'  Lambdas: lam_nn={lam_nn:.6f}, lam_graph={lam_graph:.6f}')
 
-            if adaptive_lambda and epoch == lmds_epochs:
-                lam_nn, lam_graph = _get_adaptive_lambda(combined_losses, model_losses, graph_losses)
+            # Adaptive lambda update
+            if adaptive_lambda:
+                if adaptive_lambda == 'sobol' and epoch == lmds_epochs:
+                    # Sobol: compute once after 10% of epochs
+                    lam_nn, lam_graph = _get_adaptive_lambda_sobol(combined_losses, model_losses, graph_losses)
+                    lambdas_adapted = True
+                    if self.verbose:
+                        print(f'  [Sobol] Lambda adapted at epoch {epoch + 1}')
+                elif adaptive_lambda == 'gradnorm':
+                    # GradNorm: update every epoch
+                    gradnorm_state.update(model_losses[-1], graph_losses[-1])
+                    lam_nn, lam_graph = gradnorm_state.get_lambdas()
+                    if not lambdas_adapted:
+                        lambdas_adapted = True  
 
         self.trained_loss_values['model_loss'] = model_losses
         self.trained_loss_values['graph_loss'] = graph_losses
         self.trained_loss_values['combined_loss'] = combined_losses
         if val_features is not None:
             self.trained_loss_values['val_loss'] = val_losses
+
+
+        if isinstance(self.criterion, nn.CrossEntropyLoss):
+            self.trained_loss_values['train_accuracy'] = train_accuracies
+            self.trained_loss_values['val_accuracy'] = val_accuracies
 
         if plot_convergence:
             self._plot_convergence(combined_losses, None, model_losses, graph_losses)

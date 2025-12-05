@@ -666,7 +666,7 @@ def synthetic_graph_regularization(folder_path=None,
 if __name__ == "__main__":
     # Specify the run folder to use
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    experiment_dir = os.path.abspath(os.path.join(script_dir, '..'))  # synthetic/
+    experiment_dir = os.path.abspath(os.path.join(script_dir, '..'))
 
     # Set your run folder name
     run_folder_name = 'torus'
@@ -688,10 +688,6 @@ if __name__ == "__main__":
         num_epochs=15000,
         batch_size=1024,
         learning_rate=1e-3,
-        early_stopping_patience=40000,
+        early_stopping_patience=150,
         adaptive_lambda=True
     )
-
-
-
-
