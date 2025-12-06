@@ -45,7 +45,6 @@ def load_data_from_folder(folder_path):
     latent_dim = int(np.load(f'{folder_path}/latent_dim.npy'))
     base_projections = np.load(f'{folder_path}/base_projections.npy')
     train_projections = np.load(f'{folder_path}/train_projections.npy')
-    val_projections = np.load(f'{folder_path}/val_projections.npy')
 
     print(f"  X_train: {X_train.shape}")
     print(f"  X_val: {X_val.shape}")
@@ -53,7 +52,6 @@ def load_data_from_folder(folder_path):
     print(f"  FPS indices: {len(fps_indices)} basis points")
     print(f"  Latent dim: {latent_dim}")
     print(f"  Train projections: {train_projections.shape} precomputed")
-    print(f"  Val projections: {val_projections.shape} precomputed")
 
     return {
         'X_train': X_train,
@@ -67,7 +65,6 @@ def load_data_from_folder(folder_path):
         'latent_dim': latent_dim,
         'base_projections': base_projections,
         'train_projections': train_projections,
-        'val_projections': val_projections,
         'folder_path': folder_path
     }
 
@@ -108,7 +105,7 @@ class MNISTClassifier(nn.Module):
 
 def train_and_evaluate_model(X_train, y_train, X_val, y_val, X_test, y_test,
                              weights_matrix, fps_indices, base_projections,
-                             train_projections, val_projections,
+                             train_projections,
                              lambda_graph, model_name,
                              cache_folder, num_epochs, batch_size,
                              learning_rate, early_stopping_patience, adaptive_lambda=False):
@@ -327,7 +324,6 @@ def mnist_graph_regularization(folder_path: Optional[str] = None,
         'X_train.npy',
         'y_train.npy',
         'train_projections.npy',
-        'val_projections.npy',
         'base_projections.npy',
         'latent_dim.npy'
     ]
@@ -357,7 +353,7 @@ def mnist_graph_regularization(folder_path: Optional[str] = None,
     latent_dim = data['latent_dim']
     base_projections = data['base_projections']
     train_projections = data['train_projections']
-    val_projections = data['val_projections']
+
 
     n_basis = len(fps_indices)
     weights_matrix = reconstruct_distance_matrix(best_distances_matrix, n_basis)
@@ -370,7 +366,7 @@ def mnist_graph_regularization(folder_path: Optional[str] = None,
     baseline_results = train_and_evaluate_model(
         X_train, y_train, X_val, y_val, X_test, y_test,
         weights_matrix, fps_indices, base_projections,
-        train_projections, val_projections,
+        train_projections,
         lambda_graph=baseline_lambda,
         model_name="Baseline",
         cache_folder=os.path.join(experiment_folder, 'baseline'),
@@ -384,7 +380,7 @@ def mnist_graph_regularization(folder_path: Optional[str] = None,
     reg_results = train_and_evaluate_model(
         X_train, y_train, X_val, y_val, X_test, y_test,
         weights_matrix, fps_indices, base_projections,
-        train_projections, val_projections,
+        train_projections,
         lambda_graph=reg_lambda,
         model_name="REGULARIZED",
         cache_folder=os.path.join(experiment_folder, 'regularized'),
@@ -442,7 +438,7 @@ def mnist_graph_regularization(folder_path: Optional[str] = None,
         adaptive_lambda_config = {
             'method': 'disabled'
         }
-    # todo: определить в экспериментах какая нормализация рабочая и убрать нерабочие
+
     reg_params = {
         'lambda_graph': reg_lambda,
         'num_epochs': num_epochs,
@@ -451,11 +447,6 @@ def mnist_graph_regularization(folder_path: Optional[str] = None,
         'early_stopping_patience': early_stopping_patience,
         'adaptive_lambda': adaptive_lambda_config,
         'accuracy_check_interval': 10,
-        'graph_normalization': {
-            'kernel': 'exponential (RBF)',
-            'normalization': 'D^(-1/2) symmetric normalization (L_sym = I - D^(-1/2) W D^(-1/2))'
-        },
-
         'best_epoch': reg_results.get('best_epoch', num_epochs)
     }
 
@@ -502,9 +493,9 @@ if __name__ == "__main__":
         folder_path=folder_path,
         baseline_lambda=0.0,
         reg_lambda=0.01,
-        num_epochs=120,
+        num_epochs=200,
         batch_size=128,
         learning_rate=1e-4,
-        early_stopping_patience=5000,
+        early_stopping_patience=50,
         adaptive_lambda='gradnorm'  # Options: False, 'sobol', 'gradnorm'
     )

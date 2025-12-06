@@ -61,7 +61,6 @@ def load_data_from_folder(folder_path):
     latent_dim = int(np.load(os.path.join(folder_path, 'latent_dim.npy')))
     base_projections = np.load(os.path.join(folder_path, 'base_projections.npy'))
     train_projections = np.load(os.path.join(folder_path, 'train_projections.npy'))
-    val_projections = np.load(os.path.join(folder_path, 'val_projections.npy'))
 
     print(f"  X_train: {X_train.shape}, y_train: {y_train.shape}")
     print(f"  X_val: {X_val.shape}, y_val: {y_val.shape}")
@@ -70,7 +69,6 @@ def load_data_from_folder(folder_path):
     print(f"  Latent dim: {latent_dim}")
     print(f"  Base projections: {base_projections.shape}")
     print(f"  Train projections: {train_projections.shape}")
-    print(f"  Val projections: {val_projections.shape}")
 
     return {
         'X_train': X_train,
@@ -84,7 +82,6 @@ def load_data_from_folder(folder_path):
         'latent_dim': latent_dim,
         'base_projections': base_projections,
         'train_projections': train_projections,
-        'val_projections': val_projections,
         'folder_path': folder_path
     }
 
@@ -134,7 +131,7 @@ class RegressionModel(nn.Module):
 
 def train_and_evaluate_model(X_train, y_train, X_val, y_val, X_test, y_test,
                              weights_matrix, fps_indices, base_projections,
-                             train_projections, val_projections,
+                             train_projections,
                              lambda_graph, model_name,
                              cache_folder, num_epochs, batch_size,
                              learning_rate, early_stopping_patience, adaptive_lambda):
@@ -149,7 +146,6 @@ def train_and_evaluate_model(X_train, y_train, X_val, y_val, X_test, y_test,
         fps_indices: basis point indices
         base_projections: precomputed projections from GradientIsomap
         train_projections: precomputed projections for training data
-        val_projections: precomputed projections for validation data
         lambda_graph: graph regularization coefficient (0 = no regularization)
         model_name: name for logging
         cache_folder: folder to save results
@@ -254,9 +250,6 @@ def create_comparison_visualization(geometry_name, y_test,
     """
     fig, axes = plt.subplots(1, 2, figsize=(15, 5))
 
-    y_test_flat = y_test.flatten()
-    pred_baseline = baseline_results['predictions_test']
-    pred_reg = reg_results['predictions_test']
 
     ax1 = axes[0]
 
@@ -287,6 +280,10 @@ def create_comparison_visualization(geometry_name, y_test,
         ax2.legend(fontsize=10)
         ax2.grid(True, alpha=0.3)
         ax2.set_yscale('log')
+    else:
+        print("WARNING: Validation losses not available - skipping validation loss plot")
+        ax2.set_title('Validation Loss - No Data', fontsize=12)
+        ax2.axis('off')
 
     # Overall title
     mse_base = baseline_results['test_mse']
@@ -318,7 +315,6 @@ def save_experiment_config(experiment_folder, geometry_name, baseline_params, re
         'experiment_info': {
             'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
             'geometry': geometry_name,
-            'architecture': '64-32-1 (regression)'
         },
         'baseline_model': baseline_params,
         'regularized_model': reg_params,
@@ -394,7 +390,6 @@ def synthetic_graph_regularization(folder_path: Optional[str] = None,
         'X_train.npy',
         'y_train.npy',
         'train_projections.npy',
-        'val_projections.npy',
         'base_projections.npy',
         'latent_dim.npy'
     ]
@@ -426,7 +421,6 @@ def synthetic_graph_regularization(folder_path: Optional[str] = None,
     latent_dim = data['latent_dim']
     base_projections = data['base_projections']
     train_projections = data['train_projections']
-    val_projections = data['val_projections']
 
     n_basis = len(fps_indices)
     weights_matrix = reconstruct_distance_matrix(best_distances_matrix, n_basis)
@@ -438,7 +432,7 @@ def synthetic_graph_regularization(folder_path: Optional[str] = None,
     baseline_results = train_and_evaluate_model(
         X_train, y_train, X_val, y_val, X_test, y_test,
         weights_matrix, fps_indices, base_projections,
-        train_projections, val_projections,
+        train_projections,
         lambda_graph=baseline_lambda,
         model_name="Baseline",
         cache_folder=os.path.join(experiment_folder, 'baseline'),
@@ -452,7 +446,7 @@ def synthetic_graph_regularization(folder_path: Optional[str] = None,
     reg_results = train_and_evaluate_model(
         X_train, y_train, X_val, y_val, X_test, y_test,
         weights_matrix, fps_indices, base_projections,
-        train_projections, val_projections,
+        train_projections,
         lambda_graph=reg_lambda,
         model_name="REGULARIZED",
         cache_folder=os.path.join(experiment_folder, 'regularized'),
@@ -506,7 +500,7 @@ def synthetic_graph_regularization(folder_path: Optional[str] = None,
         adaptive_lambda_config = {
             'method': 'disabled'
         }
-    # todo: определить в экспериментах какая нормализация рабочая и убрать нерабочие
+
     reg_params = {
         'lambda_graph': reg_lambda,
         'num_epochs': num_epochs,
@@ -514,11 +508,6 @@ def synthetic_graph_regularization(folder_path: Optional[str] = None,
         'learning_rate': learning_rate,
         'early_stopping_patience': early_stopping_patience,
         'adaptive_lambda': adaptive_lambda_config,
-        'graph_normalization': {
-            'kernel': 'none',
-            #'kernel': 'exponential (RBF)',
-            'normalization': 'D^(-1/2) symmetric normalization (L_sym = I - D^(-1/2) W D^(-1/2))'
-        },
         'best_epoch': reg_results.get('best_epoch', num_epochs)
     }
 
@@ -566,10 +555,10 @@ if __name__ == "__main__":
     results = synthetic_graph_regularization(
         folder_path=folder_path,
         baseline_lambda=0.0,
-        reg_lambda=1e-2,
+        reg_lambda=1e-5,
         num_epochs=15000,
-        batch_size=512,
+        batch_size=1024,
         learning_rate=1e-3,
-        early_stopping_patience=1500,
-        adaptive_lambda='gradnorm'
+        early_stopping_patience=1000,
+        adaptive_lambda='sobol'
     )

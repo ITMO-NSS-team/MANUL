@@ -17,71 +17,7 @@ from matplotlib import pyplot as plt
 from SALib import ProblemSpec
 
 from Adam.Isomap import IsomapNN
-
-
-def project_krr_optimized(X_sparse, Y_sparse, X_all, batch_size=1000):
-    """Optimized Kernel Ridge Regression"""
-    param_grid = {'alpha': [0.1, 1.0, 10.0], 'gamma': [0.01, 0.1, 1.0]}
-    krr = KernelRidge(kernel='rbf')
-
-    if len(X_sparse) > 1000:
-        subset_idx = np.random.choice(len(X_sparse), 1000, replace=False)
-        X_tune, Y_tune = X_sparse[subset_idx], Y_sparse[subset_idx]
-    else:
-        X_tune, Y_tune = X_sparse, Y_sparse
-
-    grid_search = GridSearchCV(krr, param_grid, cv=3, n_jobs=-1, verbose=0)
-    grid_search.fit(X_tune, Y_tune)
-    best_krr = grid_search.best_estimator_
-    best_krr.fit(X_sparse, Y_sparse)
-
-    Y_projected = []
-    for i in range(0, len(X_all), batch_size):
-        batch = X_all[i:i + batch_size]
-        Y_projected.append(best_krr.predict(batch))
-
-    return np.concatenate(Y_projected, axis=0)
-
-
-def project_ensemble_knn(X_sparse, Y_sparse, X_all):
-    """Ensemble KNN regression"""
-    estimators = [
-        ('knn5', KNeighborsRegressor(n_neighbors=5, weights='distance', n_jobs=-1)),
-        ('knn10', KNeighborsRegressor(n_neighbors=10, weights='distance', n_jobs=-1)),
-        ('knn15', KNeighborsRegressor(n_neighbors=15, weights='distance', n_jobs=-1)),
-    ]
-
-    n_components = Y_sparse.shape[1]
-    Y_projected = np.zeros((len(X_all), n_components))
-
-    for dim in range(n_components):
-        ensemble = VotingRegressor(estimators, n_jobs=-1)
-        ensemble.fit(X_sparse, Y_sparse[:, dim])
-        Y_projected[:, dim] = ensemble.predict(X_all)
-
-    return Y_projected
-
-
-def project_random_forest(X_sparse, Y_sparse, X_all, batch_size=1000):
-    """Random Forest regression"""
-    n_components = Y_sparse.shape[1]
-    Y_projected = np.zeros((len(X_all), n_components))
-
-    for dim in range(n_components):
-        rf = RandomForestRegressor(
-            n_estimators=100, max_depth=None,
-            min_samples_split=5, n_jobs=-1, random_state=42
-        )
-        rf.fit(X_sparse, Y_sparse[:, dim])
-
-        dim_pred = []
-        for i in range(0, len(X_all), batch_size):
-            batch = X_all[i:i + batch_size]
-            dim_pred.append(rf.predict(batch))
-
-        Y_projected[:, dim] = np.concatenate(dim_pred)
-
-    return Y_projected
+from utils.Projector import project_krr_optimized, project_ensemble_knn, project_random_forest
 
 
 def _get_adaptive_lambda_sobol(combines_loss, nn_loss, graph_loss):
@@ -247,10 +183,10 @@ class GraphRegTrainer:
                  train_target: np.ndarray,
                  weights_matrix: np.ndarray,
                  basis_indices: np.ndarray,
-                 model: nn.Module = None,
-                 criterion: Callable = None,
-                 optimizer: torch.optim.Optimizer = None,
-                 lr: float =  1e-3,
+                 model: nn.Module,
+                 criterion: Callable,
+                 optimizer: torch.optim.Optimizer,
+                 task_type: str = None,
                  target_metric: Callable = None,
                  num_epochs: int = 100,
                  batch_size: int = 64,
@@ -268,10 +204,11 @@ class GraphRegTrainer:
             train_target: target values [N, ] or [N, output_dim]
             weights_matrix: graph weight matrix [base_dim, base_dim]
             basis_indices: indices of basis points
-            model: custom model (nn.Module)
-            criterion: loss function
-            optimizer: optimizer
-            lr: learning rate
+            model: custom neural network model (nn.Module)
+            criterion: loss function (e.g., nn.MSELoss, nn.CrossEntropyLoss)
+            optimizer: optimizer (e.g., torch.optim.Adam)
+            task_type: optional explicit task type ('regression' or 'classification').
+                      If None, will be inferred from criterion
             target_metric: evaluation metric
             num_epochs: number of epochs
             batch_size: batch size
@@ -335,9 +272,10 @@ class GraphRegTrainer:
                 print(f"Computing projections for all {len(train_features)} points...")
             self.Y_all = self.compute_all_projections(method=self.method)
 
-        self.init_model(model)
-        self._init_training_settings(criterion, optimizer, lr)
+        self.model = model.to(self.device)
+        self._init_training_settings(criterion, optimizer)
         self._init_target_metric(target_metric)
+        self._init_task_type(criterion, task_type)
 
     def init_device(self, device: str = None):
         """
@@ -406,47 +344,81 @@ class GraphRegTrainer:
 
         return Y_all
 
-    def init_model(self, model):
+    def _infer_task_type(self, criterion) -> str:
         """
-        Initialize neural network model.
+        Infer task type from criterion.
 
         Args:
-            model: custom nn.Module or None for default architecture
+            criterion: loss function
+
+        Returns:
+            'classification', 'regression', or 'custom'
         """
-        if model is not None:
-            self.model = model
+        classification_losses = (
+            nn.CrossEntropyLoss,
+            nn.NLLLoss,
+            nn.BCELoss,
+            nn.BCEWithLogitsLoss,
+            nn.MultiLabelSoftMarginLoss,
+            nn.MultiMarginLoss,
+        )
+
+        regression_losses = (
+            nn.MSELoss,
+            nn.L1Loss,
+            nn.SmoothL1Loss,
+            nn.HuberLoss,
+        )
+
+        if isinstance(criterion, classification_losses):
+            return 'classification'
+        elif isinstance(criterion, regression_losses):
+            return 'regression'
         else:
-            input_dim = self.features.shape[1]
-            self.model = nn.Sequential(
-                nn.Linear(input_dim, 512, dtype=fl64),
-                nn.ReLU(),
-                nn.Linear(512, 256, dtype=fl64),
-                nn.ReLU(),
-                nn.Linear(256, 64, dtype=fl64),
-                nn.ReLU(),
-                nn.Linear(64, 1, dtype=fl64)
-            )
+            return 'custom'
 
-        self.model = self.model.to(self.device)
+    def _init_task_type(self, criterion, task_type):
+        """
+        Initialize task type (classification or regression).
 
-    def _init_training_settings(self, criterion, optimizer, lr):
+        Args:
+            criterion: loss function
+            task_type: explicit task type or None for auto-inference
+        """
+        inferred_type = self._infer_task_type(criterion)
+
+        if task_type is None:
+            if inferred_type == 'custom':
+                raise ValueError(
+                    "Custom loss function detected. Please explicitly specify "
+                    "task_type='regression' or task_type='classification'"
+                )
+            self.task_type = inferred_type
+        else:
+            if task_type not in ['regression', 'classification']:
+                raise ValueError(
+                    f"task_type must be 'regression' or 'classification', got {task_type}"
+                )
+            self.task_type = task_type
+
+            # Warn if explicit task_type contradicts inferred type
+            if inferred_type != 'custom' and inferred_type != task_type:
+                import warnings
+                warnings.warn(
+                    f"Explicit task_type='{task_type}' contradicts inferred type "
+                    f"'{inferred_type}' from criterion. Using explicit task_type."
+                )
+
+    def _init_training_settings(self, criterion, optimizer):
         """
         Initialize loss criterion and optimizer.
 
         Args:
-            criterion: loss function or None for MSELoss
-            optimizer: optimizer or None for Adam
-            lr: learning rate
+            criterion: loss function
+            optimizer: optimizer
         """
-        if optimizer is None:
-            self.optimizer = Adam(self.model.parameters(), lr=1e-3, eps=1e-4)
-        else:
-            self.optimizer = optimizer
-
-        if criterion is None:
-            self.criterion = nn.MSELoss()
-        else:
-            self.criterion = criterion
+        self.criterion = criterion
+        self.optimizer = optimizer
 
 
     def _init_target_metric(self, target_metric):
@@ -458,35 +430,68 @@ class GraphRegTrainer:
         """
         self.target_metric = target_metric
 
-    def _compute_graph_loss(self, predictions: torch.Tensor,
-                                                 batch_indices: np.ndarray) -> torch.Tensor:
+    def _get_target_dtype(self):
         """
-        Compute graph regularization with symmetric normalized Laplacian.
+        Get appropriate dtype for target tensor based on criterion.
 
-        L_sym = D^(-1/2) (D - W) D^(-1/2) = I - D^(-1/2) W D^(-1/2)"
+        Returns:
+            torch dtype for target tensor
+        """
+        # CrossEntropyLoss and NLLLoss need long dtype (class indices)
+        if isinstance(self.criterion, (nn.CrossEntropyLoss, nn.NLLLoss)):
+            return torch.long
+        else:
+            return torch.float64
+
+    def _prepare_target(self, output, batch_y):
+        """
+        Prepare target for loss computation.
+
+        Args:
+            output: model output
+            batch_y: target batch
+
+        Returns:
+            prepared target tensor
+        """
+        # CrossEntropyLoss and NLLLoss expect [batch_size] shape
+        if isinstance(self.criterion, (nn.CrossEntropyLoss, nn.NLLLoss)):
+            return batch_y
+        # Other losses may need reshaping
+        else:
+            return batch_y.reshape_as(output)
+
+    def _compute_graph_loss(self, predictions: torch.Tensor,
+                            batch_indices: np.ndarray) -> torch.Tensor:
+        """
+        Compute graph regularization loss with symmetric normalized Laplacian.
+
+        L_sym = D^(-1/2) (D - W) D^(-1/2) = I - D^(-1/2) W D^(-1/2)
+
+        Args:
+            predictions: model predictions for batch [batch_size, output_dim]
+            batch_indices: indices of batch elements in dataset
+
+        Returns:
+            loss: graph loss value
         """
         Y_batch = torch.tensor(self.Y_all[batch_indices], dtype=torch.float64).to(self.device)
-
         distances_sq = torch.cdist(Y_batch, Y_batch, p=2) ** 2
         nonzero_dists = distances_sq[distances_sq > 0]
         if len(nonzero_dists) > 0:
-            sigma = torch.median(nonzero_dists).sqrt()
+            sigma_sq = torch.median(nonzero_dists)
         else:
-            sigma = torch.tensor(1.0, device=self.device)
-        W_batch = distances_sq
-        #W_batch = torch.exp(-distances_sq / (2 * sigma ** 2))
+            sigma_sq = torch.tensor(1.0, device=self.device, dtype=torch.float64)
+        W_batch = torch.exp(-distances_sq / (2 * sigma_sq))
         W_batch = W_batch - torch.diag(torch.diag(W_batch))
-
         D_diag = torch.sum(W_batch, dim=1)
-
         D_inv_sqrt = torch.diag(torch.pow(D_diag + 1e-10, -0.5))
-
         I = torch.eye(W_batch.shape[0], device=self.device, dtype=torch.float64)
         L_sym = I - D_inv_sqrt @ W_batch @ D_inv_sqrt
-
         loss = torch.trace(predictions.T @ L_sym @ predictions)
         n = predictions.shape[0]
         loss = loss / n
+
         return loss
 
 
@@ -503,7 +508,6 @@ class GraphRegTrainer:
             early_stopping_patience: number of epochs to wait for improvement before stopping (None = no early stopping)
             val_features: validation features for early stopping
             val_target: validation target for early stopping
-            val_projections: validation projections for graph loss computation
             accuracy_check_interval: compute accuracy every N epochs (default: 10)
 
         Returns:
@@ -519,7 +523,8 @@ class GraphRegTrainer:
 
         # Early stopping setup
         best_val_loss = float('inf')
-        patience_counter = 0
+        prev_val_loss = float('inf')
+        increasing_counter = 0  # Count consecutive epochs with increasing val loss
         self.best_model_state = None
         self.best_epoch = 0
 
@@ -555,23 +560,17 @@ class GraphRegTrainer:
 
                 batch_x = torch.tensor(self.features[batch_indices], dtype=fl64).to(self.device)
 
-                # For classification: target should be long dtype, shape [batch_size]
-                # For regression: target should be float64, shape can be [batch_size] or [batch_size, output_dim]
-                if isinstance(self.criterion, nn.CrossEntropyLoss):
-                    batch_y = torch.tensor(self.target[batch_indices], dtype=torch.long).to(self.device)
-                else:
-                    batch_y = torch.tensor(self.target[batch_indices], dtype=fl64).to(self.device)
+                # Get appropriate dtype for target based on criterion
+                target_dtype = self._get_target_dtype()
+                batch_y = torch.tensor(self.target[batch_indices], dtype=target_dtype).to(self.device)
 
                 self.optimizer.zero_grad()
 
                 output = self.model(batch_x)
 
-                # For CrossEntropyLoss: target should be [batch_size] with class indices
-                # For other losses: might need reshape_as
-                if isinstance(self.criterion, nn.CrossEntropyLoss):
-                    model_loss = self.criterion(output, batch_y)
-                else:
-                    model_loss = self.criterion(output, batch_y.reshape_as(output))
+                # Prepare target for loss computation
+                prepared_target = self._prepare_target(output, batch_y)
+                model_loss = self.criterion(output, prepared_target)
 
                 graph_loss = self._compute_graph_loss(output, batch_indices)
 
@@ -613,7 +612,7 @@ class GraphRegTrainer:
             combined_losses.append(np.mean(epoch_combined_losses))
 
             if epoch % accuracy_check_interval == 0 or epoch == self.num_epochs - 1:
-                if isinstance(self.criterion, nn.CrossEntropyLoss):
+                if self.task_type == 'classification':
                     self.model.eval()
                     with torch.no_grad():
                         # Train accuracy
@@ -642,7 +641,7 @@ class GraphRegTrainer:
                     else:
                         print(f'  Lambdas: lam_nn={lam_nn:.6f}, lam_graph={lam_graph:.6f}')
 
-                    if isinstance(self.criterion, nn.CrossEntropyLoss) and len(train_accuracies) > 0:
+                    if self.task_type == 'classification' and len(train_accuracies) > 0:
                         if epoch % accuracy_check_interval == 0 or epoch == self.num_epochs - 1:
                             print(f'  Train Accuracy: {train_accuracies[-1]:.4f}, Val Accuracy: {val_accuracies[-1]:.4f}')
 
@@ -650,21 +649,26 @@ class GraphRegTrainer:
                 if early_stopping_patience is not None:
                     if val_model_loss < best_val_loss:
                         best_val_loss = val_model_loss
-                        patience_counter = 0
                         self.best_model_state = self.model.state_dict().copy()
                         self.best_epoch = epoch + 1
                         if self.verbose:
                             print(f'  New best model saved (val loss: {best_val_loss:.6f})')
-                    else:
-                        patience_counter += 1
-                        if self.verbose:
-                            print(f'  Patience: {patience_counter}/{early_stopping_patience}')
 
-                        if patience_counter >= early_stopping_patience:
+                    # Check if val loss is increasing compared to previous epoch
+                    if val_model_loss > prev_val_loss:
+                        increasing_counter += 1
+                        if self.verbose:
+                            print(f'  Val loss increasing: {increasing_counter}/{early_stopping_patience}')
+
+                        if increasing_counter >= early_stopping_patience:
                             if self.verbose:
                                 print(f'\nEarly stopping triggered at epoch {epoch + 1}')
+                                print(f'Val loss increased for {early_stopping_patience} consecutive epochs')
                                 print(f'Best model was at epoch {self.best_epoch} with val loss {best_val_loss:.6f}')
                             break
+                    else:
+                        increasing_counter = 0
+                    prev_val_loss = val_model_loss
             else:
                 if self.verbose:
                     print(f'  Model loss: {model_losses[-1]:.6f}, Graph loss: {graph_losses[-1]:.6f}, Combined: {combined_losses[-1]:.6f}')
@@ -695,7 +699,7 @@ class GraphRegTrainer:
             self.trained_loss_values['val_loss'] = val_losses
 
 
-        if isinstance(self.criterion, nn.CrossEntropyLoss):
+        if self.task_type == 'classification':
             self.trained_loss_values['train_accuracy'] = train_accuracies
             self.trained_loss_values['val_accuracy'] = val_accuracies
 
@@ -762,11 +766,18 @@ class GraphRegTrainer:
         """
         Load the best model weights saved during training (from early stopping).
         If no best weights were saved, keeps current weights.
+        Also saves the best weights to disk.
         """
         if hasattr(self, 'best_model_state') and self.best_model_state is not None:
             self.model.load_state_dict(self.best_model_state)
             if self.verbose:
                 print(f"Loaded best model weights from epoch {self.best_epoch}")
+
+            if self.cache_folder is not None:
+                best_weights_path = os.path.join(self.cache_folder, 'best_model.pth')
+                self.save_weights(best_weights_path)
+                if self.verbose:
+                    print(f"Best model weights automatically saved to {best_weights_path}")
         else:
             if self.verbose:
                 print("No best weights saved, using current model weights")
@@ -786,17 +797,13 @@ class GraphRegTrainer:
         with torch.no_grad():
             val_x = torch.tensor(val_features, dtype=fl64).to(self.device)
 
-            if isinstance(self.criterion, nn.CrossEntropyLoss):
-                val_y = torch.tensor(val_target, dtype=torch.long).to(self.device)
-            else:
-                val_y = torch.tensor(val_target, dtype=fl64).to(self.device)
+            target_dtype = self._get_target_dtype()
+            val_y = torch.tensor(val_target, dtype=target_dtype).to(self.device)
 
             output = self.model(val_x)
 
-            if isinstance(self.criterion, nn.CrossEntropyLoss):
-                val_loss = self.criterion(output, val_y)
-            else:
-                val_loss = self.criterion(output, val_y.reshape_as(output))
+            prepared_target = self._prepare_target(output, val_y)
+            val_loss = self.criterion(output, prepared_target)
 
         return val_loss.item()
 
@@ -810,25 +817,38 @@ class GraphRegTrainer:
             nn_losses: model loss values per epoch
             graph_losses: graph loss values per epoch
         """
-        fig, axes = plt.subplots(1, 2, figsize=(15, 5))
+        if self.lambda_graph == 0:
+            fig, ax = plt.subplots(1, 1, figsize=(8, 5))
+            epochs = range(1, len(losses) + 1)
 
-        epochs = range(1, len(losses) + 1)
+            ax.plot(epochs, losses, label='Model Loss', color='blue', linewidth=2)
+            ax.set_xlabel('Epoch')
+            ax.set_ylabel('Loss')
+            ax.set_title('Baseline Model Loss (no regularization)')
+            ax.legend()
+            ax.grid(True)
+            ax.set_yscale('log')
+        else:
+            fig, axes = plt.subplots(1, 2, figsize=(15, 5))
+            epochs = range(1, len(losses) + 1)
 
-        axes[0].plot(epochs, losses, label='Combined Loss', color='blue')
-        axes[0].set_xlabel('Epoch')
-        axes[0].set_ylabel('Loss')
-        axes[0].set_title('Combined Loss')
-        axes[0].legend()
-        axes[0].grid(True)
+            axes[0].plot(epochs, losses, label='Combined Loss', color='blue')
+            axes[0].set_xlabel('Epoch')
+            axes[0].set_ylabel('Loss')
+            axes[0].set_title('Combined Loss')
+            axes[0].legend()
+            axes[0].grid(True)
+            axes[0].set_yscale('log')
 
-        if nn_losses is not None and graph_losses is not None:
-            axes[1].plot(epochs, nn_losses, label='Model Loss', color='green')
-            axes[1].plot(epochs, graph_losses, label='Graph Loss', color='red')
-            axes[1].set_xlabel('Epoch')
-            axes[1].set_ylabel('Loss')
-            axes[1].set_title('Model Loss vs Graph Loss')
-            axes[1].legend()
-            axes[1].grid(True)
+            if nn_losses is not None and graph_losses is not None:
+                axes[1].plot(epochs, nn_losses, label='Model Loss', color='green')
+                axes[1].plot(epochs, graph_losses, label='Graph Loss', color='red')
+                axes[1].set_xlabel('Epoch')
+                axes[1].set_ylabel('Loss')
+                axes[1].set_title('Model Loss vs Graph Loss')
+                axes[1].legend()
+                axes[1].grid(True)
+                axes[1].set_yscale('log')
 
         plt.tight_layout()
 
