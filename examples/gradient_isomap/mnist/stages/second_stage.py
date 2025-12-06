@@ -6,6 +6,7 @@ from typing import Union, Optional
 import numpy as np
 import torch
 import torch.nn as nn
+import pandas as pd
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
 import matplotlib
 matplotlib.use('Agg')
@@ -115,12 +116,6 @@ def train_and_evaluate_model(X_train, y_train, X_val, y_val, X_test, y_test,
     print(f"\n--- Training {model_name} (lambda_graph={lambda_graph}) ---")
     print(f"  Train: {len(X_train)}, Validation: {len(X_val)}, Test: {len(X_test)}")
 
-    np.random.seed(42)
-    torch.manual_seed(42)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed(42)
-        torch.backends.cudnn.deterministic = True
-        torch.backends.cudnn.benchmark = False
 
     model = MNISTClassifier()
     criterion = nn.CrossEntropyLoss()
@@ -186,7 +181,7 @@ def train_and_evaluate_model(X_train, y_train, X_val, y_val, X_test, y_test,
     }
 
 
-def create_mnist_comparison_visualization(X_test, y_test, baseline_results, reg_results, save_path):
+def create_mnist_comparison_visualization(baseline_results, reg_results, save_path):
     """
     Create comparison visualization for MNIST with 4 subplots (losses and accuracies)
     """
@@ -328,8 +323,8 @@ def mnist_graph_regularization(folder_path: Optional[str] = None,
         'latent_dim.npy'
     ]
 
-    if not check_required_files(folder_path, required_files):
-        print("\nPlease run Stage 1 (01_manifold_learning.py) first")
+    if folder_path is None or not check_required_files(folder_path, required_files):
+        print("\nPlease run Stage 1 (first_stage.py) first")
         return None
 
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -403,7 +398,6 @@ def mnist_graph_regularization(folder_path: Optional[str] = None,
     print("\n  Creating comparison visualization...")
     viz_path = os.path.join(experiment_folder, 'mnist_comparison.png')
     create_mnist_comparison_visualization(
-        X_test, y_test,
         baseline_results, reg_results, viz_path
     )
 
@@ -413,7 +407,7 @@ def mnist_graph_regularization(folder_path: Optional[str] = None,
         'batch_size': batch_size,
         'learning_rate': learning_rate,
         'early_stopping_patience': early_stopping_patience,
-        'adaptive_lambda': False,
+        'adaptive_lambda': {'method': 'disabled'},
         'accuracy_check_interval': 10,
         'best_epoch': baseline_results.get('best_epoch', num_epochs)
     }
@@ -464,8 +458,7 @@ def mnist_graph_regularization(folder_path: Optional[str] = None,
     }
 
     save_experiment_config(experiment_folder, baseline_params, reg_params, results)
-
-    np.save(os.path.join(experiment_folder, 'comparison_results.csv'), results)
+    pd.DataFrame([results]).to_csv(os.path.join(experiment_folder, 'comparison_results.csv'), index=False)
     print(f"Comparison results saved to {experiment_folder}/comparison_results.csv")
 
     return results
@@ -492,10 +485,10 @@ if __name__ == "__main__":
     results = mnist_graph_regularization(
         folder_path=folder_path,
         baseline_lambda=0.0,
-        reg_lambda=0.01,
+        reg_lambda=0.0001,
         num_epochs=200,
         batch_size=128,
         learning_rate=1e-4,
         early_stopping_patience=50,
-        adaptive_lambda='gradnorm'  # Options: False, 'sobol', 'gradnorm'
+        adaptive_lambda='False'  # Options: False, 'sobol', 'gradnorm'
     )

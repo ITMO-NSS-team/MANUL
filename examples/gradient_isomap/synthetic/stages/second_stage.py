@@ -18,6 +18,7 @@ from typing import Union, Optional
 import numpy as np
 import torch
 import torch.nn as nn
+import pandas as pd
 
 import matplotlib
 matplotlib.use('Agg')
@@ -234,7 +235,7 @@ def train_and_evaluate_model(X_train, y_train, X_val, y_val, X_test, y_test,
     }
 
 
-def create_comparison_visualization(geometry_name, y_test,
+def create_comparison_visualization(geometry_name,
                                    baseline_results, reg_results, save_path):
     """
     Create comparison visualization with 2 subplots:
@@ -394,7 +395,7 @@ def synthetic_graph_regularization(folder_path: Optional[str] = None,
         'latent_dim.npy'
     ]
 
-    if not check_required_files(folder_path, required_files):
+    if folder_path is None or not check_required_files(folder_path, required_files):
         print("\nPlease run Stage 1 (first_stage.py) first")
         return None
 
@@ -466,7 +467,7 @@ def synthetic_graph_regularization(folder_path: Optional[str] = None,
     print("\n  Creating comparison visualization...")
     viz_path = os.path.join(experiment_folder, f'{geometry_name}_comparison.png')
     create_comparison_visualization(
-        geometry_name, y_test,
+        geometry_name,
         baseline_results, reg_results, viz_path
     )
 
@@ -476,7 +477,7 @@ def synthetic_graph_regularization(folder_path: Optional[str] = None,
         'batch_size': batch_size,
         'learning_rate': learning_rate,
         'early_stopping_patience': early_stopping_patience,
-        'adaptive_lambda': False,
+        'adaptive_lambda': {'method': 'disabled'},
         'best_epoch': baseline_results.get('best_epoch', num_epochs)
     }
 
@@ -527,7 +528,7 @@ def synthetic_graph_regularization(folder_path: Optional[str] = None,
 
     save_experiment_config(experiment_folder, geometry_name, baseline_params, reg_params, results)
 
-    np.save(os.path.join(experiment_folder, 'comparison_results.csv'), results)
+    pd.DataFrame([results]).to_csv(os.path.join(experiment_folder, 'comparison_results.csv'), index=False)
     print(f"Comparison results saved to {experiment_folder}/comparison_results.csv")
 
 
@@ -560,5 +561,5 @@ if __name__ == "__main__":
         batch_size=1024,
         learning_rate=1e-3,
         early_stopping_patience=1000,
-        adaptive_lambda='sobol'
+        adaptive_lambda='False'
     )
