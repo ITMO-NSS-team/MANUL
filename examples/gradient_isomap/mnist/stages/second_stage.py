@@ -204,65 +204,83 @@ def create_mnist_comparison_visualization(baseline_results, reg_results, save_pa
 
     # Top-left: Training Loss
     ax1 = axes[0, 0]
-    if len(baseline_train_losses) > 0 and len(reg_train_losses) > 0:
+    if len(baseline_train_losses) > 0:
         ax1.plot(baseline_train_losses, label='Baseline', linewidth=2, alpha=0.8, color='blue')
+    if len(reg_train_losses) > 0:
         ax1.plot(reg_train_losses, label='Regularized', linewidth=2, alpha=0.8, color='red')
-        ax1.set_xlabel('Epoch', fontsize=11)
-        ax1.set_ylabel('Training Loss', fontsize=11)
-        ax1.set_title('Training Loss Comparison', fontsize=12, fontweight='bold')
-        ax1.legend(fontsize=10)
-        ax1.grid(True, alpha=0.3)
+    ax1.set_xlabel('Epoch', fontsize=11)
+    ax1.set_ylabel('Training Loss', fontsize=11)
+    ax1.set_title('Training Loss Comparison', fontsize=12, fontweight='bold')
+    ax1.legend(fontsize=10)
+    ax1.grid(True, alpha=0.3)
+    if len(baseline_train_losses) > 0 or len(reg_train_losses) > 0:
         ax1.set_yscale('log')
 
-
+    # Top-right: Validation Loss
     ax2 = axes[0, 1]
-    if len(baseline_val_losses) > 0 and len(reg_val_losses) > 0:
+    if len(baseline_val_losses) > 0:
         ax2.plot(baseline_val_losses, label='Baseline', linewidth=2, alpha=0.8, color='blue')
+    if len(reg_val_losses) > 0:
         ax2.plot(reg_val_losses, label='Regularized', linewidth=2, alpha=0.8, color='red')
-        ax2.set_xlabel('Epoch', fontsize=11)
-        ax2.set_ylabel('Validation Loss', fontsize=11)
-        ax2.set_title('Validation Loss Comparison', fontsize=12, fontweight='bold')
-        ax2.legend(fontsize=10)
-        ax2.grid(True, alpha=0.3)
+    ax2.set_xlabel('Epoch', fontsize=11)
+    ax2.set_ylabel('Validation Loss', fontsize=11)
+    ax2.set_title('Validation Loss Comparison', fontsize=12, fontweight='bold')
+    ax2.legend(fontsize=10)
+    ax2.grid(True, alpha=0.3)
+    if len(baseline_val_losses) > 0 or len(reg_val_losses) > 0:
         ax2.set_yscale('log')
 
+    # Bottom-left: Training Accuracy
     ax3 = axes[1, 0]
-    if len(baseline_train_accs) > 0 and len(reg_train_accs) > 0:
-        # Create x-axis based on accuracy check interval (every 10 epochs)
-        accuracy_check_interval = max(1, len(baseline_train_losses) // len(baseline_train_accs))
-        epochs_acc = [i * accuracy_check_interval for i in range(len(baseline_train_accs))]
+    if len(baseline_train_accs) > 0 and len(baseline_train_losses) > 0:
+        baseline_acc_interval = max(1, len(baseline_train_losses) // len(baseline_train_accs))
+        baseline_epochs_acc = [i * baseline_acc_interval for i in range(len(baseline_train_accs))]
+        ax3.plot(baseline_epochs_acc, baseline_train_accs, label='Baseline',
+                 linewidth=2, alpha=0.8, color='blue', marker='o', markersize=3)
 
-        ax3.plot(epochs_acc, baseline_train_accs, label='Baseline', linewidth=2, alpha=0.8, color='blue', marker='o', markersize=3)
-        ax3.plot(epochs_acc, reg_train_accs, label='Regularized', linewidth=2, alpha=0.8, color='red', marker='s', markersize=3)
-        ax3.set_xlabel('Epoch', fontsize=11)
-        ax3.set_ylabel('Training Accuracy', fontsize=11)
-        ax3.set_title('Training Accuracy Comparison', fontsize=12, fontweight='bold')
-        ax3.legend(fontsize=10)
-        ax3.grid(True, alpha=0.3)
-        ax3.set_ylim([0, 1.05])
+    if len(reg_train_accs) > 0 and len(reg_train_losses) > 0:
+        reg_acc_interval = max(1, len(reg_train_losses) // len(reg_train_accs))
+        reg_epochs_acc = [i * reg_acc_interval for i in range(len(reg_train_accs))]
+        ax3.plot(reg_epochs_acc, reg_train_accs, label='Regularized',
+                 linewidth=2, alpha=0.8, color='red', marker='s', markersize=3)
+
+    ax3.set_xlabel('Epoch', fontsize=11)
+    ax3.set_ylabel('Training Accuracy', fontsize=11)
+    ax3.set_title('Training Accuracy Comparison', fontsize=12, fontweight='bold')
+    ax3.legend(fontsize=10)
+    ax3.grid(True, alpha=0.3)
+    ax3.set_ylim([0, 1.05])
 
     ax4 = axes[1, 1]
-    if len(baseline_val_accs) > 0 and len(reg_val_accs) > 0:
-        accuracy_check_interval = max(1, len(baseline_val_losses) // len(baseline_val_accs))
-        epochs_acc = [i * accuracy_check_interval for i in range(len(baseline_val_accs))]
+    if len(baseline_val_accs) > 0 and len(baseline_val_losses) > 0:
+        baseline_acc_interval = max(1, len(baseline_val_losses) // len(baseline_val_accs))
+        baseline_epochs_acc = [i * baseline_acc_interval for i in range(len(baseline_val_accs))]
+        ax4.plot(baseline_epochs_acc, baseline_val_accs, label='Baseline',
+                 linewidth=2, alpha=0.8, color='blue', marker='o', markersize=3)
 
-        ax4.plot(epochs_acc, baseline_val_accs, label='Baseline', linewidth=2, alpha=0.8, color='blue', marker='o', markersize=3)
-        ax4.plot(epochs_acc, reg_val_accs, label='Regularized', linewidth=2, alpha=0.8, color='red', marker='s', markersize=3)
-        ax4.set_xlabel('Epoch', fontsize=11)
-        ax4.set_ylabel('Validation Accuracy', fontsize=11)
-        ax4.set_title('Validation Accuracy Comparison', fontsize=12, fontweight='bold')
-        ax4.legend(fontsize=10)
-        ax4.grid(True, alpha=0.3)
-        ax4.set_ylim([0, 1.05])
+    if len(reg_val_accs) > 0 and len(reg_val_losses) > 0:
+        reg_acc_interval = max(1, len(reg_val_losses) // len(reg_val_accs))
+        reg_epochs_acc = [i * reg_acc_interval for i in range(len(reg_val_accs))]
+        ax4.plot(reg_epochs_acc, reg_val_accs, label='Regularized',
+                 linewidth=2, alpha=0.8, color='red', marker='s', markersize=3)
 
-        ax4.text(0.02, 0.98, f'Final Val Acc:\nBaseline: {baseline_val_acc:.4f}\nRegularized: {reg_val_acc:.4f}',
-                transform=ax4.transAxes, fontsize=9, verticalalignment='top',
-                bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+    ax4.set_xlabel('Epoch', fontsize=11)
+    ax4.set_ylabel('Validation Accuracy', fontsize=11)
+    ax4.set_title('Validation Accuracy Comparison', fontsize=12, fontweight='bold')
+    ax4.legend(fontsize=10)
+    ax4.grid(True, alpha=0.3)
+    ax4.set_ylim([0, 1.05])
+
+    ax4.text(0.02, 0.98,
+             f'Final Val Acc:\nBaseline: {baseline_val_acc:.4f}\nRegularized: {reg_val_acc:.4f}',
+             transform=ax4.transAxes, fontsize=9, verticalalignment='top',
+             bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
 
     improvement = (reg_test_acc - baseline_test_acc) * 100
     fig.suptitle(f'MNIST Classification: Baseline vs Regularized Comparison\n' +
-                f'Test Accuracy: Baseline: {baseline_test_acc:.4f}, Regularized: {reg_test_acc:.4f} (Improvement: {improvement:+.2f}%)',
-                fontsize=14, fontweight='bold')
+                 f'Test Accuracy: Baseline: {baseline_test_acc:.4f}, Regularized: {reg_test_acc:.4f} '
+                 f'(Improvement: {improvement:+.2f}%)',
+                 fontsize=14, fontweight='bold')
 
     plt.tight_layout()
     plt.savefig(save_path, dpi=150, bbox_inches='tight')
@@ -485,10 +503,10 @@ if __name__ == "__main__":
     results = mnist_graph_regularization(
         folder_path=folder_path,
         baseline_lambda=0.0,
-        reg_lambda=0.0001,
+        reg_lambda=1e-6,
         num_epochs=200,
         batch_size=128,
         learning_rate=1e-4,
         early_stopping_patience=50,
-        adaptive_lambda='False'  # Options: False, 'sobol', 'gradnorm'
+        adaptive_lambda='sobol'  # Options: False, 'sobol', 'gradnorm'
     )
