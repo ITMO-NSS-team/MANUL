@@ -29,12 +29,12 @@ def _get_adaptive_lambda_sobol(combines_loss, nn_loss, graph_loss):
     :param graph_loss: matrix m x n where m - epochs number, n - batch size with nn losses
     :return: list [float, float] - list with coefficients to multiply with nn loss and graph loss
     """
-    n_samples = 5  # can be changed to use more elements of lists
+    n_samples = 1  # can be changed to use more elements of lists
     sampling_D = 2  # as combine 2 features
 
     if n_samples * (sampling_D * 2 + 2) > len(combines_loss):
         print('  [Sobol] Epochs number is too small to calculate adaptive lambda')
-        return [1, 0.01]
+        return [1, 1e-6]
 
     combines_loss = np.array(combines_loss)
     nn_loss = np.expand_dims(np.array(nn_loss), axis=1)
@@ -61,7 +61,7 @@ def _get_adaptive_lambda_sobol(combines_loss, nn_loss, graph_loss):
 
     if nn_disp == 0 or graph_disp == 0:
         print(f'  [Sobol] Lambda search failed: nn_disp={nn_disp}, graph_disp={graph_disp}')
-        return [1, 1]
+        return [1, 1e-6]
 
     lam_nn = total_disp / nn_disp
     lam_graph = total_disp / graph_disp
@@ -654,8 +654,8 @@ class GraphRegTrainer:
                         if self.verbose:
                             print(f'  New best model saved (val loss: {best_val_loss:.6f})')
 
-                    # Check if val loss is increasing compared to previous epoch
-                    if val_model_loss > prev_val_loss:
+                    # Check if val loss is increasing compared to best epoch
+                    if val_model_loss > best_val_loss:
                         increasing_counter += 1
                         if self.verbose:
                             print(f'  Val loss increasing: {increasing_counter}/{early_stopping_patience}')
@@ -663,7 +663,7 @@ class GraphRegTrainer:
                         if increasing_counter >= early_stopping_patience:
                             if self.verbose:
                                 print(f'\nEarly stopping triggered at epoch {epoch + 1}')
-                                print(f'Val loss increased for {early_stopping_patience} consecutive epochs')
+                                print(f'Val loss increased for {early_stopping_patience} epochs')
                                 print(f'Best model was at epoch {self.best_epoch} with val loss {best_val_loss:.6f}')
                             break
                     else:
