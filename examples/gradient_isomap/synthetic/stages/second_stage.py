@@ -556,7 +556,7 @@ if __name__ == "__main__":
     results = synthetic_graph_regularization(
         folder_path=folder_path,
         baseline_lambda=0.0,
-        reg_lambda=1e-5,
+        reg_lambda=1e-6,
         num_epochs=15000,
         batch_size=1024,
         learning_rate=1e-3,
