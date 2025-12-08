@@ -275,6 +275,22 @@ def create_comparison_visualization(geometry_name,
     if len(baseline_val_losses) > 0 and len(reg_val_losses) > 0:
         ax2.plot(baseline_val_losses, label='Baseline', linewidth=2, alpha=0.8, color='blue')
         ax2.plot(reg_val_losses, label='Regularized', linewidth=2, alpha=0.8, color='red')
+        baseline_best_epoch = baseline_results.get('best_epoch', None)
+        if baseline_best_epoch is not None and baseline_best_epoch <= len(baseline_val_losses):
+            ax2.axvline(x=baseline_best_epoch-1, color='blue', linestyle='--',
+                       linewidth=1, alpha=0.6, label=f'Baseline Best (epoch {baseline_best_epoch})')
+            best_val_loss = baseline_val_losses[baseline_best_epoch-1]
+            ax2.axhline(y=best_val_loss, color='blue', linestyle='--',
+                       linewidth=1, alpha=0.6)
+
+        reg_best_epoch = reg_results.get('best_epoch', None)
+        if reg_best_epoch is not None and reg_best_epoch <= len(reg_val_losses):
+            ax2.axvline(x=reg_best_epoch-1, color='red', linestyle='--',
+                       linewidth=1, alpha=0.6, label=f'Regularized Best (epoch {reg_best_epoch})')
+            best_val_loss = reg_val_losses[reg_best_epoch-1]
+            ax2.axhline(y=best_val_loss, color='red', linestyle='--',
+                       linewidth=1, alpha=0.6)
+
         ax2.set_xlabel('Epoch', fontsize=11)
         ax2.set_ylabel('Validation Loss', fontsize=11)
         ax2.set_title('Validation Loss Comparison', fontsize=12, fontweight='bold')
@@ -512,6 +528,11 @@ def synthetic_graph_regularization(folder_path: Optional[str] = None,
         'best_epoch': reg_results.get('best_epoch', num_epochs)
     }
 
+    if 'trainer' in reg_results and hasattr(reg_results['trainer'], 'trained_loss_values'):
+        lambda_history = reg_results['trainer'].trained_loss_values.get('lambda_history', None)
+        if lambda_history is not None:
+            reg_params['lambda_history'] = lambda_history
+
     results = {
         'baseline_test_mse': float(baseline_results['test_mse']),
         'baseline_val_mse': float(baseline_results['val_mse']),
@@ -556,10 +577,10 @@ if __name__ == "__main__":
     results = synthetic_graph_regularization(
         folder_path=folder_path,
         baseline_lambda=0.0,
-        reg_lambda=1e-6,
-        num_epochs=15000,
+        reg_lambda=1,
+        num_epochs=10000,
         batch_size=1024,
         learning_rate=1e-3,
-        early_stopping_patience=1000,
-        adaptive_lambda='False'
+        early_stopping_patience=4000,
+        adaptive_lambda='sobol'
     )

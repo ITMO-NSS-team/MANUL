@@ -222,6 +222,27 @@ def create_mnist_comparison_visualization(baseline_results, reg_results, save_pa
         ax2.plot(baseline_val_losses, label='Baseline', linewidth=2, alpha=0.8, color='blue')
     if len(reg_val_losses) > 0:
         ax2.plot(reg_val_losses, label='Regularized', linewidth=2, alpha=0.8, color='red')
+
+    if len(baseline_val_losses) > 0:
+        baseline_best_epoch = baseline_results.get('best_epoch', None)
+        if baseline_best_epoch is not None and baseline_best_epoch <= len(baseline_val_losses):
+            # Vertical line
+            ax2.axvline(x=baseline_best_epoch-1, color='blue', linestyle='--',
+                       linewidth=1, alpha=0.6, label=f'Baseline Best (epoch {baseline_best_epoch})')
+            # Horizontal line
+            best_val_loss = baseline_val_losses[baseline_best_epoch-1]
+            ax2.axhline(y=best_val_loss, color='blue', linestyle='--',
+                       linewidth=1, alpha=0.6)
+
+    if len(reg_val_losses) > 0:
+        reg_best_epoch = reg_results.get('best_epoch', None)
+        if reg_best_epoch is not None and reg_best_epoch <= len(reg_val_losses):
+            ax2.axvline(x=reg_best_epoch-1, color='red', linestyle='--',
+                       linewidth=1, alpha=0.6, label=f'Regularized Best (epoch {reg_best_epoch})')
+            best_val_loss = reg_val_losses[reg_best_epoch-1]
+            ax2.axhline(y=best_val_loss, color='red', linestyle='--',
+                       linewidth=1, alpha=0.6)
+
     ax2.set_xlabel('Epoch', fontsize=11)
     ax2.set_ylabel('Validation Loss', fontsize=11)
     ax2.set_title('Validation Loss Comparison', fontsize=12, fontweight='bold')
@@ -462,6 +483,11 @@ def mnist_graph_regularization(folder_path: Optional[str] = None,
         'best_epoch': reg_results.get('best_epoch', num_epochs)
     }
 
+    if 'trainer' in reg_results and hasattr(reg_results['trainer'], 'trained_loss_values'):
+        lambda_history = reg_results['trainer'].trained_loss_values.get('lambda_history', None)
+        if lambda_history is not None:
+            reg_params['lambda_history'] = lambda_history
+
     results = {
         'baseline_test_accuracy': float(baseline_acc),
         'baseline_val_accuracy': float(baseline_results['val_accuracy']),
@@ -503,10 +529,10 @@ if __name__ == "__main__":
     results = mnist_graph_regularization(
         folder_path=folder_path,
         baseline_lambda=0.0,
-        reg_lambda=1e-6,
+        reg_lambda=1,
         num_epochs=200,
         batch_size=128,
         learning_rate=1e-4,
-        early_stopping_patience=50,
+        early_stopping_patience=100,
         adaptive_lambda='sobol'  # Options: False, 'sobol', 'gradnorm'
     )
