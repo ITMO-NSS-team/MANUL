@@ -48,7 +48,7 @@ def _get_adaptive_lambda_sobol(combines_loss, nn_loss, graph_loss):
     desired_n_samples = 32
     n_samples = min(desired_n_samples, max_n_samples)
 
-    min_required_samples = 5
+    min_required_samples = 10
     if n_samples < min_required_samples:
         required_epochs = min_required_samples * (sampling_D * 2 + 2)
         print(f'  [Sobol] Not enough epochs for adaptive lambda computation')

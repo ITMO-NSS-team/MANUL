@@ -506,13 +506,6 @@ def synthetic_graph_regularization(folder_path: Optional[str] = None,
             'sampling_D': 2,
             'warmup_fraction': 0.1
         }
-    elif adaptive_lambda == 'gradnorm':
-        adaptive_lambda_config = {
-            'method': 'gradnorm',
-            'alpha': 0.0001,
-            'lr_weights': 0.001,
-            'initial_lambda_graph': reg_lambda
-        }
     else:
         adaptive_lambda_config = {
             'method': 'disabled'

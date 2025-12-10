@@ -16,6 +16,7 @@ class GradientIsomap:
     def __init__(self, train_feature: torch.Tensor,
                  train_target: torch.Tensor,
                  latent_len: int,
+                 n_neighbors: int = 25,
                  epochs: int = 1000,
                  plot_convergence: bool = True,
                  checkpoint_each: [int, None] = 100,
@@ -28,6 +29,7 @@ class GradientIsomap:
         self.epochs = epochs
         self.plot_convergence = plot_convergence
         self.latent_len = latent_len
+        self.n_neighbors = n_neighbors
         self.checkpoint_each = checkpoint_each
         self.save_checkpoint_history = save_checkpoint_history
         self.stop_criteria_value = stop_criteria_value
@@ -69,7 +71,7 @@ class GradientIsomap:
     def train(self):
         start_time = time.time()
         dist_train = self.generate_random_matrix(self.features.shape[0], dist_type='normal', device=self.device)
-        isomap_model = IsomapNN(dist_train, n_components=self.latent_len, eigval_choice='MDS')
+        isomap_model = IsomapNN(dist_train, n_components=self.latent_len, n_neighbors=self.n_neighbors, eigval_choice='MDS')
         isomap_model.to(self.device)
         isomap_optim = torch.optim.AdamW(params=isomap_model.parameters(), lr=0.0001)
         isomap_criterion = nn.MSELoss()
@@ -199,6 +201,8 @@ class GradientIsomap:
             'checkpoint_each': self.checkpoint_each,
             'total_epochs': self.epochs,
             'n_basis_points': self.features.shape[0],
+            'latent_dim': self.latent_len,
+            'n_neighbors': self.n_neighbors,
             'checkpoints': self.checkpoint_metadata
         }
 

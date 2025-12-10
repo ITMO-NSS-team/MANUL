@@ -1,4 +1,5 @@
 import os
+import json
 import numpy as np
 import torch
 from sklearn.neighbors import KNeighborsRegressor
@@ -85,11 +86,33 @@ class Projector:
     3. Saving/loading projections to/from disk
     """
 
+    @staticmethod
+    def reconstruct_distance_matrix(upper_triangular_distances: np.ndarray, n_basis: int) -> np.ndarray:
+        """
+        Reconstruct symmetric distance matrix from upper-triangular format.
+
+        Args:
+            upper_triangular_distances: 1D array of shape [n_basis*(n_basis-1)/2]
+            n_basis: Number of basis points
+
+        Returns:
+            Symmetric distance matrix of shape [n_basis, n_basis]
+        """
+        weights_matrix = np.zeros((n_basis, n_basis))
+        idx = 0
+        for i in range(n_basis):
+            for j in range(i + 1, n_basis):
+                weights_matrix[i, j] = upper_triangular_distances[idx]
+                weights_matrix[j, i] = upper_triangular_distances[idx]
+                idx += 1
+        return weights_matrix
+
     def __init__(self,
                  source_data: np.ndarray,
-                 weights_matrix: np.ndarray,
                  basis_indices: np.ndarray,
-                 n_neighbors: int = 10,
+                 weights_matrix: np.ndarray = None,
+                 upper_triangular_distances: np.ndarray = None,
+                 n_neighbors: int = 25,
                  method: str = 'ensemble_knn',
                  batch_size: int = 128,
                  device: str = None,
@@ -100,15 +123,28 @@ class Projector:
 
         Args:
             source_data: all data points [N, features]
-            weights_matrix: distance matrix for basis points [base_dim, base_dim]
             basis_indices: indices of basis points in source_data
-            n_neighbors: number of neighbors for Isomap and interpolation
+            weights_matrix: Full symmetric distance matrix [n_basis, n_basis] (optional)
+            upper_triangular_distances: Upper-triangular distances [n_basis*(n_basis-1)/2] (optional)
+            n_neighbors: number of neighbors for Isomap and interpolation (default: 25)
             method: projection method ('krr', 'ensemble_knn', 'random_forest')
             batch_size: batch size for projection methods
             device: 'cuda', 'cpu', or None (auto)
             precomputed_base_projections: precomputed base projections [base_dim, proj_dim]
             verbose: print progress messages
+
+        Note: Provide either weights_matrix or upper_triangular_distances, not both
         """
+        if weights_matrix is None and upper_triangular_distances is None:
+            raise ValueError("Must provide either weights_matrix or upper_triangular_distances")
+
+        if weights_matrix is not None and upper_triangular_distances is not None:
+            raise ValueError("Provide only one: weights_matrix or upper_triangular_distances")
+
+        if weights_matrix is None:
+            n_basis = len(basis_indices)
+            weights_matrix = self.reconstruct_distance_matrix(upper_triangular_distances, n_basis)
+
         self.source_data = source_data.astype(float)
         self.weights_matrix = weights_matrix
         self.basis_indices = basis_indices
@@ -131,7 +167,7 @@ class Projector:
                 print("Projector: Base projections not provided - will compute when needed")
             self.base_projections = None
 
-        self.all_projections = None
+        self.projection = None
 
     def compute_base_projections(self):
         """
@@ -161,12 +197,12 @@ class Projector:
 
         return self.base_projections
 
-    def compute_all_projections(self):
+    def compute_projection(self):
         """
         Compute projections for ALL points using KNN interpolation from basis points.
 
         Returns:
-            all_projections: coordinates of all points in hidden space [N, proj_dim]
+            projection: coordinates of all points in hidden space [N, proj_dim]
         """
         # Ensure base projections exist
         if self.base_projections is None:
@@ -192,16 +228,16 @@ class Projector:
         # Ensure basis points have exact projections (not interpolated)
         Y_all[self.basis_indices] = Y_basis
 
-        self.all_projections = Y_all
+        self.projection = Y_all
 
         if self.verbose:
-            print(f"Projector: All projections computed: {self.all_projections.shape}")
+            print(f"Projector: All projections computed: {self.self.projection.shape}")
 
-        return self.all_projections
+        return self.projection
 
     def save(self, folder_path: str):
         """
-        Save both base and all projections to disk.
+        Save both base and all projections to disk along with metadata.
 
         Args:
             folder_path: directory to save projections
@@ -215,8 +251,23 @@ class Projector:
             if self.verbose:
                 print(f"Projector: Saved base projections to {base_path}")
 
-        if self.all_projections is not None:
-            all_path = os.path.join(folder_path, 'all_projections.npy')
-            np.save(all_path, self.all_projections)
+        if self.projection is not None:
+            all_path = os.path.join(folder_path, 'projection.npy')
+            np.save(all_path, self.projection)
             if self.verbose:
                 print(f"Projector: Saved all projections to {all_path}")
+
+        metadata = {
+            'n_neighbors': self.n_neighbors,
+            'method': self.method,
+            'latent_dim': self.base_projections.shape[1] if self.base_projections is not None else None,
+            'n_basis_points': len(self.basis_indices),
+            'batch_size': self.batch_size,
+            'device': self.device
+        }
+        metadata_path = os.path.join(folder_path, 'projector_metadata.json')
+        with open(metadata_path, 'w') as f:
+            json.dump(metadata, f, indent=2)
+
+        if self.verbose:
+            print(f"Projector: Saved metadata to {metadata_path}")

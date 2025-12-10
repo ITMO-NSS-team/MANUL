@@ -1,5 +1,6 @@
 import os
 import sys
+import json
 from datetime import datetime
 import numpy as np
 import torch
@@ -11,7 +12,7 @@ from utils.DimensionalityAnalyser import DimensionalityAnalyser
 from utils.fps_implementation import memory_efficient_fps
 from utils.Projector import Projector
 from utils.cache_utils import load_or_compute_fps, load_or_train_isomap, load_or_compute_projections
-
+from regularizator.GraphRegTrainer import project_ensemble_knn
 
 def mnist_manifold_learning_example(save_checkpoint_history=False):
     """
@@ -54,7 +55,7 @@ def mnist_manifold_learning_example(save_checkpoint_history=False):
 
     analyser.analyse_dimensions(
         X_train,
-        method='both',
+        method='eigenvalue',
         n_samples=1000
     )
     analyser.plot_dimension_histograms(dataset_name="MNIST",
@@ -80,58 +81,29 @@ def mnist_manifold_learning_example(save_checkpoint_history=False):
     train_features = torch.tensor(X_train_sparse, dtype=torch.float32).to('cuda')
     train_target = torch.tensor(y_train_sparse, dtype=torch.float32).to('cuda')
 
-    distance_matrix_path = os.path.join(working_folder, 'best_distance_matrix.npy')
+    print(f"Starting Isomap training for 15000 epochs...")
+    isomap = GradientIsomap(
+        train_feature=train_features,
+        train_target=train_target,
+        latent_len=latent_len,
+        n_neighbors=25,
+        checkpoint_each=100,
+        save_checkpoint_history=save_checkpoint_history,
+        logs_folder=working_folder,
+        plot_convergence=False,
+        epochs=15000,
+        stop_criteria_value=0.001,
+    )
+    isomap.train()
+    isomap.visualize_trained()
 
-    if os.path.exists(distance_matrix_path):
-        print(f"Found cached distance matrix at {distance_matrix_path}")
-        print(f"Skipping Isomap training (15000 epochs saved)")
-        best_distances_matrix = np.load(distance_matrix_path)
+    best_distances_matrix = isomap.best_distances_matrix
+    proj_features = isomap.best_isomap_model()
+    base_projections = proj_features.detach().cpu().numpy()
 
-        n_basis = len(fps_indices)
-        weights_matrix = np.zeros((n_basis, n_basis))
-        idx = 0
-        for i in range(n_basis):
-            for j in range(i+1, n_basis):
-                weights_matrix[i, j] = best_distances_matrix[idx]
-                weights_matrix[j, i] = best_distances_matrix[idx]
-                idx += 1
-
-        base_proj_path = os.path.join(working_folder, 'base_projections.npy')
-        base_projections = np.load(base_proj_path)
-    else:
-        print(f"Starting Isomap training for 15000 epochs...")
-        isomap = GradientIsomap(
-            train_feature=train_features,
-            train_target=train_target,
-            latent_len=latent_len,
-            checkpoint_each=100,
-            save_checkpoint_history=save_checkpoint_history,
-            logs_folder=working_folder,
-            plot_convergence=False,
-            epochs=15000,
-            stop_criteria_value=0.001,
-        )
-        isomap.train()
-        isomap.visualize_trained()
-
-        best_distances_matrix = isomap.best_distances_matrix
-        proj_features = isomap.best_isomap_model()
-        base_projections = proj_features.detach().cpu().numpy()
-
-        print("\n=== COMPUTING ALL PROJECTIONS ===")
-        n_basis = len(fps_indices)
-        weights_matrix = np.zeros((n_basis, n_basis))
-        idx = 0
-        for i in range(n_basis):
-            for j in range(i+1, n_basis):
-                weights_matrix[i, j] = best_distances_matrix[idx]
-                weights_matrix[j, i] = best_distances_matrix[idx]
-                idx += 1
-        print(f"Reconstructed distance matrix: {weights_matrix.shape}")
-
-        np.save(f'{working_folder}/base_projections.npy', base_projections)
-        np.save(f'{working_folder}/best_distance_matrix.npy', best_distances_matrix)
-        print(f"Saved distance matrix to {distance_matrix_path}")
+    np.save(f'{working_folder}/base_projections.npy', base_projections)
+    np.save(f'{working_folder}/best_distance_matrix.npy', best_distances_matrix)
+    print(f"Saved distance matrix and base projections")
 
     print("\n=== COMPUTING PROJECTIONS ===")
     train_proj_path = os.path.join(working_folder, 'train_projections.npy')
@@ -140,33 +112,26 @@ def mnist_manifold_learning_example(save_checkpoint_history=False):
     X_basis = X_train[fps_indices]
     Y_basis = base_projections
 
-    if os.path.exists(train_proj_path):
-        print(f"Found cached train projections")
-    else:
-        print("Computing projections for training data...")
-        projector = Projector(
-            source_data=X_train,
-            weights_matrix=weights_matrix,
-            basis_indices=fps_indices,
-            n_neighbors=10,
-            method='random_forest',
-            batch_size=128,
-            precomputed_base_projections=base_projections,
-            verbose=True
-        )
-        projector.compute_all_projections()
-        train_projections = projector.all_projections
-        np.save(train_proj_path, train_projections)
-        print(f"Saved train projections")
+    print("Computing projections for training data...")
+    projector = Projector(
+        source_data=X_train,
+        basis_indices=fps_indices,
+        upper_triangular_distances=best_distances_matrix,
+        n_neighbors=25,
+        method='random_forest',
+        batch_size=128,
+        precomputed_base_projections=base_projections,
+        verbose=True
+    )
+    projector.compute_projection()
+    train_projections = projector.projection
+    np.save(train_proj_path, train_projections)
+    print(f"Saved train projections")
 
-    if os.path.exists(val_proj_path):
-        print(f"Found cached val projections")
-    else:
-        print("Computing projections for validation data...")
-        from regularizator.GraphRegTrainer import project_ensemble_knn
-        val_projections = project_ensemble_knn(X_basis, Y_basis, X_val)
-        np.save(val_proj_path, val_projections)
-        print(f"Saved val projections")
+    print("Computing projections for validation data...")
+    val_projections = project_ensemble_knn(X_basis, Y_basis, X_val)
+    np.save(val_proj_path, val_projections)
+    print(f"Saved val projections")
 
     print("\n=== SAVING DATA FOR GRAPH REGULARIZATION ===")
     np.save(f'{working_folder}/X_train.npy', X_train)
@@ -175,16 +140,23 @@ def mnist_manifold_learning_example(save_checkpoint_history=False):
     np.save(f'{working_folder}/y_train.npy', y_train)
     np.save(f'{working_folder}/y_val.npy', y_val)
     np.save(f'{working_folder}/y_test.npy', y_test)
-    np.save(f'{working_folder}/latent_dim.npy', latent_len)
+
+    experiment_metadata = {
+        'latent_dim': int(latent_len),
+        'n_samples': n_samples,
+        'n_basis_points': len(fps_indices),
+        'train_size': len(X_train),
+        'val_size': len(X_val),
+        'test_size': len(X_test),
+        'timestamp': timestamp
+    }
+    metadata_path = os.path.join(working_folder, 'experiment_metadata.json')
+    with open(metadata_path, 'w') as f:
+        json.dump(experiment_metadata, f, indent=2)
+    print(f"Saved experiment metadata to {metadata_path}")
 
     print(f"\nAll data saved to {working_folder}/")
 
-    return {
-        'working_folder': working_folder,
-        'latent_dim': latent_len,
-        'n_basis_points': len(fps_indices)
-    }
-
 
 if __name__ == "__main__":
-    results = mnist_manifold_learning_example(save_checkpoint_history=False)
+    mnist_manifold_learning_example(save_checkpoint_history=False)

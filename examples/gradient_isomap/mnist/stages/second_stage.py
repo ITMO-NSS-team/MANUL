@@ -350,7 +350,7 @@ def mnist_graph_regularization(folder_path: Optional[str] = None,
         batch_size: batch size for training
         learning_rate: learning rate for optimizer
         early_stopping_patience: patience for early stopping
-        adaptive_lambda: 'sobol', 'gradnorm', False
+        adaptive_lambda: 'sobol', False
     """
     required_files = [
         'fps_indices.npy',
@@ -460,13 +460,6 @@ def mnist_graph_regularization(folder_path: Optional[str] = None,
             'sampling_D': 2,
             'warmup_fraction': 0.1
         }
-    elif adaptive_lambda == 'gradnorm':
-        adaptive_lambda_config = {
-            'method': 'gradnorm',
-            'alpha': 0.0001,
-            'lr_weights': 0.0001,
-            'initial_lambda_graph': reg_lambda
-        }
     else:
         adaptive_lambda_config = {
             'method': 'disabled'
@@ -517,7 +510,6 @@ if __name__ == "__main__":
     run_folder_name = 'mnist_2000'
     folder_path = os.path.join(experiment_dir, 'outputs', run_folder_name)
 
-    print(f"Script location: {script_dir}")
     print(f"Experiment dir: {experiment_dir}")
     print(f"Looking for data in: {folder_path}")
 
@@ -534,5 +526,5 @@ if __name__ == "__main__":
         batch_size=128,
         learning_rate=1e-4,
         early_stopping_patience=100,
-        adaptive_lambda='sobol'  # Options: False, 'sobol', 'gradnorm'
+        adaptive_lambda='sobol'  # Options: False, 'sobol'
     )
