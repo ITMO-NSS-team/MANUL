@@ -169,13 +169,13 @@ class DimensionalityAnalyser:
 
     def get_latent_dim(self, method='eigenvalue'):
         """
-        Get recommended latent dimension based on analysis.
+        Get recommended latent dimension based on analysis using 90th percentile.
         """
         if method not in self.results:
             raise ValueError(f"Method {method} not found in results. Available: {list(self.results.keys())}")
 
         dims = self.results[method]
-        recommended_dim = int(np.mean(dims))
+        recommended_dim = int(np.percentile(dims, 90))
 
-        print(f"Recommended latent dimension ({method} method): {recommended_dim}")
+        print(f"Recommended latent dimension ({method} method, 90th percentile): {recommended_dim}")
         return recommended_dim
