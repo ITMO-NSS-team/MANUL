@@ -110,8 +110,7 @@ class Projector:
     def __init__(self,
                  source_data: np.ndarray,
                  basis_indices: np.ndarray,
-                 weights_matrix: np.ndarray = None,
-                 upper_triangular_distances: np.ndarray = None,
+                 upper_triangular_distances: np.ndarray,
                  n_neighbors: int = 25,
                  method: str = 'ensemble_knn',
                  batch_size: int = 128,
@@ -124,7 +123,6 @@ class Projector:
         Args:
             source_data: all data points [N, features]
             basis_indices: indices of basis points in source_data
-            weights_matrix: Full symmetric distance matrix [n_basis, n_basis] (optional)
             upper_triangular_distances: Upper-triangular distances [n_basis*(n_basis-1)/2] (optional)
             n_neighbors: number of neighbors for Isomap and interpolation (default: 25)
             method: projection method ('krr', 'ensemble_knn', 'random_forest')
@@ -132,19 +130,10 @@ class Projector:
             device: 'cuda', 'cpu', or None (auto)
             precomputed_base_projections: precomputed base projections [base_dim, proj_dim]
             verbose: print progress messages
-
-        Note: Provide either weights_matrix or upper_triangular_distances, not both
         """
-        if weights_matrix is None and upper_triangular_distances is None:
-            raise ValueError("Must provide either weights_matrix or upper_triangular_distances")
 
-        if weights_matrix is not None and upper_triangular_distances is not None:
-            raise ValueError("Provide only one: weights_matrix or upper_triangular_distances")
-
-        if weights_matrix is None:
-            n_basis = len(basis_indices)
-            weights_matrix = self.reconstruct_distance_matrix(upper_triangular_distances, n_basis)
-
+        n_basis = len(basis_indices)
+        weights_matrix = self.reconstruct_distance_matrix(upper_triangular_distances, n_basis)
         self.source_data = source_data.astype(float)
         self.weights_matrix = weights_matrix
         self.basis_indices = basis_indices
@@ -231,7 +220,7 @@ class Projector:
         self.projection = Y_all
 
         if self.verbose:
-            print(f"Projector: All projections computed: {self.self.projection.shape}")
+            print(f"Projector: All projections computed: {self.projection.shape}")
 
         return self.projection
 

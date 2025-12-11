@@ -28,88 +28,9 @@ from matplotlib.gridspec import GridSpec
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 
 from regularizator.GraphRegTrainer import GraphRegTrainer
-from utils.cache_utils import check_required_files
-
-np.random.seed(42)
-torch.manual_seed(42)
-if torch.cuda.is_available():
-    torch.cuda.manual_seed(42)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
-
-
-def load_data_from_folder(folder_path):
-    """
-    Load all necessary data from the folder created by synthetic_geometry_manifold_learning.py
-
-    Args:
-        folder_path: path to the folder with saved data
-
-    Returns:
-        dict with all loaded data
-    """
-    print(f"\nLoading data from {folder_path}...")
-
-    X_train = np.load(os.path.join(folder_path, 'X_train.npy'))
-    X_val = np.load(os.path.join(folder_path, 'X_val.npy'))
-    X_test = np.load(os.path.join(folder_path, 'X_test.npy'))
-    y_train = np.load(os.path.join(folder_path, 'y_train.npy'))
-    y_val = np.load(os.path.join(folder_path, 'y_val.npy'))
-    y_test = np.load(os.path.join(folder_path, 'y_test.npy'))
-
-    best_distances_matrix = np.load(os.path.join(folder_path, 'best_distance_matrix.npy'))
-    fps_indices = np.load(os.path.join(folder_path, 'fps_indices.npy'))
-    latent_dim = int(np.load(os.path.join(folder_path, 'latent_dim.npy')))
-    base_projections = np.load(os.path.join(folder_path, 'base_projections.npy'))
-    train_projections = np.load(os.path.join(folder_path, 'train_projections.npy'))
-
-    print(f"  X_train: {X_train.shape}, y_train: {y_train.shape}")
-    print(f"  X_val: {X_val.shape}, y_val: {y_val.shape}")
-    print(f"  X_test: {X_test.shape}, y_test: {y_test.shape}")
-    print(f"  FPS indices: {len(fps_indices)} basis points")
-    print(f"  Latent dim: {latent_dim}")
-    print(f"  Base projections: {base_projections.shape}")
-    print(f"  Train projections: {train_projections.shape}")
-
-    return {
-        'X_train': X_train,
-        'X_val': X_val,
-        'X_test': X_test,
-        'y_train': y_train,
-        'y_val': y_val,
-        'y_test': y_test,
-        'best_distances_matrix': best_distances_matrix,
-        'fps_indices': fps_indices,
-        'latent_dim': latent_dim,
-        'base_projections': base_projections,
-        'train_projections': train_projections,
-        'folder_path': folder_path
-    }
-
-
-def reconstruct_distance_matrix(best_distances_matrix, n_basis):
-    """
-    Reconstruct full symmetric distance matrix from upper triangular form
-
-    Args:
-        best_distances_matrix: upper triangular distances (1D array)
-        n_basis: number of basis points
-
-    Returns:
-        weights_matrix: full symmetric distance matrix [n_basis, n_basis]
-    """
-    print("  Reconstructing full distance matrix...")
-    weights_matrix = np.zeros((n_basis, n_basis))
-    idx = 0
-    for i in range(n_basis):
-        for j in range(i+1, n_basis):
-            weights_matrix[i, j] = best_distances_matrix[idx]
-            weights_matrix[j, i] = best_distances_matrix[idx]
-            idx += 1
-
-    print(f"    Matrix shape: {weights_matrix.shape}")
-    return weights_matrix
-
+from utils.cache_utils import check_required_files, restore_data_from_metadata, set_global_seed, \
+                               load_data_from_folder
+from utils.Projector import Projector
 
 class RegressionModel(nn.Module):
     """
@@ -387,7 +308,7 @@ def synthetic_graph_regularization(folder_path: Optional[str] = None,
                                     num_epochs: int = 20000,
                                     batch_size: int = 1024,
                                     learning_rate: float = 1e-3,
-                                    early_stopping_patience: int = 20000,
+                                    early_stopping_patience: int = 4000,
                                     adaptive_lambda: Union[bool, str] = 'sobol'):
     """
     Main function to train regression model with graph regularization for synthetic geometries
@@ -404,11 +325,10 @@ def synthetic_graph_regularization(folder_path: Optional[str] = None,
     required_files = [
         'fps_indices.npy',
         'best_distance_matrix.npy',
-        'X_train.npy',
-        'y_train.npy',
         'train_projections.npy',
         'base_projections.npy',
-        'latent_dim.npy'
+        'latent_dim.npy',
+        'experiment_metadata.json'
     ]
 
     if folder_path is None or not check_required_files(folder_path, required_files):
@@ -425,6 +345,18 @@ def synthetic_graph_regularization(folder_path: Optional[str] = None,
     print(f"EXPERIMENT FOLDER: {experiment_folder}")
     print(f"{'='*60}\n")
 
+
+    metadata_path = os.path.join(folder_path, 'experiment_metadata.json')
+    try:
+        with open(metadata_path, 'r') as f:
+            metadata = json.load(f)
+            saved_seed = metadata.get('random_seed')
+            print(f"\nFound saved seed: {saved_seed}")
+    except FileNotFoundError:
+        print("\nMetadata file not found.")
+
+    set_global_seed(saved_seed)
+
     data = load_data_from_folder(folder_path)
 
     X_train = data['X_train']
@@ -440,11 +372,12 @@ def synthetic_graph_regularization(folder_path: Optional[str] = None,
     train_projections = data['train_projections']
 
     n_basis = len(fps_indices)
-    weights_matrix = reconstruct_distance_matrix(best_distances_matrix, n_basis)
+    weights_matrix = Projector.reconstruct_distance_matrix(best_distances_matrix, n_basis)
 
     print("\n" + "="*60)
     print("TRAINING REGRESSOR WITH GRAPH REGULARIZATION")
     print("="*60)
+    set_global_seed(saved_seed)
 
     baseline_results = train_and_evaluate_model(
         X_train, y_train, X_val, y_val, X_test, y_test,
@@ -459,6 +392,8 @@ def synthetic_graph_regularization(folder_path: Optional[str] = None,
         early_stopping_patience=early_stopping_patience,
         adaptive_lambda=False
     )
+
+    set_global_seed(saved_seed)
 
     reg_results = train_and_evaluate_model(
         X_train, y_train, X_val, y_val, X_test, y_test,
@@ -571,9 +506,9 @@ if __name__ == "__main__":
         folder_path=folder_path,
         baseline_lambda=0.0,
         reg_lambda=1,
-        num_epochs=10000,
+        num_epochs=20000,
         batch_size=1024,
         learning_rate=1e-3,
-        early_stopping_patience=4000,
+        early_stopping_patience=8000,
         adaptive_lambda='sobol'
     )

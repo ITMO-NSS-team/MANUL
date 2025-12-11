@@ -2,10 +2,13 @@ import os
 import numpy as np
 import torch
 from typing import Optional, Tuple, Callable, Dict
+import random
+import json
+from sklearn.model_selection import train_test_split
+from torchvision import datasets
 
-def load_or_compute_fps(output_dir: str,
-                        train_features: np.ndarray,
-                        num_basis: int,
+
+def load_or_compute_fps(output_dir: str, train_features: np.ndarray, num_basis: int,
                         fps_function: Callable) -> np.ndarray:
     """Loads FPS indices from cache or computes them.
 
@@ -32,109 +35,6 @@ def load_or_compute_fps(output_dir: str,
         return fps_indices
 
 
-def load_or_train_isomap(output_dir: str,
-                         basis_features: np.ndarray,
-                         basis_labels: np.ndarray,
-                         latent_dim: int,
-                         epochs: int,
-                         isomap_class) -> Tuple:
-    """Loads distance matrix from cache or trains Isomap.
-
-    Args:
-        output_dir: Directory where distance matrix is/will be saved
-        basis_features: Basis point features
-        basis_labels: Basis point labels
-        latent_dim: Latent dimension of manifold
-        epochs: Number of training epochs
-        isomap_class: GradientIsomap class
-
-    Returns:
-        Tuple of (weights_matrix, distance_matrix)
-    """
-    distance_matrix_path = os.path.join(output_dir, 'best_distance_matrix.npy')
-
-    if os.path.exists(distance_matrix_path):
-        print(f"Found cached distance matrix at {distance_matrix_path}")
-        print(f"Skipping Isomap training ({epochs} epochs saved)")
-        distance_matrix = np.load(distance_matrix_path)
-        weights_matrix = distance_matrix_to_weights(distance_matrix)
-        return weights_matrix, distance_matrix
-    else:
-        print(f"Starting Isomap training for {epochs} epochs...")
-        isomap = isomap_class(
-            train_feature=basis_features,
-            train_target=basis_labels,
-            latent_len=latent_dim,
-            epochs=epochs
-        )
-        isomap.train()
-        weights_matrix, distance_matrix = isomap.get_weights_matrix()
-        np.save(distance_matrix_path, distance_matrix)
-        print(f"Saved distance matrix to {distance_matrix_path}")
-        return weights_matrix, distance_matrix
-
-
-def load_or_compute_projections(output_dir: str,
-                                data_dict: Dict[str, np.ndarray],
-                                weights_matrix,
-                                fps_indices: np.ndarray,
-                                projector_class,
-                                method: str = 'ensemble_knn') -> Dict[str, np.ndarray]:
-    """Loads projections from cache or computes them for train/val/test splits.
-
-    Args:
-        output_dir: Directory where projections are/will be saved
-        data_dict: Dictionary with split names as keys and data as values
-        weights_matrix: Distance matrix weights
-        fps_indices: FPS basis indices
-        projector_class: Projector class
-        method: Projection method to use
-
-    Returns:
-        Dictionary of projections for each split
-    """
-    projections = {}
-
-    for split_name, split_data in data_dict.items():
-        proj_path = os.path.join(output_dir, f'{split_name}_projections.npy')
-
-        if os.path.exists(proj_path):
-            print(f"Found cached {split_name} projections")
-            projections[split_name] = np.load(proj_path)
-        else:
-            print(f"Computing projections for {split_name} data...")
-            projector = projector_class(
-                source_data=split_data,
-                weights_matrix=weights_matrix,
-                basis_indices=fps_indices,
-                method=method
-            )
-            proj = projector.compute_all_projections()
-            np.save(proj_path, proj)
-            print(f"Saved {split_name} projections")
-            projections[split_name] = proj
-
-    return projections
-
-
-def distance_matrix_to_weights(distance_matrix: np.ndarray) -> list:
-    """Reconstructs weights_matrix from distance_matrix.
-
-    Converts symmetric distance matrix to lower triangular format
-    used by the framework.
-
-    Args:
-        distance_matrix: Square symmetric distance matrix [N, N]
-
-    Returns:
-        weights_matrix: List of arrays (lower triangular format)
-    """
-    weights_matrix = []
-    for i in range(1, distance_matrix.shape[0]):
-        weights_matrix.append(distance_matrix[i, :i])
-    return weights_matrix
-
-
 def check_required_files(input_dir: str, required_files: list) -> bool:
     """Checks if all required files exist in directory.
 
@@ -155,3 +55,215 @@ def check_required_files(input_dir: str, required_files: list) -> bool:
     else:
         print(f"All required files found in {input_dir}")
         return True
+
+def set_global_seed(seed=42):
+    """
+    Set fixed seed for all random number generators.
+    Ensures reproducibility for numpy, torch, and random.
+
+    Args:
+        seed: Integer to initialize generators
+    """
+    np.random.seed(seed)
+    random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+
+    # Для полной детерминированности PyTorch
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+    print(f"Global seed set to {seed}")
+
+
+def restore_mnist_splits(data_dir, test_size_outer=0.2, test_size_inner=0.2, random_state=42):
+    """
+    Restore train/val/test splits for MNIST dataset.
+
+    Args:
+        data_dir: Path to MNIST data directory
+        test_size_outer: Test set size (default 0.2)
+        test_size_inner: Validation set size from trainval (default 0.2)
+        random_state: Seed for reproducibility
+
+    Returns:
+        Tuple of X_train, X_val, X_test, y_train, y_val, y_test
+    """
+    set_global_seed(random_state)
+
+
+    mnist_dataset = datasets.MNIST(root=data_dir, train=True, download=True)
+    X = mnist_dataset.data.numpy().reshape(len(mnist_dataset), -1).astype(np.float32) / 255.0
+    y = mnist_dataset.targets.numpy()
+
+    X_trainval, X_test, y_trainval, y_test = train_test_split(
+        X, y, test_size=test_size_outer, random_state=random_state, stratify=y
+    )
+
+    X_train, X_val, y_train, y_val = train_test_split(
+        X_trainval, y_trainval, test_size=test_size_inner,
+        random_state=random_state, stratify=y_trainval
+    )
+
+    print(f"Restored MNIST splits: train={len(X_train)}, val={len(X_val)}, test={len(X_test)}")
+
+    return X_train, X_val, X_test, y_train, y_val, y_test
+
+
+def restore_synthetic_splits(geometry_name, n_samples, noise_percent,
+                             test_size_outer=0.15, test_size_inner=0.176,
+                             random_state=42):
+    """
+    Restore train/val/test splits for synthetic geometry data.
+
+    Args:
+        geometry_name: Geometry name ('torus', 'sphere', etc.)
+        n_samples: Number of points to generate
+        noise_percent: Noise level (0.05 = 5%)
+        test_size_outer: Test set size
+        test_size_inner: Validation set size from trainval
+        random_state: Seed for reproducibility
+
+    Returns:
+        Tuple of X_train, X_val, X_test, y_train, y_val, y_test
+    """
+    from data.synthetic_geometries import geometries, noisy_manifold
+
+    set_global_seed(random_state)
+
+    base_func = geometries[geometry_name][0]
+    X, y = noisy_manifold(base_func, noise_percent=noise_percent, n_samples=n_samples)
+
+    X_trainval, X_test, y_trainval, y_test = train_test_split(
+        X, y, test_size=test_size_outer, random_state=random_state
+    )
+
+    X_train, X_val, y_train, y_val = train_test_split(
+        X_trainval, y_trainval, test_size=test_size_inner, random_state=random_state
+    )
+
+    print(f"Restored {geometry_name} splits: train={len(X_train)}, val={len(X_val)}, test={len(X_test)}")
+
+    return X_train, X_val, X_test, y_train, y_val, y_test
+
+def restore_data_from_metadata(experiment_folder, project_root=None):
+    """
+    Universal function for restoring data from metadata.
+
+    Reads experiment_metadata.json and regenerates train/val/test splits
+    using the same random seed and parameters as first_stage.
+
+    Args:
+        experiment_folder: Path to experiment folder
+        project_root: Root directory of project (for MNIST data path).
+                      If None, automatically computed as experiment_folder + '../../../..'
+
+    Returns:
+        Dictionary with keys: X_train, X_val, X_test, y_train, y_val, y_test
+    """
+
+    metadata_path = os.path.join(experiment_folder, 'experiment_metadata.json')
+    if not os.path.exists(metadata_path):
+        raise FileNotFoundError(f"Metadata not found: {metadata_path}")
+
+    with open(metadata_path, 'r') as f:
+        metadata = json.load(f)
+
+    dataset_type = metadata.get('dataset_type', 'mnist')
+    random_seed = metadata.get('random_seed', 42)
+    split_params = metadata.get('split_params', {})
+
+    if dataset_type == 'mnist':
+        if project_root is None:
+            project_root = os.path.abspath(os.path.join(experiment_folder, '../../../..'))
+        data_dir = os.path.join(project_root, 'data')
+
+        X_train, X_val, X_test, y_train, y_val, y_test = restore_mnist_splits(
+            data_dir=data_dir,
+            test_size_outer=split_params.get('test_size_outer', 0.2),
+            test_size_inner=split_params.get('test_size_inner', 0.2),
+            random_state=random_seed
+        )
+
+    elif dataset_type == 'synthetic':
+        X_train, X_val, X_test, y_train, y_val, y_test = restore_synthetic_splits(
+            geometry_name=metadata['geometry_name'],
+            n_samples=metadata['n_samples'],
+            noise_percent=metadata['noise_percent'],
+            test_size_outer=split_params.get('test_size_outer', 0.15),
+            test_size_inner=split_params.get('test_size_inner', 0.176),
+            random_state=random_seed
+        )
+    else:
+        raise ValueError(f"Unknown dataset_type: {dataset_type}")
+
+    return {
+        'X_train': X_train,
+        'X_val': X_val,
+        'X_test': X_test,
+        'y_train': y_train,
+        'y_val': y_val,
+        'y_test': y_test
+    }
+
+def load_data_from_folder(folder_path: str) -> dict:
+    """
+    Load all necessary data from experiment folder created by first_stage.
+
+    Loads both preprocessed splits (X_train, y_train, etc.) and manifold learning artifacts
+    (distance matrix, projections, FPS indices) by restoring from metadata.
+
+    Args:
+        folder_path: Path to the folder with saved experiment data
+
+    Returns:
+        Dictionary containing:
+            - X_train, X_val, X_test: feature arrays
+            - y_train, y_val, y_test: target arrays
+            - best_distances_matrix: upper triangular distance matrix from GradientIsomap
+            - fps_indices: indices of FPS-selected basis points
+            - latent_dim: intrinsic dimensionality
+            - base_projections: projections for basis points
+            - train_projections: projections for all training data
+            - folder_path: original folder path
+    """
+    print(f"\nLoading data from {folder_path}...")
+
+    # Restore train/val/test splits from metadata
+    restored_data = restore_data_from_metadata(folder_path)
+    X_train = restored_data['X_train']
+    X_val = restored_data['X_val']
+    X_test = restored_data['X_test']
+    y_train = restored_data['y_train']
+    y_val = restored_data['y_val']
+    y_test = restored_data['y_test']
+
+    # Load manifold learning artifacts
+    best_distances_matrix = np.load(os.path.join(folder_path, 'best_distance_matrix.npy'))
+    fps_indices = np.load(os.path.join(folder_path, 'fps_indices.npy'))
+    latent_dim = int(np.load(os.path.join(folder_path, 'latent_dim.npy')))
+    base_projections = np.load(os.path.join(folder_path, 'base_projections.npy'))
+    train_projections = np.load(os.path.join(folder_path, 'train_projections.npy'))
+
+    print(f"  X_train: {X_train.shape}, y_train: {y_train.shape}")
+    print(f"  X_val: {X_val.shape}, y_val: {y_val.shape}")
+    print(f"  X_test: {X_test.shape}, y_test: {y_test.shape}")
+    print(f"  FPS indices: {len(fps_indices)} basis points")
+    print(f"  Latent dim: {latent_dim}")
+    print(f"  Base projections: {base_projections.shape}")
+    print(f"  Train projections: {train_projections.shape}")
+
+    return {
+        'X_train': X_train,
+        'X_val': X_val,
+        'X_test': X_test,
+        'y_train': y_train,
+        'y_val': y_val,
+        'y_test': y_test,
+        'best_distances_matrix': best_distances_matrix,
+        'fps_indices': fps_indices,
+        'latent_dim': latent_dim,
+        'base_projections': base_projections,
+        'train_projections': train_projections,
+        'folder_path': folder_path
+    }

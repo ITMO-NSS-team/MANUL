@@ -11,13 +11,17 @@ from Adam.GradientIsomap import GradientIsomap
 from utils.DimensionalityAnalyser import DimensionalityAnalyser
 from utils.fps_implementation import memory_efficient_fps
 from utils.Projector import Projector
-from utils.cache_utils import load_or_compute_fps, load_or_train_isomap, load_or_compute_projections
+from utils.cache_utils import load_or_compute_fps, set_global_seed
 from regularizator.GraphRegTrainer import project_ensemble_knn
 
+RANDOM_SEED = 42
 def mnist_manifold_learning_example(save_checkpoint_history=False):
     """
     MNIST manifold learning example with FPS sampling and local PCA dimension estimation.
     """
+
+    set_global_seed(RANDOM_SEED)
+
     n_samples = 2000
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -102,12 +106,15 @@ def mnist_manifold_learning_example(save_checkpoint_history=False):
     base_projections = proj_features.detach().cpu().numpy()
 
     np.save(f'{working_folder}/base_projections.npy', base_projections)
+
     np.save(f'{working_folder}/best_distance_matrix.npy', best_distances_matrix)
     print(f"Saved distance matrix and base projections")
 
+    np.save(f'{working_folder}/latent_dim.npy', latent_len)
+    print(f"Saved latent_dim: {latent_len}")
+
     print("\n=== COMPUTING PROJECTIONS ===")
     train_proj_path = os.path.join(working_folder, 'train_projections.npy')
-    val_proj_path = os.path.join(working_folder, 'val_projections.npy')
 
     X_basis = X_train[fps_indices]
     Y_basis = base_projections
@@ -128,27 +135,14 @@ def mnist_manifold_learning_example(save_checkpoint_history=False):
     np.save(train_proj_path, train_projections)
     print(f"Saved train projections")
 
-    print("Computing projections for validation data...")
-    val_projections = project_ensemble_knn(X_basis, Y_basis, X_val)
-    np.save(val_proj_path, val_projections)
-    print(f"Saved val projections")
-
-    print("\n=== SAVING DATA FOR GRAPH REGULARIZATION ===")
-    np.save(f'{working_folder}/X_train.npy', X_train)
-    np.save(f'{working_folder}/X_val.npy', X_val)
-    np.save(f'{working_folder}/X_test.npy', X_test)
-    np.save(f'{working_folder}/y_train.npy', y_train)
-    np.save(f'{working_folder}/y_val.npy', y_val)
-    np.save(f'{working_folder}/y_test.npy', y_test)
-
     experiment_metadata = {
+        'dataset_type': 'mnist',
+        'random_seed': RANDOM_SEED,
         'latent_dim': int(latent_len),
-        'n_samples': n_samples,
-        'n_basis_points': len(fps_indices),
-        'train_size': len(X_train),
-        'val_size': len(X_val),
-        'test_size': len(X_test),
-        'timestamp': timestamp
+        'split_params': {
+            'test_size_outer': 0.2,
+            'test_size_inner': 0.2
+        }
     }
     metadata_path = os.path.join(working_folder, 'experiment_metadata.json')
     with open(metadata_path, 'w') as f:

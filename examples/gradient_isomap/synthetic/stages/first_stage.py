@@ -24,10 +24,11 @@ matplotlib.use('Agg')
 from Adam.GradientIsomap import GradientIsomap
 from utils.fps_implementation import memory_efficient_fps
 from utils.Projector import Projector
-from utils.cache_utils import load_or_compute_fps
+from utils.cache_utils import load_or_compute_fps, set_global_seed
 from data.synthetic_geometries import geometries, noisy_manifold
 from regularizator.GraphRegTrainer import project_ensemble_knn
 
+RANDOM_SEED = 42
 
 def process_geometry(geometry_name, n_samples=1000, n_basis_points=200,
                      noise_percent=0, latent_dim=2, epochs=500,
@@ -57,6 +58,7 @@ def process_geometry(geometry_name, n_samples=1000, n_basis_points=200,
     print(f"PROCESSING GEOMETRY: {geometry_name.upper()}")
     print(f"{'='*80}\n")
 
+    set_global_seed(RANDOM_SEED)
     script_dir = os.path.dirname(os.path.abspath(__file__))
     experiment_dir = os.path.abspath(os.path.join(script_dir, '..'))
     project_root = os.path.abspath(os.path.join(script_dir, '../../../..'))
@@ -133,10 +135,11 @@ def process_geometry(geometry_name, n_samples=1000, n_basis_points=200,
     np.save(os.path.join(working_folder, 'base_projections.npy'), base_projections)
     np.save(os.path.join(working_folder, 'best_distance_matrix.npy'), best_distances_matrix)
     print(f"Saved distance matrix and base projections")
-
+    np.save(f'{working_folder}/latent_dim.npy', latent_dim)
+    print(f"Saved latent_dim: {latent_dim}")
     print("\n=== COMPUTING PROJECTIONS ===")
     train_proj_path = os.path.join(working_folder, 'train_projections.npy')
-    val_proj_path = os.path.join(working_folder, 'val_projections.npy')
+
 
     X_basis = X_train[fps_indices]
     Y_basis = base_projections
@@ -159,32 +162,17 @@ def process_geometry(geometry_name, n_samples=1000, n_basis_points=200,
     np.save(train_proj_path, train_projections)
     print(f"Saved train projections")
 
-
-    print("Computing projections for validation data...")
-    val_projections = project_ensemble_knn(X_basis, Y_basis, X_val)
-    np.save(val_proj_path, val_projections)
-    print(f"Saved val projections")
-
-    print(f"\nSaving data to {working_folder}/...")
-    np.save(os.path.join(working_folder, 'X_train.npy'), X_train)
-    #todo: во второй stage написать небольшую функцию, которая все эти
-    # матрицы восстановит на основе исходных данных и индексов разбиения
-    np.save(os.path.join(working_folder, 'X_val.npy'), X_val)
-    np.save(os.path.join(working_folder, 'X_test.npy'), X_test)
-    np.save(os.path.join(working_folder, 'y_train.npy'), y_train)
-    np.save(os.path.join(working_folder, 'y_val.npy'), y_val)
-    np.save(os.path.join(working_folder, 'y_test.npy'), y_test)
-
     experiment_metadata = {
-        'geometry': geometry_name,
-        'latent_dim': int(latent_dim),
+        'dataset_type': 'synthetic',
+        'random_seed': RANDOM_SEED,
+        'geometry_name': geometry_name,
         'n_samples': n_samples,
-        'n_basis_points': len(fps_indices),
-        'train_size': len(X_train),
-        'val_size': len(X_val),
-        'test_size': len(X_test),
         'noise_percent': noise_percent,
-        'timestamp': timestamp
+        'latent_dim': int(latent_dim),
+        'split_params': {
+            'test_size_outer': 0.15,
+            'test_size_inner': 0.176
+        }
     }
     metadata_path = os.path.join(working_folder,
                                  'experiment_metadata.json')
@@ -202,11 +190,11 @@ def synthetic_manifold_learning_pipeline():
     Main pipeline function for use by run_pipeline.py
     """
     geometries_to_process = ['torus']
-    n_samples = 5000
-    n_basis_points = 1000
+    n_samples = 10000
+    n_basis_points = 2000
     noise_percent = 0.05
     latent_dim = 2
-    epochs = 10000
+    epochs = 20000
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
     print("=" * 80)
