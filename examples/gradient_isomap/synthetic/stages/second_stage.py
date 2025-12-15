@@ -98,13 +98,13 @@ def train_baseline_model(X_train, y_train, X_val, y_val, X_test, y_test,
     patience_counter = 0
 
     for epoch in range(num_epochs):
-        # Training phase
         model.train()
-        epoch_train_loss = 0.0
 
-        # Shuffle indices
         indices = torch.randperm(len(X_train))
         num_batches = (len(indices) + batch_size - 1) // batch_size
+
+        all_predictions = []
+        all_targets = []
 
         for batch_idx in range(num_batches):
             start_idx = batch_idx * batch_size
@@ -114,22 +114,22 @@ def train_baseline_model(X_train, y_train, X_val, y_val, X_test, y_test,
             batch_x = torch.tensor(X_train[batch_indices], dtype=torch.float64).to(device)
             batch_y = torch.tensor(y_train[batch_indices], dtype=torch.float64).to(device)
 
-            # Forward pass
             output = model(batch_x)
-            loss = criterion(output, batch_y)
 
-            # Backward and step (standard mini-batch SGD)
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
+            all_predictions.append(output)
+            all_targets.append(batch_y)
 
-            # Track loss
-            epoch_train_loss += loss.item()
+        all_predictions = torch.cat(all_predictions, dim=0)
+        all_targets = torch.cat(all_targets, dim=0)
 
-        avg_train_loss = epoch_train_loss / num_batches
-        train_losses.append(avg_train_loss)
+        train_loss = criterion(all_predictions, all_targets)
 
-        # Validation phase
+        optimizer.zero_grad()
+        train_loss.backward()
+        optimizer.step()
+
+        train_losses.append(train_loss.item())
+
         model.eval()
         with torch.no_grad():
             val_x = torch.tensor(X_val, dtype=torch.float64).to(device)
@@ -140,7 +140,7 @@ def train_baseline_model(X_train, y_train, X_val, y_val, X_test, y_test,
 
             if epoch % 100 == 0:
                 print(f'Epoch {epoch + 1}/{num_epochs}')
-                print(f'  Train Loss: {avg_train_loss:.6f}, Val Loss: {val_loss:.6f}')
+                print(f'  Train Loss: {train_loss.item():.6f}, Val Loss: {val_loss:.6f}')
 
         # Early stopping
         if val_loss < best_val_loss:
@@ -457,7 +457,6 @@ def create_summary_table(all_metrics, save_path):
 
 
 def synthetic_graph_regularization(folder_path: Optional[str] = None,
-                                    baseline_lambda: float = 0.0,
                                     reg_lambda: float = 0.00001,
                                     num_epochs: int = 20000,
                                     batch_size: int = 1024,
@@ -469,7 +468,6 @@ def synthetic_graph_regularization(folder_path: Optional[str] = None,
 
     Args:
         folder_path: path to folder with data from Stage 1
-        baseline_lambda: lambda for baseline model
         reg_lambda: lambda for regularized model
         num_epochs: number of training epochs
         batch_size: batch size for training
@@ -532,9 +530,8 @@ def synthetic_graph_regularization(folder_path: Optional[str] = None,
     print("\n" + "="*60)
     print("TRAINING REGRESSOR WITH GRAPH REGULARIZATION")
     print("="*60)
-    set_global_seed(saved_seed)
-
-    baseline_results = train_and_evaluate_model(
+    set_global_seed(43)
+    baseline_results = train_baseline_model(
         X_train, y_train, X_val, y_val, X_test, y_test,
         model_name="Baseline",
         cache_folder=os.path.join(experiment_folder, 'baseline'),
@@ -544,7 +541,7 @@ def synthetic_graph_regularization(folder_path: Optional[str] = None,
         early_stopping_patience=early_stopping_patience
     )
 
-    set_global_seed(saved_seed)
+    set_global_seed(43)
 
     reg_results = train_and_evaluate_model(
         X_train, y_train, X_val, y_val, X_test, y_test,
@@ -580,7 +577,6 @@ def synthetic_graph_regularization(folder_path: Optional[str] = None,
     )
 
     baseline_params = {
-        'lambda_graph': baseline_lambda,
         'num_epochs': num_epochs,
         'batch_size': batch_size,
         'learning_rate': learning_rate,
@@ -651,11 +647,10 @@ if __name__ == "__main__":
 
     results = synthetic_graph_regularization(
         folder_path=folder_path,
-        baseline_lambda=0.0,
         reg_lambda=1,
         num_epochs=20000,
         batch_size=1024,
-        learning_rate=1e-3,
-        early_stopping_patience=8000,
+        learning_rate=1e-2,
+        early_stopping_patience=5000,
         adaptive_lambda='False'
     )

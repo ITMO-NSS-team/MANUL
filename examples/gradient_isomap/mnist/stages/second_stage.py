@@ -77,13 +77,13 @@ def train_baseline_model(X_train, y_train, X_val, y_val, X_test, y_test,
     patience_counter = 0
 
     for epoch in range(num_epochs):
-        # Training phase
         model.train()
-        epoch_train_loss = 0.0
 
-        # Shuffle indices
         indices = torch.randperm(len(X_train))
         num_batches = (len(indices) + batch_size - 1) // batch_size
+
+        all_predictions = []
+        all_targets = []
 
         for batch_idx in range(num_batches):
             start_idx = batch_idx * batch_size
@@ -92,21 +92,23 @@ def train_baseline_model(X_train, y_train, X_val, y_val, X_test, y_test,
 
             batch_x = torch.tensor(X_train[batch_indices], dtype=torch.float64).to(device)
             batch_y = torch.tensor(y_train[batch_indices], dtype=torch.long).to(device)
-            # Forward pass
+
             output = model(batch_x)
-            loss = criterion(output, batch_y)
 
-            # Backward and step (standard mini-batch SGD)
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
+            all_predictions.append(output)
+            all_targets.append(batch_y)
 
-            # Track loss
-            epoch_train_loss += loss.item()
+        all_predictions = torch.cat(all_predictions, dim=0)
+        all_targets = torch.cat(all_targets, dim=0)
 
+        train_loss = criterion(all_predictions, all_targets)
 
-        avg_train_loss = epoch_train_loss / num_batches
-        train_losses.append(avg_train_loss)
+        optimizer.zero_grad()
+        train_loss.backward()
+        optimizer.step()
+
+        # Track loss
+        train_losses.append(train_loss.item())
 
         # Validation phase
         model.eval()
@@ -117,7 +119,6 @@ def train_baseline_model(X_train, y_train, X_val, y_val, X_test, y_test,
             val_loss = criterion(val_output, val_y).item()
             val_losses.append(val_loss)
 
-            # Calculate accuracies every 10 epochs
             if epoch % 10 == 0 or epoch == num_epochs - 1:
                 train_x = torch.tensor(X_train, dtype=torch.float64).to(device)
                 train_y_tensor = torch.tensor(y_train, dtype=torch.long).to(device)
@@ -132,7 +133,7 @@ def train_baseline_model(X_train, y_train, X_val, y_val, X_test, y_test,
 
                 if epoch % 10 == 0:
                     print(f'Epoch {epoch + 1}/{num_epochs}')
-                    print(f'  Train Loss: {avg_train_loss:.6f}, Val Loss: {val_loss:.6f}')
+                    print(f'  Train Loss: {train_loss.item():.6f}, Val Loss: {val_loss:.6f}')
                     print(f'  Train Accuracy: {train_acc:.4f}, Val Accuracy: {val_acc:.4f}')
 
         # Early stopping
