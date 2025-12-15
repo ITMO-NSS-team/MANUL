@@ -51,6 +51,159 @@ class RegressionModel(nn.Module):
         return x
 
 
+
+def train_baseline_model(X_train, y_train, X_val, y_val, X_test, y_test,
+                        model_name, cache_folder, num_epochs, batch_size, learning_rate, early_stopping_patience):
+    """
+    Train baseline regression model with simple PyTorch loop
+
+    Args:
+        X_train, y_train: training data
+        X_val, y_val: validation data
+        X_test, y_test: test data
+        model_name: name for logging
+        cache_folder: folder to save results
+        num_epochs: number of training epochs
+        batch_size: batch size for training
+        learning_rate: learning rate
+        early_stopping_patience: patience for early stopping
+
+    Returns:
+        dict with metrics and predictions
+    """
+    print(f"\n  --- Training {model_name} (Baseline) ---")
+    print(f"  Batch size: {batch_size}")
+
+    # Reshape targets if needed
+    if len(y_train.shape) == 1:
+        y_train = y_train.reshape(-1, 1)
+        y_val = y_val.reshape(-1, 1)
+        y_test = y_test.reshape(-1, 1)
+
+    # Create model, criterion, optimizer
+    model = RegressionModel(input_dim=X_train.shape[1], hidden_dims=[64, 32], output_dim=1)
+    criterion = nn.MSELoss()
+    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+
+    # Training setup
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    model = model.to(device)
+
+    train_losses = []
+    val_losses = []
+
+    best_val_loss = float('inf')
+    best_model_state = None
+    best_epoch = 0
+    patience_counter = 0
+
+    for epoch in range(num_epochs):
+        # Training phase
+        model.train()
+        epoch_train_loss = 0.0
+
+        # Shuffle indices
+        indices = torch.randperm(len(X_train))
+        num_batches = (len(indices) + batch_size - 1) // batch_size
+
+        for batch_idx in range(num_batches):
+            start_idx = batch_idx * batch_size
+            end_idx = min(start_idx + batch_size, len(indices))
+            batch_indices = indices[start_idx:end_idx]
+
+            batch_x = torch.tensor(X_train[batch_indices], dtype=torch.float64).to(device)
+            batch_y = torch.tensor(y_train[batch_indices], dtype=torch.float64).to(device)
+
+            # Forward pass
+            output = model(batch_x)
+            loss = criterion(output, batch_y)
+
+            # Backward and step (standard mini-batch SGD)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+            # Track loss
+            epoch_train_loss += loss.item()
+
+        avg_train_loss = epoch_train_loss / num_batches
+        train_losses.append(avg_train_loss)
+
+        # Validation phase
+        model.eval()
+        with torch.no_grad():
+            val_x = torch.tensor(X_val, dtype=torch.float64).to(device)
+            val_y = torch.tensor(y_val, dtype=torch.float64).to(device)
+            val_output = model(val_x)
+            val_loss = criterion(val_output, val_y).item()
+            val_losses.append(val_loss)
+
+            if epoch % 100 == 0:
+                print(f'Epoch {epoch + 1}/{num_epochs}')
+                print(f'  Train Loss: {avg_train_loss:.6f}, Val Loss: {val_loss:.6f}')
+
+        # Early stopping
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            best_model_state = model.state_dict().copy()
+            best_epoch = epoch + 1
+            patience_counter = 0
+        else:
+            patience_counter += 1
+
+        if patience_counter >= early_stopping_patience:
+            print(f'\nEarly stopping at epoch {epoch + 1}')
+            print(f'Best model was at epoch {best_epoch} with val loss {best_val_loss:.6f}')
+            break
+
+    # Load best weights
+    if best_model_state is not None:
+        model.load_state_dict(best_model_state)
+        print(f"    Loaded best model weights from epoch {best_epoch}")
+
+    # Final evaluation
+    model.eval()
+    with torch.no_grad():
+        # Validation
+        val_x = torch.tensor(X_val, dtype=torch.float64).to(device)
+        val_output = model(val_x)
+        pred_val = val_output.cpu().numpy().flatten()
+        y_val_flat = y_val.flatten()
+        val_mse = mean_squared_error(y_val_flat, pred_val)
+        val_mae = mean_absolute_error(y_val_flat, pred_val)
+        val_r2 = r2_score(y_val_flat, pred_val)
+
+        # Test
+        test_x = torch.tensor(X_test, dtype=torch.float64).to(device)
+        test_output = model(test_x)
+        pred_test = test_output.cpu().numpy().flatten()
+        y_test_flat = y_test.flatten()
+        test_mse = mean_squared_error(y_test_flat, pred_test)
+        test_mae = mean_absolute_error(y_test_flat, pred_test)
+        test_r2 = r2_score(y_test_flat, pred_test)
+
+        print(f"    {model_name} Validation - MSE: {val_mse:.6f}, MAE: {val_mae:.6f}, R²: {val_r2:.6f}")
+        print(f"    {model_name} Test - MSE: {test_mse:.6f}, MAE: {test_mae:.6f}, R²: {test_r2:.6f}")
+
+    # Save model
+    if cache_folder is not None:
+        os.makedirs(cache_folder, exist_ok=True)
+        torch.save(model.state_dict(), os.path.join(cache_folder, 'best_model.pth'))
+
+    return {
+        'val_mse': val_mse,
+        'val_mae': val_mae,
+        'val_r2': val_r2,
+        'test_mse': test_mse,
+        'test_mae': test_mae,
+        'test_r2': test_r2,
+        'predictions_val': pred_val,
+        'predictions_test': pred_test,
+        'train_losses': train_losses,
+        'val_losses': val_losses,
+        'best_epoch': best_epoch
+    }
+
 def train_and_evaluate_model(X_train, y_train, X_val, y_val, X_test, y_test,
                              weights_matrix, fps_indices, base_projections,
                              train_projections,
@@ -75,6 +228,7 @@ def train_and_evaluate_model(X_train, y_train, X_val, y_val, X_test, y_test,
         batch_size: batch size for training
         learning_rate: learning rate
         early_stopping_patience: patience for early stopping
+        adaptive_lambda: 'sobol', False
 
     Returns:
         dict with metrics, predictions, and trainer
@@ -321,6 +475,7 @@ def synthetic_graph_regularization(folder_path: Optional[str] = None,
         batch_size: batch size for training
         learning_rate: learning rate for optimizer
         early_stopping_patience: patience for early stopping
+        adaptive_lambda: 'sobol', False
     """
     required_files = [
         'fps_indices.npy',
@@ -381,16 +536,12 @@ def synthetic_graph_regularization(folder_path: Optional[str] = None,
 
     baseline_results = train_and_evaluate_model(
         X_train, y_train, X_val, y_val, X_test, y_test,
-        weights_matrix, fps_indices, base_projections,
-        train_projections,
-        lambda_graph=baseline_lambda,
         model_name="Baseline",
         cache_folder=os.path.join(experiment_folder, 'baseline'),
         num_epochs=num_epochs,
         batch_size=batch_size,
         learning_rate=learning_rate,
-        early_stopping_patience=early_stopping_patience,
-        adaptive_lambda=False
+        early_stopping_patience=early_stopping_patience
     )
 
     set_global_seed(saved_seed)
@@ -409,11 +560,17 @@ def synthetic_graph_regularization(folder_path: Optional[str] = None,
         adaptive_lambda=adaptive_lambda
     )
 
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("COMPARISON RESULTS")
-    print("="*60)
-    print(f"Baseline Test MSE:    {baseline_results['test_mse']:.6f}")
-    print(f"Regularized Test MSE: {reg_results['test_mse']:.6f}")
+    print("=" * 60)
+
+    baseline_test_mse = baseline_results['test_mse']
+    baseline_val_mse = baseline_results['val_mse']
+    reg_test_mse = reg_results['test_mse']
+    reg_val_mse = reg_results['val_mse']
+
+    print(f"Baseline Test MSE:    {baseline_test_mse:.6f}")
+    print(f"Regularized Test MSE: {reg_test_mse:.6f}")
 
     print("\n  Creating comparison visualization...")
     viz_path = os.path.join(experiment_folder, f'{geometry_name}_comparison.png')
@@ -433,18 +590,11 @@ def synthetic_graph_regularization(folder_path: Optional[str] = None,
     }
 
     # Determine adaptive lambda config
-    adaptive_lambda_config = {}
     if adaptive_lambda == 'sobol':
-        adaptive_lambda_config = {
-            'method': 'sobol',
-            'n_samples': 5,
-            'sampling_D': 2,
-            'warmup_fraction': 0.1
-        }
+        adaptive_lambda_config = {'method': 'sobol'}
+
     else:
-        adaptive_lambda_config = {
-            'method': 'disabled'
-        }
+        adaptive_lambda_config = {'method': 'disabled'}
 
     reg_params = {
         'lambda_graph': reg_lambda,
@@ -456,25 +606,22 @@ def synthetic_graph_regularization(folder_path: Optional[str] = None,
         'best_epoch': reg_results.get('best_epoch', num_epochs)
     }
 
-    if 'trainer' in reg_results and hasattr(reg_results['trainer'], 'trained_loss_values'):
-        lambda_history = reg_results['trainer'].trained_loss_values.get('lambda_history', None)
-        if lambda_history is not None:
-            reg_params['lambda_history'] = lambda_history
+    lambda_history = reg_results['trainer'].trained_loss_values.get('lambda_history', None)
+    if lambda_history is not None:
+        reg_params['lambda_history'] = lambda_history
 
     results = {
-        'baseline_test_mse': float(baseline_results['test_mse']),
-        'baseline_val_mse': float(baseline_results['val_mse']),
-        'regularized_test_mse': float(reg_results['test_mse']),
-        'regularized_val_mse': float(reg_results['val_mse']),
-        'mse_improvement_percent': float((baseline_results['test_mse'] - reg_results['test_mse']) /
-                                        baseline_results['test_mse'] * 100),
+        'baseline_test_mse': float(baseline_test_mse),
+        'baseline_val_mse': float(baseline_val_mse),
+        'regularized_test_mse': float(reg_test_mse),
+        'regularized_val_mse': float(reg_val_mse),
+        'mse_improvement_percent': float((baseline_test_mse - reg_test_mse) / baseline_test_mse * 100),
         'latent_dim': int(latent_dim),
         'n_basis_points': int(n_basis),
         'n_train_samples': len(X_train),
         'n_val_samples': len(X_val),
         'n_test_samples': len(X_test)
     }
-
     save_experiment_config(experiment_folder, geometry_name, baseline_params, reg_params, results)
 
     pd.DataFrame([results]).to_csv(os.path.join(experiment_folder, 'comparison_results.csv'), index=False)
@@ -490,7 +637,7 @@ if __name__ == "__main__":
     experiment_dir = os.path.abspath(os.path.join(script_dir, '..'))
 
     # Set your run folder name
-    run_folder_name = 'torus'
+    run_folder_name = 'torus_run_20251211_192332_n10000'
     folder_path = os.path.join(experiment_dir, 'outputs', run_folder_name)
 
     print(f"Script location: {script_dir}")
@@ -510,5 +657,5 @@ if __name__ == "__main__":
         batch_size=1024,
         learning_rate=1e-3,
         early_stopping_patience=8000,
-        adaptive_lambda='sobol'
+        adaptive_lambda='False'
     )

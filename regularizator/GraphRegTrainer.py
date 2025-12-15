@@ -34,10 +34,15 @@ def _get_adaptive_lambda_sobol(combines_loss, nn_loss, graph_loss):
     """
     Sobol Sensitivity Analysis for adaptive lambda computation.
 
-    :param combines_loss:  matrix m x n where m - epochs number, n - batch size with sum of nn and graph losses
-    :param nn_loss: matrix m x n where m - epochs number, n - batch size with graph losses
-    :param graph_loss: matrix m x n where m - epochs number, n - batch size with nn losses
-    :return: list [float, float] - list with coefficients to multiply with nn loss and graph loss
+    Args:
+        combines_loss: list of combined losses per epoch [loss_epoch0, loss_epoch1, ...]
+        nn_loss: list of model losses per epoch
+        graph_loss: list of graph losses per epoch
+
+    Returns:
+        list [float, float]: normalized lambda coefficients [lam_nn, lam_graph]
+
+    Note: Requires at least 60 epochs for reliable Sobol analysis (10 samples * 6 params).
     """
     sampling_D = 2  # as combine 2 features
 
@@ -203,6 +208,7 @@ class GraphRegTrainer:
         self._init_target_metric(target_metric)
         self._init_task_type(criterion, task_type)
         self.sigma_sq_global = compute_global_sigma(self.Y_all)
+        self.Y_all_tensor = torch.tensor(self.Y_all, dtype=torch.float64).to(self.device)
 
     def init_device(self, device: str = None):
         """
@@ -402,7 +408,7 @@ class GraphRegTrainer:
         Returns:
             loss: graph loss value
         """
-        Y_batch = torch.tensor(self.Y_all[batch_indices], dtype=torch.float64).to(self.device)
+        Y_batch = self.Y_all_tensor[batch_indices]
         distances_sq = torch.cdist(Y_batch, Y_batch, p=2) ** 2
         nonzero_dists = distances_sq[distances_sq > 0]
         sigma_sq = self.sigma_sq_global
@@ -419,6 +425,107 @@ class GraphRegTrainer:
 
         return loss
 
+    def _compute_graph_loss_batch_averaged(self,
+                                            all_predictions: torch.Tensor,
+                                            all_indices: np.ndarray,
+                                            num_batches: int) -> torch.Tensor:
+        """
+        Compute graph loss as average over batch-wise losses.
+
+        Processes predictions in batches, computes graph loss for each batch
+        (B×B matrix), then averages the results.
+
+
+        Args:
+            all_predictions: all predictions from forward pass [N, output_dim]
+            all_indices: original dataset indices [N]
+            num_batches: number of batches
+
+        Returns:
+            averaged graph loss (scalar tensor)
+        """
+        batch_losses = []
+
+        for batch_idx in range(num_batches):
+            start_idx = batch_idx * self.batch_size
+            end_idx = min(start_idx + self.batch_size, len(all_predictions))
+
+            batch_predictions = all_predictions[start_idx:end_idx]
+            batch_dataset_indices = all_indices[start_idx:end_idx]
+
+            batch_graph_loss = self._compute_graph_loss(
+                batch_predictions,
+                batch_dataset_indices
+            )
+
+            batch_losses.append(batch_graph_loss)
+
+        avg_loss = torch.stack(batch_losses).mean()
+
+        return avg_loss
+
+    def _train_one_epoch(self, epoch: int, lam_nn: float, lam_graph: float) -> tuple:
+        """
+        Execute one full-batch training step.
+
+        Process:
+        1. Forward pass through all data (in batches for memory efficiency)
+        2. Accumulate all predictions and targets
+        3. Compute losses on full dataset
+        4. Single backward + optimizer step
+
+        Args:
+            epoch: current epoch number
+            lam_nn: model loss weight
+            lam_graph: graph loss weight
+
+        Returns:
+            (model_loss, graph_loss, combined_loss): scalar loss values
+        """
+        self.model.train()
+
+        indices = randperm(len(self.features)).numpy()
+
+        all_predictions = []
+        all_targets = []
+        all_batch_indices_list = []
+
+        num_batches = (len(indices) + self.batch_size - 1) // self.batch_size
+
+        for batch_idx in range(num_batches):
+            start_idx = batch_idx * self.batch_size
+            end_idx = min(start_idx + self.batch_size, len(indices))
+            batch_indices = indices[start_idx:end_idx]
+
+            batch_x = torch.tensor(self.features[batch_indices], dtype=fl64).to(self.device)
+
+            target_dtype = self._get_target_dtype()
+            batch_y = torch.tensor(self.target[batch_indices], dtype=target_dtype).to(self.device)
+
+            output = self.model(batch_x)
+
+            all_predictions.append(output)
+            all_targets.append(batch_y)
+            all_batch_indices_list.append(batch_indices)
+
+        all_predictions = torch.cat(all_predictions, dim=0)
+        all_targets = torch.cat(all_targets, dim=0)
+        all_indices = np.concatenate(all_batch_indices_list)
+
+        prepared_target = self._prepare_target(all_predictions, all_targets)
+        model_loss = self.criterion(all_predictions, prepared_target)
+
+        graph_loss = self._compute_graph_loss_batch_averaged(
+            all_predictions, all_indices, num_batches
+        )
+
+        combined_loss = lam_nn * model_loss + lam_graph * graph_loss
+
+        self.optimizer.zero_grad()
+        combined_loss.backward()
+        self.optimizer.step()
+
+        return model_loss.item(), graph_loss.item(), combined_loss.item()
 
     def train(self, plot_convergence: bool = False, adaptive_lambda = False,
               early_stopping_patience: int = None, val_features: np.ndarray = None,
@@ -448,7 +555,7 @@ class GraphRegTrainer:
         # Early stopping setup
         best_val_loss = float('inf')
         prev_val_loss = float('inf')
-        increasing_counter = 0  # Count consecutive epochs with increasing val loss
+        increasing_counter = 0
         self.best_model_state = None
         self.best_epoch = 0
 
@@ -479,48 +586,20 @@ class GraphRegTrainer:
 
         for epoch in range(self.num_epochs):
             if self.verbose:
+                if epoch == 0:
+                    print(f"Training configuration:")
+                    print(f"  Batch size: {self.batch_size} (for forward pass only)")
+                    print(f"  Full-batch gradient descent: 1 step per epoch")
                 print(f'Epoch {epoch + 1}/{self.num_epochs}')
 
-            indices = randperm(len(self.features)).numpy()
+            model_loss, graph_loss, combined_loss = self._train_one_epoch(
+                epoch, lam_nn, lam_graph
+            )
 
-            epoch_model_losses = []
-            epoch_graph_losses = []
-            epoch_combined_losses = []
-
-            # Training phase
-            self.model.train()
-            for i in range(0, len(indices), self.batch_size):
-                batch_indices = indices[i:i + self.batch_size]
-
-                batch_x = torch.tensor(self.features[batch_indices], dtype=fl64).to(self.device)
-
-                # Get appropriate dtype for target based on criterion
-                target_dtype = self._get_target_dtype()
-                batch_y = torch.tensor(self.target[batch_indices], dtype=target_dtype).to(self.device)
-
-                self.optimizer.zero_grad()
-
-                output = self.model(batch_x)
-
-                # Prepare target for loss computation
-                prepared_target = self._prepare_target(output, batch_y)
-                model_loss = self.criterion(output, prepared_target)
-
-                graph_loss = self._compute_graph_loss(output, batch_indices)
-
-                # Compute combined loss and backprop
-                self.optimizer.zero_grad()
-                combined_loss = lam_nn * model_loss + lam_graph * graph_loss
-                combined_loss.backward()
-                self.optimizer.step()
-
-                epoch_model_losses.append(model_loss.item())
-                epoch_graph_losses.append(graph_loss.item())
-                epoch_combined_losses.append(combined_loss.item())
-
-            model_losses.append(np.mean(epoch_model_losses))
-            graph_losses.append(np.mean(epoch_graph_losses))
-            combined_losses.append(np.mean(epoch_combined_losses))
+            # Store losses
+            model_losses.append(model_loss)
+            graph_losses.append(graph_loss)
+            combined_losses.append(combined_loss)
 
             if epoch % accuracy_check_interval == 0 or epoch == self.num_epochs - 1:
                 if self.task_type == 'classification':
