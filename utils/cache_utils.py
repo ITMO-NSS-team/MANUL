@@ -241,9 +241,14 @@ def load_data_from_folder(folder_path: str) -> dict:
     # Load manifold learning artifacts
     best_distances_matrix = np.load(os.path.join(folder_path, 'best_distance_matrix.npy'))
     fps_indices = np.load(os.path.join(folder_path, 'fps_indices.npy'))
-    latent_dim = int(np.load(os.path.join(folder_path, 'latent_dim.npy')))
     base_projections = np.load(os.path.join(folder_path, 'base_projections.npy'))
     train_projections = np.load(os.path.join(folder_path, 'train_projections.npy'))
+
+    # Load latent_dim from metadata
+    metadata_path = os.path.join(folder_path, 'experiment_metadata.json')
+    with open(metadata_path, 'r') as f:
+        metadata = json.load(f)
+    latent_dim = int(metadata['latent_dim'])
 
     print(f"  X_train: {X_train.shape}, y_train: {y_train.shape}")
     print(f"  X_val: {X_val.shape}, y_val: {y_val.shape}")

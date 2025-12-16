@@ -135,8 +135,7 @@ def process_geometry(geometry_name, n_samples=1000, n_basis_points=200,
     np.save(os.path.join(working_folder, 'base_projections.npy'), base_projections)
     np.save(os.path.join(working_folder, 'best_distance_matrix.npy'), best_distances_matrix)
     print(f"Saved distance matrix and base projections")
-    np.save(f'{working_folder}/latent_dim.npy', latent_dim)
-    print(f"Saved latent_dim: {latent_dim}")
+    print(f"Latent_dim: {latent_dim} (saved in metadata)")
     print("\n=== COMPUTING PROJECTIONS ===")
     train_proj_path = os.path.join(working_folder, 'train_projections.npy')
 

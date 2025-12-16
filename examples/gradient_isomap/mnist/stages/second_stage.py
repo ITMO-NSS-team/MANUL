@@ -456,7 +456,6 @@ def mnist_graph_regularization(folder_path: Optional[str] = None,
         'best_distance_matrix.npy',
         'train_projections.npy',
         'base_projections.npy',
-        'latent_dim.npy',
         'experiment_metadata.json'
     ]
 
@@ -583,7 +582,6 @@ def mnist_graph_regularization(folder_path: Optional[str] = None,
         'regularized_test_accuracy': float(reg_test_acc),
         'regularized_val_accuracy': float(reg_val_acc),
         'accuracy_improvement_percent': float((reg_test_acc - baseline_test_acc) * 100),
-        'latent_dim': int(latent_dim),
         'n_basis_points': int(n_basis),
         'n_train_samples': len(X_train),
         'n_val_samples': len(X_val),

@@ -492,7 +492,6 @@ def synthetic_graph_regularization(folder_path: Optional[str] = None,
         'best_distance_matrix.npy',
         'train_projections.npy',
         'base_projections.npy',
-        'latent_dim.npy',
         'experiment_metadata.json'
     ]
 

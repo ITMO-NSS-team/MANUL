@@ -109,9 +109,7 @@ def mnist_manifold_learning_example(save_checkpoint_history=False):
 
     np.save(f'{working_folder}/best_distance_matrix.npy', best_distances_matrix)
     print(f"Saved distance matrix and base projections")
-
-    np.save(f'{working_folder}/latent_dim.npy', latent_len)
-    print(f"Saved latent_dim: {latent_len}")
+    print(f"Latent_dim: {latent_len}")
 
     print("\n=== COMPUTING PROJECTIONS ===")
     train_proj_path = os.path.join(working_folder, 'train_projections.npy')
