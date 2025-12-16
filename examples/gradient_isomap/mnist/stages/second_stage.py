@@ -604,10 +604,8 @@ if __name__ == "__main__":
     experiment_dir = os.path.abspath(os.path.join(script_dir, '..'))  # mnist/
 
     # Set your run folder name
-    run_folder_name = 'run_20251210_150023_n2000'
+    run_folder_name = 'run_20251210_150023_n2000' #todo get rid of hardcode by making this input from user or somehow else
     folder_path = os.path.join(experiment_dir, 'outputs', run_folder_name)
-    #Переменная нигде не используется, кроме создания пути. outputs где-то еще захардкожено?
-    # Можно просто прокидывать название папки заданной пользователем - я не понимаю комментраий ревьюера этот
 
     print(f"Experiment dir: {experiment_dir}")
     print(f"Looking for data in: {folder_path}")

@@ -29,7 +29,7 @@ def compute_global_sigma(Y_all, k=10, device="cpu"):
 
     return torch.tensor(sigma_sq, dtype=torch.float64, device=device)
 
-
+#todo implement vanilla std based ad lambda
 def _get_adaptive_lambda_sobol(combines_loss, nn_loss, graph_loss):
     """
     Sobol Sensitivity Analysis for adaptive lambda computation.
@@ -50,7 +50,7 @@ def _get_adaptive_lambda_sobol(combines_loss, nn_loss, graph_loss):
     max_n_samples = available_epochs // (sampling_D * 2 + 2)
 
     # Use at least 5 samples if possible, otherwise use maximum available
-    desired_n_samples = 32
+    desired_n_samples = 20
     n_samples = min(desired_n_samples, max_n_samples)
 
     min_required_samples = 10
