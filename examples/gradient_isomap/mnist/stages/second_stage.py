@@ -75,6 +75,7 @@ def train_baseline_model(X_train, y_train, X_val, y_val, X_test, y_test,
     best_model_state = None
     best_epoch = 0
     patience_counter = 0
+    val_loss_window = []
 
     for epoch in range(num_epochs):
         model.train()
@@ -141,14 +142,25 @@ def train_baseline_model(X_train, y_train, X_val, y_val, X_test, y_test,
             best_val_loss = val_loss
             best_model_state = model.state_dict().copy()
             best_epoch = epoch + 1
-            patience_counter = 0
-        else:
-            patience_counter += 1
 
-        if patience_counter >= early_stopping_patience:
-            print(f'\nEarly stopping at epoch {epoch + 1}')
-            print(f'Best model was at epoch {best_epoch} with val loss {best_val_loss:.6f}')
-            break
+        val_loss_window.append(val_loss)
+
+        if len(val_loss_window) > 1000:
+            val_loss_window.pop(0)
+
+        if len(val_loss_window) >= min(1000, epoch + 1):
+            median_val_loss = np.median(val_loss_window)
+
+            if val_loss < median_val_loss:
+                patience_counter = 0
+            else:
+                patience_counter += 1
+
+                if patience_counter >= early_stopping_patience:
+                    print(f'\nEarly stopping at epoch {epoch + 1}')
+                    print(f'Val loss above median for {early_stopping_patience} epochs')
+                    print(f'Best model was at epoch {best_epoch} with val loss {best_val_loss:.6f}')
+                    break
 
     # Load best weights
     if best_model_state is not None:

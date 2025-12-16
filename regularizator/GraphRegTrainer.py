@@ -558,6 +558,7 @@ class GraphRegTrainer:
         increasing_counter = 0
         self.best_model_state = None
         self.best_epoch = 0
+        val_loss_window = []
 
         lam_nn = 1
         lam_graph = self.lambda_graph
@@ -644,21 +645,29 @@ class GraphRegTrainer:
                         if self.verbose:
                             print(f'  New best model saved (val loss: {best_val_loss:.6f})')
 
-                    # Check if val loss is increasing compared to best epoch
-                    if val_model_loss >= best_val_loss:
-                        increasing_counter += 1
-                        if self.verbose:
-                            print(f'  Val loss increasing: {increasing_counter}/{early_stopping_patience}')
+                    val_loss_window.append(val_model_loss)
 
-                        if increasing_counter >= early_stopping_patience:
+                    if len(val_loss_window) > 1000:
+                        val_loss_window.pop(0)
+
+                    if len(val_loss_window) >= min(1000, epoch + 1):
+                        median_val_loss = np.median(val_loss_window)
+
+                        if val_model_loss < median_val_loss:
+                            increasing_counter = 0
                             if self.verbose:
-                                print(f'\nEarly stopping triggered at epoch {epoch + 1}')
-                                print(f'Val loss increased for {early_stopping_patience} epochs')
-                                print(f'Best model was at epoch {self.best_epoch} with val loss {best_val_loss:.6f}')
-                            break
-                    else:
-                        increasing_counter = 0
-                    prev_val_loss = val_model_loss
+                                print(f'  Val loss below median: patience reset (val: {val_model_loss:.6f}, median: {median_val_loss:.6f})')
+                        else:
+                            increasing_counter += 1
+                            if self.verbose:
+                                print(f'  Val loss above median: {increasing_counter}/{early_stopping_patience} (val: {val_model_loss:.6f}, median: {median_val_loss:.6f})')
+
+                            if increasing_counter >= early_stopping_patience:
+                                if self.verbose:
+                                    print(f'\nEarly stopping triggered at epoch {epoch + 1}')
+                                    print(f'Val loss above median for {early_stopping_patience} epochs')
+                                    print(f'Best model was at epoch {self.best_epoch} with val loss {best_val_loss:.6f}')
+                                break
             else:
                 if self.verbose:
                     print(f'  Model loss: {model_losses[-1]:.6f}, Graph loss: {graph_losses[-1]:.6f}, Combined: {combined_losses[-1]:.6f}')
