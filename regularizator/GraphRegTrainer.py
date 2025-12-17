@@ -95,7 +95,8 @@ def _get_adaptive_lambda_sobol(combines_loss, nn_loss, graph_loss):
     lam_graph = total_disp / graph_disp
 
     if np.isnan(lam_nn) or np.isnan(lam_graph):
-        print(f'  [Sobol] Lambda search failed: nn_disp={lam_nn}, graph_disp={lam_graph}')
+        print(f'  [Sobol] Lambda search failed: nn_disp={nn_disp}, graph_disp={graph_disp}')
+
         return [1, 1e-6]
 
     return [lam_nn / (np.nanmax([lam_nn, lam_graph])), lam_graph / (np.nanmax([lam_nn, lam_graph]))]
@@ -121,8 +122,8 @@ class GraphRegTrainer:
                  num_epochs: int = 100,
                  batch_size: int = 64,
                  lambda_graph: float = 1.0,
-                 n_neighbors: int = 5,
-                 method: str = 'ensemble_knn',
+                 n_neighbors: int = 25,
+                 method: str = 'random_forest',
                  device: str = None,
                  cache_folder: str = None,
                  verbose: bool = True,
@@ -250,7 +251,7 @@ class GraphRegTrainer:
         return projections.detach().cpu().numpy()
 
 
-    def compute_all_projections(self, method='ensemble_knn'):
+    def compute_all_projections(self, method='random_forest'):
         """
         Projects ALL points from Euclidean space to hidden geometry.
 
@@ -410,7 +411,6 @@ class GraphRegTrainer:
         """
         Y_batch = self.Y_all_tensor[batch_indices]
         distances_sq = torch.cdist(Y_batch, Y_batch, p=2) ** 2
-        nonzero_dists = distances_sq[distances_sq > 0]
         sigma_sq = self.sigma_sq_global
 
         W_batch = torch.exp(-distances_sq / (2 * sigma_sq))
@@ -464,7 +464,7 @@ class GraphRegTrainer:
 
         return avg_loss
 
-    def _train_one_epoch(self, epoch: int, lam_nn: float, lam_graph: float) -> tuple:
+    def _train_one_epoch(self, lam_nn: float, lam_graph: float) -> tuple:
         """
         Execute one full-batch training step.
 
@@ -594,7 +594,7 @@ class GraphRegTrainer:
                 print(f'Epoch {epoch + 1}/{self.num_epochs}')
 
             model_loss, graph_loss, combined_loss = self._train_one_epoch(
-                epoch, lam_nn, lam_graph
+                lam_nn, lam_graph
             )
 
             # Store losses

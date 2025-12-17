@@ -26,7 +26,6 @@ from utils.fps_implementation import memory_efficient_fps
 from utils.Projector import Projector
 from utils.cache_utils import load_or_compute_fps, set_global_seed
 from data.synthetic_geometries import geometries, noisy_manifold
-from regularizator.GraphRegTrainer import project_ensemble_knn
 
 RANDOM_SEED = 42
 
@@ -150,7 +149,7 @@ def process_geometry(geometry_name, n_samples=1000, n_basis_points=200,
         basis_indices=fps_indices,
         upper_triangular_distances=best_distances_matrix,
         n_neighbors=25,
-        method='ensemble_knn',
+        method='random_forest',
         batch_size=1024,
         precomputed_base_projections=base_projections,
         verbose=True
@@ -188,7 +187,22 @@ def synthetic_manifold_learning_pipeline():
     """
     Main pipeline function for use by run_pipeline.py
     """
-    geometries_to_process = ['torus']
+    geometries_to_process = [
+        'torus',
+        'sphere',
+        'swiss_roll',
+        'swiss_hole',
+        's_curve',
+        'pseudosphere',
+        'hyperboloid',
+        'helicoid',
+        'multi_scale_torus',
+        'nonuniform_sphere',
+        'cone_surface',
+        'genus_2_surface',
+        'connected_multiscale_manifold',
+    ]
+
     n_samples = 10000
     n_basis_points = 2000
     noise_percent = 0.05

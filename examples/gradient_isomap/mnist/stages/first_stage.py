@@ -12,7 +12,6 @@ from utils.DimensionalityAnalyser import DimensionalityAnalyser
 from utils.fps_implementation import memory_efficient_fps
 from utils.Projector import Projector
 from utils.cache_utils import load_or_compute_fps, set_global_seed
-from regularizator.GraphRegTrainer import project_ensemble_knn
 
 RANDOM_SEED = 42
 def mnist_manifold_learning_example(save_checkpoint_history=False):
@@ -21,7 +20,6 @@ def mnist_manifold_learning_example(save_checkpoint_history=False):
     """
 
     set_global_seed(RANDOM_SEED)
-
     n_samples = 2000
 
     script_dir = os.path.dirname(os.path.abspath(__file__))

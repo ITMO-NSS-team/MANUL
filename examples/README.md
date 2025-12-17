@@ -9,29 +9,54 @@ The pipeline consists of **two stages** that work together:
 1. **Stage 1: Manifold Learning** - Learns the intrinsic geometry of data using GradientIsomap
 2. **Stage 2: Graph Regularization** - Trains neural networks with graph-based regularization using the learned manifold
 
-Data flows between stages through the **`outputs/`** directory at the project root.
+Data flows between stages through the **`outputs/`** directory within each experiment folder.
 
 ---
 
 ## Directory Structure
 
 ```
-MANUL-main/
+MANUL/
 ├── examples/
 │   └── gradient_isomap/
 │       ├── mnist/                     # MNIST classification example
 │       │   ├── outputs/               # Experiment outputs (timestamped runs)
-│       │   │   └── run_20251106_143022_n2000/
-│       │   │       ├── *.npy (Stage 1 outputs)
-│       │   │       └── experiment_20251106_145530/  # Stage 2 results
-│       │   ├── run_pipeline.py        # Full pipeline runner
+│       │   │   └── run_20251210_150023_n2000/
+│       │   │       ├── fps_indices.npy
+│       │   │       ├── best_distance_matrix.npy
+│       │   │       ├── base_projections.npy
+│       │   │       ├── train_projections.npy
+│       │   │       ├── experiment_metadata.json
+│       │   │       ├── hist_plot.png              # Dimension histogram
+│       │   │       ├── variance_plot.png          # Variance analysis
+│       │   │       └── experiment_20251210_145530/  # Stage 2 results
+│       │   │           ├── baseline/
+│       │   │           │   └── best_model.pth
+│       │   │           ├── regularized/
+│       │   │           │   ├── best_model.pth
+│       │   │           │   └── *_convergence.png
+│       │   │           ├── mnist_comparison.png
+│       │   │           ├── experiment_config.json
+│       │   │           └── comparison_results.csv
 │       │   └── stages/
 │       │       ├── first_stage.py     # Stage 1: Manifold Learning
 │       │       └── second_stage.py    # Stage 2: Graph Regularization
 │       └── synthetic/                 # Synthetic geometry regression example
 │           ├── outputs/               # Experiment outputs
-│           │   └── run_20251106_182030_torus/
-│           ├── run_pipeline.py
+│           │   └── torus_run_20251211_192332_n10000/
+│           │       ├── fps_indices.npy
+│           │       ├── best_distance_matrix.npy
+│           │       ├── base_projections.npy
+│           │       ├── train_projections.npy
+│           │       ├── experiment_metadata.json
+│           │       └── experiment_20251211_193045/
+│           │           ├── baseline/best_model.pth
+│           │           ├── regularized/
+│           │           │   ├── best_model.pth
+│           │           │   └── *_convergence.png
+│           │           ├── torus_comparison.png
+│           │           ├── experiment_config.json
+│           │           └── comparison_results.csv
 │           └── stages/
 │               ├── first_stage.py
 │               └── second_stage.py
@@ -49,125 +74,105 @@ MANUL-main/
 
 **Process:**
 1. Load or generate dataset
-2. Apply Farthest Point Sampling (FPS) to select representative basis points
-3. Train GradientIsomap to learn geodesic distances on the manifold
-4. Compute low-dimensional projections for all data points
-5. Save results to `outputs/{dataset_name}/`
+2. Split into train/val/test (70%/15%/15% for synthetic, stratified 64%/16%/20% for MNIST)
+3. Apply Farthest Point Sampling (FPS) to select representative basis points from training set
+4. Train GradientIsomap on basis points to learn geodesic distances
+5. Compute low-dimensional projections for all training data points
+6. Save results to `outputs/{run_folder_name}/`
 
-**Outputs saved to `outputs/{dataset_name}/`:**
+**Key Parameters (editable in `first_stage.py`):**
+- **MNIST:** `n_samples=2000` (FPS basis points), `latent_dim` (auto-detected), `epochs=15000`
+- **Synthetic:** `n_samples=10000` (total points), `n_basis_points=2000`, `noise_percent=0.05`, `latent_dim=2`, `epochs=500`
+
+**Outputs saved to `outputs/{run_folder_name}/`:**
 - `fps_indices.npy` - Selected basis point indices
-- `best_distance_matrix.npy` - Learned geodesic distance matrix
+- `best_distance_matrix.npy` - Learned geodesic distance matrix (upper triangular)
 - `base_projections.npy` - Low-dimensional projections of basis points
-- `train_projections.npy` - Projections for training data
-- `val_projections.npy` - Projections for validation data
-- `X_train.npy, X_val.npy, X_test.npy` - Dataset splits (features)
-- `y_train.npy, y_val.npy, y_test.npy` - Dataset splits (targets)
-- `latent_dim.npy` - Estimated intrinsic dimensionality
+- `train_projections.npy` - Projections for training data (computed via ensemble KNN/random forest)
+- `experiment_metadata.json` - Configuration (includes `latent_dim`, `random_seed`, split params)
+- Visualization plots (Isomap convergence, dimension analysis for MNIST)
+
+**Note:** Data splits (X_train, y_train, etc.) are regenerated in Stage 2 from `experiment_metadata.json` using the same random seed, ensuring reproducibility.
 
 ### Stage 2: Graph Regularization Training
 
 **Purpose:** Train neural networks with manifold-aware regularization
 
 **Process:**
-1. Load preprocessed data from `outputs/{dataset_name}/`
-2. Train baseline model (no regularization, λ=0)
-3. Train regularized model (with graph regularization, λ>0)
-4. Compare performance and visualize results
-5. Save experiments to `outputs/{dataset_name}/experiment_{timestamp}/`
+1. Load preprocessed data from `outputs/{run_folder_name}/`
+2. Reconstruct full distance matrix from upper triangular matrix
+3. Train **baseline model** (no graph regularization, λ_graph=0)
+4. Train **regularized model** (with graph regularization, λ_graph>0)
+5. Compare performance and generate visualizations
+6. Save experiments to `outputs/{run_folder_name}/experiment_{timestamp}/`
 
-**Outputs saved to `outputs/{dataset_name}/experiment_{timestamp}/`:**
-- `baseline/` - Baseline model checkpoints and metrics
-- `regularized/` - Regularized model checkpoints and metrics
-- `mnist_comparison.png` or `{geometry}_comparison.png` - Visualization
-- `experiment_config.json` - Full experiment configuration
-- `comparison_results.npy` - Performance metrics
+**Key Training Features:**
+- **Full-batch gradient descent** 
+- **Early stopping** based on validation loss median
+- **Adaptive lambda**: Sobol sensitivity analysis at 10% of training
+- **Graph regularization loss:** Symmetric normalized Laplacian with RBF kernel
+
+**Key Parameters (editable at bottom of `second_stage.py`):**
+- **MNIST:** `reg_lambda=1`, `num_epochs=200`, `batch_size=128`, `learning_rate=1e-4`, `early_stopping_patience=150`
+- **Synthetic:** `reg_lambda=1`, `num_epochs=20000`, `batch_size=1024`, `learning_rate=1e-2`, `early_stopping_patience=5000`
+- **Adaptive lambda:** `adaptive_lambda='sobol'` or `False`
+
+**Outputs saved to `outputs/{run_folder_name}/experiment_{timestamp}/`:**
+- `baseline/best_model.pth` - Best baseline model weights
+- `regularized/best_model.pth` - Best regularized model weights
+- `{dataset}_comparison.png` - Training/validation loss curves, accuracy plots (MNIST)
+- `experiment_config.json` - Full experiment configuration with lambda history
+- `comparison_results.csv` - Performance metrics (accuracy/MSE, R², improvement %)
 
 ---
 
 ## Usage
 
-### Option 1: Run Full Pipeline 
+### Option 1: Run Stages Manually 
 
-
-Automatically runs both stages sequentially:
+**Step 1: Run Stage 1 (Manifold Learning)**
 
 ```bash
-# For MNIST classification
-python examples/gradient_isomap/mnist/run_pipeline.py
-
-# For synthetic geometries (torus, sphere, etc.)
-python examples/gradient_isomap/synthetic/run_pipeline.py
+cd examples/gradient_isomap/mnist/stages  # or synthetic/stages
+python first_stage.py
 ```
 
+This will create a timestamped folder like `outputs/run_20251210_150023_n2000/` (MNIST) or `outputs/torus_run_20251211_192332_n10000/` (synthetic).
 
-### Option 2: Run Stages Manually
+**Step 2: Configure Stage 2**
+
+Open `second_stage.py` and set the run folder name at the top:
+
+```python
+# Set the name of your run folder from Stage 1
+RUN_FOLDER_NAME = 'run_20251210_150023_n2000'  # MNIST example
+# or
+RUN_FOLDER_NAME = 'torus_run_20251211_192332_n10000'  # Synthetic example
+```
+
+**Step 3: Run Stage 2 (Graph Regularization)**
 
 ```bash
-# Stage 1: Manifold Learning
-cd examples/gradient_isomap/mnist/stages
-python first_stage.py
-
-# Stage 2: Graph Regularization (after Stage 1 completes)
 python second_stage.py
 ```
 
-You can run stages independently
-**Important for Stage 2:**
-- When running `run_pipeline.py`: Stage 2 automatically uses the output from Stage 1
-- When running `second_stage.py` directly: You must specify the run folder name in the script:
-  ```python
-  run_folder_name = 'mnist_2000'  # Change to your specific run folder
-  ```
+This will automatically:
+- Load data from the specified run folder
+- Train baseline and regularized models
+- Save results to `outputs/{run_folder}/experiment_{timestamp}/`
 
+### Option 2: Run Full Pipeline (Automated)
 
+```bash
+# For MNIST classification
+cd examples/gradient_isomap/mnist
+python run_pipeline.py  
 
+# For synthetic geometries
+cd examples/gradient_isomap/synthetic
+python run_pipeline.py 
+```
+
+**Note:** Pipeline scripts automatically pass folder names between stages.
 
 ---
-
-## Examples
-
-### 1. MNIST Classification
-
-**Dataset:** MNIST handwritten digits (28×28 grayscale images)
-
-**Task:** Multi-class classification (10 classes)
-
-**Configuration:**
-- **Stage 1:** 2000 FPS basis points, ~15,000 GradientIsomap epochs
-- **Stage 2:**  MLP, λ=0 (baseline) vs λ=0.000001 (regularized)
-
-**Run:**
-```bash
-python examples/gradient_isomap/mnist/run_pipeline.py
-```
-
-
-### 2. Synthetic Geometries (Torus, Sphere, etc.)
-
-**Dataset:** Synthetically generated manifolds with noise
-
-**Task:** Regression (predict color/coordinate values)
-
-**Supported Geometries:**
-- `torus` - 2D torus embedded in 3D
-- `sphere` - 2D sphere surface
-- `swiss_roll` - Classic manifold learning benchmark
-- `s_curve` - S-shaped 2D manifold
-
-**Configuration:**
-- **Stage 1:** 5000 points with 5% noise, 1000 FPS basis points, 10,000 epochs
-- **Stage 2:**  MLP, λ=0 vs λ=0.00001
-
-**Run:**
-```bash
-python examples/gradient_isomap/synthetic/run_pipeline.py
-```
-
-**Customize geometry** (edit `first_stage.py`):
-```python
-geometries_to_process = ['torus']  # Change to 'sphere', 'swiss_roll', etc.
-```
-
----
-
-

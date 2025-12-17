@@ -17,6 +17,9 @@ from utils.cache_utils import check_required_files, restore_data_from_metadata, 
                                load_data_from_folder
 from utils.Projector import Projector
 
+#Set the name of your run folder from Stage 1
+RUN_FOLDER_NAME = 'run_20251210_150023_n2000'
+
 class MNISTClassifier(nn.Module):
 
     def __init__(self, input_dim=784, num_classes=10):
@@ -233,8 +236,6 @@ def train_and_evaluate_model(X_train, y_train, X_val, y_val, X_test, y_test,
         num_epochs=num_epochs,
         batch_size=batch_size,
         lambda_graph=lambda_graph,
-        n_neighbors=10,
-        method='ensemble_knn',
         cache_folder=cache_folder,
         verbose=True,
         precomputed_base_projections=base_projections,
@@ -597,20 +598,16 @@ def mnist_graph_regularization(folder_path: Optional[str] = None,
 
 
 if __name__ == "__main__":
-
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    experiment_dir = os.path.abspath(os.path.join(script_dir, '..'))  # mnist/
-
-    # Set your run folder name
-    run_folder_name = 'run_20251210_150023_n2000' #todo get rid of hardcode by making this input from user or somehow else
-    folder_path = os.path.join(experiment_dir, 'outputs', run_folder_name)
+    experiment_dir = os.path.abspath(os.path.join(script_dir, '..'))
+    folder_path = os.path.join(experiment_dir, 'outputs', RUN_FOLDER_NAME)
 
     print(f"Experiment dir: {experiment_dir}")
     print(f"Looking for data in: {folder_path}")
 
     if not os.path.exists(folder_path):
         print(f"\nError: Folder not found: {folder_path}")
-        print("\nPlease update 'run_folder_name' in this script or run first_stage.py")
+        print("\nPlease update 'RUN_FOLDER_NAME' in this script or run first_stage.py")
         sys.exit(1)
 
     results = mnist_graph_regularization(
