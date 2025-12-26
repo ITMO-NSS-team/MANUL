@@ -1,3 +1,5 @@
+import matplotlib
+matplotlib.use('Agg')
 import os
 import sys
 import json
@@ -6,6 +8,7 @@ import numpy as np
 import torch
 from torchvision import datasets
 from sklearn.model_selection import train_test_split
+
 
 from Adam.GradientIsomap import GradientIsomap
 from utils.DimensionalityAnalyser import DimensionalityAnalyser

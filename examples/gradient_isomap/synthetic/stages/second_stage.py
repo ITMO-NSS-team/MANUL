@@ -31,7 +31,7 @@ from utils.cache_utils import check_required_files, restore_data_from_metadata, 
 from utils.Projector import Projector
 
 #  Set the name of your run folder from Stage 1
-RUN_FOLDER_NAME = 'torus_run_20251211_192332_n10000'
+RUN_FOLDER_NAME = 'torus_run_20251217_175931_n10000'
 
 class RegressionModel(nn.Module):
     """
@@ -655,8 +655,8 @@ if __name__ == "__main__":
         folder_path=folder_path,
         reg_lambda=1,
         num_epochs=20000,
-        batch_size=1024,
-        learning_rate=1e-2,
-        early_stopping_patience=5000,
-        adaptive_lambda=False
+        batch_size=2048,
+        learning_rate=1e-3,
+        early_stopping_patience=500,
+        adaptive_lambda='sobol'
     )

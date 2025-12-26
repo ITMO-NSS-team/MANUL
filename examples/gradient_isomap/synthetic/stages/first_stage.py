@@ -202,7 +202,6 @@ def synthetic_manifold_learning_pipeline():
         'genus_2_surface',
         'connected_multiscale_manifold',
     ]
-
     n_samples = 10000
     n_basis_points = 2000
     noise_percent = 0.05

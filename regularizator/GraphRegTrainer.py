@@ -20,16 +20,6 @@ from Adam.Isomap import IsomapNN
 from utils.Projector import project_krr_optimized, project_ensemble_knn, project_random_forest
 
 
-def compute_global_sigma(Y_all, k=10, device="cpu"):
-    nbrs = NearestNeighbors(n_neighbors=k + 1, algorithm='auto').fit(Y_all)
-    distances, _ = nbrs.kneighbors(Y_all)
-
-    nonzero = distances[:, 1:].reshape(-1)
-    sigma_sq = np.median(nonzero) ** 2
-
-    return torch.tensor(sigma_sq, dtype=torch.float64, device=device)
-
-#todo implement vanilla std based ad lambda
 def _get_adaptive_lambda_sobol(combines_loss, nn_loss, graph_loss):
     """
     Sobol Sensitivity Analysis for adaptive lambda computation.
@@ -44,12 +34,11 @@ def _get_adaptive_lambda_sobol(combines_loss, nn_loss, graph_loss):
 
     Note: Requires at least 60 epochs for reliable Sobol analysis (10 samples * 6 params).
     """
-    sampling_D = 2  # as combine 2 features
+    sampling_D = 2
 
     available_epochs = len(combines_loss)
     max_n_samples = available_epochs // (sampling_D * 2 + 2)
 
-    # Use at least 5 samples if possible, otherwise use maximum available
     desired_n_samples = 20
     n_samples = min(desired_n_samples, max_n_samples)
 
@@ -57,12 +46,14 @@ def _get_adaptive_lambda_sobol(combines_loss, nn_loss, graph_loss):
     if n_samples < min_required_samples:
         required_epochs = min_required_samples * (sampling_D * 2 + 2)
         print(f'  [Sobol] Not enough epochs for adaptive lambda computation')
-        print(f'  [Sobol] Available: {available_epochs} epochs, Required: {required_epochs} epochs (for {min_required_samples} samples)')
+        print(
+            f'  [Sobol] Available: {available_epochs} epochs, Required: {required_epochs} epochs (for {min_required_samples} samples)')
         print(f'  [Sobol] Skipping adaptation, using default lambdas [1.0, 1.0]')
         return [1, 1]
 
     if n_samples < desired_n_samples:
-        print(f'  [Sobol] Using {n_samples} samples (reduced from {desired_n_samples} due to limited epochs: {available_epochs})')
+        print(
+            f'  [Sobol] Using {n_samples} samples (reduced from {desired_n_samples} due to limited epochs: {available_epochs})')
 
     combines_loss = np.array(combines_loss)
     nn_loss = np.expand_dims(np.array(nn_loss), axis=1)
@@ -96,7 +87,6 @@ def _get_adaptive_lambda_sobol(combines_loss, nn_loss, graph_loss):
 
     if np.isnan(lam_nn) or np.isnan(lam_graph):
         print(f'  [Sobol] Lambda search failed: nn_disp={nn_disp}, graph_disp={graph_disp}')
-
         return [1, 1e-6]
 
     return [lam_nn / (np.nanmax([lam_nn, lam_graph])), lam_graph / (np.nanmax([lam_nn, lam_graph]))]
@@ -184,7 +174,6 @@ class GraphRegTrainer:
 
         self.device = self.init_device(device)
 
-        # Use precomputed base projections if provided, otherwise compute them
         if precomputed_base_projections is not None:
             if self.verbose:
                 print(f"Using precomputed base projections: {precomputed_base_projections.shape}")
@@ -194,7 +183,6 @@ class GraphRegTrainer:
                 print("Computing base projections with Isomap...")
             self.proj_base_features = self._compute_base_projections()
 
-        # Use precomputed all projections if provided, otherwise compute them
         if precomputed_all_projections is not None:
             if self.verbose:
                 print(f"Using precomputed all projections: {precomputed_all_projections.shape}")
@@ -205,11 +193,18 @@ class GraphRegTrainer:
             self.Y_all = self.compute_all_projections(method=self.method)
 
         self.model = model.to(self.device)
-        self._init_training_settings(criterion, optimizer)
-        self._init_target_metric(target_metric)
+        self.criterion = criterion
+        self.optimizer = optimizer
+        self.target_metric = target_metric
+
         self._init_task_type(criterion, task_type)
-        self.sigma_sq_global = compute_global_sigma(self.Y_all)
+        self._init_criterion_info()
+
         self.Y_all_tensor = torch.tensor(self.Y_all, dtype=torch.float64).to(self.device)
+
+        if self.verbose:
+            print(f"Computing k-NN graph (k={self.n_neighbors}) for regularization...")
+        self.W_global = self._compute_full_rbf_affinity(self.Y_all, device=self.device)
 
     def init_device(self, device: str = None):
         """
@@ -249,7 +244,6 @@ class GraphRegTrainer:
         projections = isomap.fit_transform(weights_tensor)
 
         return projections.detach().cpu().numpy()
-
 
     def compute_all_projections(self, method='random_forest'):
         """
@@ -335,7 +329,6 @@ class GraphRegTrainer:
                 )
             self.task_type = task_type
 
-            # Warn if explicit task_type contradicts inferred type
             if inferred_type != 'custom' and inferred_type != task_type:
                 import warnings
                 warnings.warn(
@@ -343,26 +336,14 @@ class GraphRegTrainer:
                     f"'{inferred_type}' from criterion. Using explicit task_type."
                 )
 
-    def _init_training_settings(self, criterion, optimizer):
+    def _init_criterion_info(self):
         """
-        Initialize loss criterion and optimizer.
-
-        Args:
-            criterion: loss function
-            optimizer: optimizer
+        Initialize criterion-specific information to avoid repeated isinstance checks.
         """
-        self.criterion = criterion
-        self.optimizer = optimizer
-
-
-    def _init_target_metric(self, target_metric):
-        """
-        Initialize evaluation metric.
-
-        Args:
-            target_metric: metric function or None
-        """
-        self.target_metric = target_metric
+        self.is_classification_loss = isinstance(
+            self.criterion,
+            (nn.CrossEntropyLoss, nn.NLLLoss)
+        )
 
     def _get_target_dtype(self):
         """
@@ -371,8 +352,7 @@ class GraphRegTrainer:
         Returns:
             torch dtype for target tensor
         """
-        # CrossEntropyLoss and NLLLoss need long dtype (class indices)
-        if isinstance(self.criterion, (nn.CrossEntropyLoss, nn.NLLLoss)):
+        if self.is_classification_loss:
             return torch.long
         else:
             return torch.float64
@@ -388,81 +368,67 @@ class GraphRegTrainer:
         Returns:
             prepared target tensor
         """
-        # CrossEntropyLoss and NLLLoss expect [batch_size] shape
-        if isinstance(self.criterion, (nn.CrossEntropyLoss, nn.NLLLoss)):
+        if self.is_classification_loss:
             return batch_y
-        # Other losses may need reshaping
         else:
             return batch_y.reshape_as(output)
 
-    def _compute_graph_loss(self, predictions: torch.Tensor,
-                            batch_indices: np.ndarray) -> torch.Tensor:
+    def _compute_full_rbf_affinity(self, Y, device='cpu'):
         """
-        Compute graph regularization loss with symmetric normalized Laplacian.
+        Compute fully connected RBF (Radial Basis Function) affinity matrix.
 
-        L_sym = D^(-1/2) (D - W) D^(-1/2) = I - D^(-1/2) W D^(-1/2)
+        Creates dense affinity matrix where weights are computed using RBF kernel:
+        W_ij = exp(-dist(i,j)^2 / sigma^2)
+
+        Sigma is automatically estimated from median pairwise distance.
 
         Args:
-            predictions: model predictions for batch [batch_size, output_dim]
-            batch_indices: indices of batch elements in dataset
+            Y: point coordinates [N, proj_dim]
+            device: computing device ('cpu' or 'cuda')
 
         Returns:
-            loss: graph loss value
+            W: RBF affinity matrix [N, N] with zeros on diagonal
         """
-        Y_batch = self.Y_all_tensor[batch_indices]
-        distances_sq = torch.cdist(Y_batch, Y_batch, p=2) ** 2
-        sigma_sq = self.sigma_sq_global
+        Y_tensor = torch.tensor(Y, dtype=torch.float64, device=device)
+        dist_matrix_all = torch.cdist(Y_tensor, Y_tensor, p=2)
+        n = dist_matrix_all.shape[0]
+        triu_indices = torch.triu_indices(n, n, offset=1, device=device)
+        all_distances = dist_matrix_all[triu_indices[0], triu_indices[1]]
 
-        W_batch = torch.exp(-distances_sq / (2 * sigma_sq))
-        W_batch = W_batch - torch.diag(torch.diag(W_batch))
-        D_diag = torch.sum(W_batch, dim=1)
-        D_inv_sqrt = torch.diag(torch.pow(D_diag + 1e-10, -0.5))
-        I = torch.eye(W_batch.shape[0], device=self.device, dtype=torch.float64)
-        L_sym = I - D_inv_sqrt @ W_batch @ D_inv_sqrt
-        loss = torch.trace(predictions.T @ L_sym @ predictions)
-        n = predictions.shape[0]
-        loss = loss / (n * (n-1))
+        sigma_sq = torch.median(all_distances) ** 2
+        W = torch.exp(- (dist_matrix_all ** 2) / sigma_sq)
 
-        return loss
+        W.fill_diagonal_(0)
 
-    def _compute_graph_loss_batch_averaged(self,
-                                            all_predictions: torch.Tensor,
-                                            all_indices: np.ndarray,
-                                            num_batches: int) -> torch.Tensor:
+        if self.verbose:
+            print(f"  [Graph] Fully Connected RBF initialized.")
+            print(f"  [Graph] Global sigma^2: {sigma_sq.item():.6f}")
+            print(f"  [Graph] Matrix W size: {W.shape}")
+
+        return W
+
+    def _compute_graph_loss_global_optimized(self, all_predictions: torch.Tensor) -> torch.Tensor:
         """
-        Compute graph loss as average over batch-wise losses.
+        Compute global graph regularization loss using pairwise distances.
 
-        Processes predictions in batches, computes graph loss for each batch
-        (B×B matrix), then averages the results.
+        Computes weighted sum of prediction differences across all point pairs:
+        Loss = (1/2N^2) * sum_ij W_ij * ||f(i) - f(j)||^2
 
+        where W is the precomputed affinity matrix and f(i) are model predictions.
 
         Args:
-            all_predictions: all predictions from forward pass [N, output_dim]
-            all_indices: original dataset indices [N]
-            num_batches: number of batches
+            all_predictions: model predictions for all points [N, output_dim]
 
         Returns:
-            averaged graph loss (scalar tensor)
+            graph_loss: scalar regularization loss value
         """
-        batch_losses = []
+        F = all_predictions.to(dtype=torch.float64)
+        n_samples = F.shape[0]
+        prediction_dists = torch.cdist(F, F, p=2) ** 2
+        weighted_diff = self.W_global * prediction_dists
+        graph_loss = torch.sum(weighted_diff) / (2 * n_samples ** 2)
 
-        for batch_idx in range(num_batches):
-            start_idx = batch_idx * self.batch_size
-            end_idx = min(start_idx + self.batch_size, len(all_predictions))
-
-            batch_predictions = all_predictions[start_idx:end_idx]
-            batch_dataset_indices = all_indices[start_idx:end_idx]
-
-            batch_graph_loss = self._compute_graph_loss(
-                batch_predictions,
-                batch_dataset_indices
-            )
-
-            batch_losses.append(batch_graph_loss)
-
-        avg_loss = torch.stack(batch_losses).mean()
-
-        return avg_loss
+        return graph_loss
 
     def _train_one_epoch(self, lam_nn: float, lam_graph: float) -> tuple:
         """
@@ -475,7 +441,6 @@ class GraphRegTrainer:
         4. Single backward + optimizer step
 
         Args:
-            epoch: current epoch number
             lam_nn: model loss weight
             lam_graph: graph loss weight
 
@@ -484,7 +449,7 @@ class GraphRegTrainer:
         """
         self.model.train()
 
-        indices = randperm(len(self.features)).numpy()
+        indices = np.arange(len(self.features))
 
         all_predictions = []
         all_targets = []
@@ -515,9 +480,7 @@ class GraphRegTrainer:
         prepared_target = self._prepare_target(all_predictions, all_targets)
         model_loss = self.criterion(all_predictions, prepared_target)
 
-        graph_loss = self._compute_graph_loss_batch_averaged(
-            all_predictions, all_indices, num_batches
-        )
+        graph_loss = self._compute_graph_loss_global_optimized(all_predictions)
 
         combined_loss = lam_nn * model_loss + lam_graph * graph_loss
 
@@ -527,7 +490,7 @@ class GraphRegTrainer:
 
         return model_loss.item(), graph_loss.item(), combined_loss.item()
 
-    def train(self, plot_convergence: bool = False, adaptive_lambda = False,
+    def train(self, plot_convergence: bool = False, adaptive_lambda=False,
               early_stopping_patience: int = None, val_features: np.ndarray = None,
               val_target: np.ndarray = None, accuracy_check_interval: int = 10):
         """
@@ -552,7 +515,6 @@ class GraphRegTrainer:
         train_accuracies = []
         val_accuracies = []
 
-        # Early stopping setup
         best_val_loss = float('inf')
         prev_val_loss = float('inf')
         increasing_counter = 0
@@ -563,7 +525,6 @@ class GraphRegTrainer:
         lam_nn = 1
         lam_graph = self.lambda_graph
 
-
         min_epochs_for_sobol = 30
         desired_sobol_epoch = int(self.num_epochs * 0.1)
         lmds_epochs = max(min_epochs_for_sobol, desired_sobol_epoch)
@@ -571,18 +532,21 @@ class GraphRegTrainer:
         if adaptive_lambda == 'sobol':
             if lmds_epochs >= self.num_epochs:
                 if self.verbose:
-                    print(f"  WARNING: Not enough epochs ({self.num_epochs}) for Sobol adaptation (requires {min_epochs_for_sobol})")
-                    print(f"  Sobol will be skipped. Consider increasing num_epochs to at least {min_epochs_for_sobol * 2}")
+                    print(
+                        f"  WARNING: Not enough epochs ({self.num_epochs}) for Sobol adaptation (requires {min_epochs_for_sobol})")
+                    print(
+                        f"  Sobol will be skipped. Consider increasing num_epochs to at least {min_epochs_for_sobol * 2}")
             elif lmds_epochs > desired_sobol_epoch:
                 if self.verbose:
-                    print(f"  INFO: Sobol will be applied at epoch {lmds_epochs} (delayed from {desired_sobol_epoch} to ensure sufficient data)")
+                    print(
+                        f"  INFO: Sobol will be applied at epoch {lmds_epochs} (delayed from {desired_sobol_epoch} to ensure sufficient data)")
 
         lambdas_adapted = False
 
         lambda_history = {
             'initial_lambda_nn': lam_nn,
             'initial_lambda_graph': lam_graph,
-            'changes': []  # List of {epoch, lambda_nn, lambda_graph, method}
+            'changes': []
         }
 
         for epoch in range(self.num_epochs):
@@ -597,7 +561,6 @@ class GraphRegTrainer:
                 lam_nn, lam_graph
             )
 
-            # Store losses
             model_losses.append(model_loss)
             graph_losses.append(graph_loss)
             combined_losses.append(combined_loss)
@@ -606,7 +569,6 @@ class GraphRegTrainer:
                 if self.task_type == 'classification':
                     self.model.eval()
                     with torch.no_grad():
-                        # Train accuracy
                         train_pred = self.predict(self.features)
                         train_pred_classes = np.argmax(train_pred, axis=1)
                         train_acc = np.mean(train_pred_classes == self.target)
@@ -618,14 +580,14 @@ class GraphRegTrainer:
                             val_acc = np.mean(val_pred_classes == val_target)
                             val_accuracies.append(val_acc)
 
-            # Validation phase
             if val_features is not None and val_target is not None:
                 self.model.eval()
                 val_model_loss = self._compute_validation_loss(val_features, val_target)
                 val_losses.append(val_model_loss)
 
                 if self.verbose:
-                    print(f'  Train - Model loss: {model_losses[-1]:.6f}, Graph loss: {graph_losses[-1]:.6f}, Combined: {combined_losses[-1]:.6f}')
+                    print(
+                        f'  Train - Model loss: {model_losses[-1]:.6f}, Graph loss: {graph_losses[-1]:.6f}, Combined: {combined_losses[-1]:.6f}')
                     print(f'  Val   - Model loss: {val_model_loss:.6f}')
                     if lambdas_adapted:
                         print(f'  Adaptive lambdas: lam_nn={lam_nn:.6f}, lam_graph={lam_graph:.6f}')
@@ -634,9 +596,9 @@ class GraphRegTrainer:
 
                     if self.task_type == 'classification' and len(train_accuracies) > 0:
                         if epoch % accuracy_check_interval == 0 or epoch == self.num_epochs - 1:
-                            print(f'  Train Accuracy: {train_accuracies[-1]:.4f}, Val Accuracy: {val_accuracies[-1]:.4f}')
+                            print(
+                                f'  Train Accuracy: {train_accuracies[-1]:.4f}, Val Accuracy: {val_accuracies[-1]:.4f}')
 
-                # Early stopping check
                 if early_stopping_patience is not None:
                     if val_model_loss < best_val_loss:
                         best_val_loss = val_model_loss
@@ -656,34 +618,35 @@ class GraphRegTrainer:
                         if val_model_loss < median_val_loss:
                             increasing_counter = 0
                             if self.verbose:
-                                print(f'  Val loss below median: patience reset (val: {val_model_loss:.6f}, median: {median_val_loss:.6f})')
+                                print(
+                                    f'  Val loss below median: patience reset (val: {val_model_loss:.6f}, median: {median_val_loss:.6f})')
                         else:
                             increasing_counter += 1
                             if self.verbose:
-                                print(f'  Val loss above median: {increasing_counter}/{early_stopping_patience} (val: {val_model_loss:.6f}, median: {median_val_loss:.6f})')
+                                print(
+                                    f'  Val loss above median: {increasing_counter}/{early_stopping_patience} (val: {val_model_loss:.6f}, median: {median_val_loss:.6f})')
 
                             if increasing_counter >= early_stopping_patience:
                                 if self.verbose:
                                     print(f'\nEarly stopping triggered at epoch {epoch + 1}')
                                     print(f'Val loss above median for {early_stopping_patience} epochs')
-                                    print(f'Best model was at epoch {self.best_epoch} with val loss {best_val_loss:.6f}')
+                                    print(
+                                        f'Best model was at epoch {self.best_epoch} with val loss {best_val_loss:.6f}')
                                 break
             else:
                 if self.verbose:
-                    print(f'  Model loss: {model_losses[-1]:.6f}, Graph loss: {graph_losses[-1]:.6f}, Combined: {combined_losses[-1]:.6f}')
+                    print(
+                        f'  Model loss: {model_losses[-1]:.6f}, Graph loss: {graph_losses[-1]:.6f}, Combined: {combined_losses[-1]:.6f}')
                     if lambdas_adapted:
                         print(f'  Adaptive lambdas: lam_nn={lam_nn:.6f}, lam_graph={lam_graph:.6f}')
                     else:
                         print(f'  Lambdas: lam_nn={lam_nn:.6f}, lam_graph={lam_graph:.6f}')
 
-            # Adaptive lambda update
             if adaptive_lambda == 'sobol' and epoch == lmds_epochs:
-                # Sobol: compute once after 10% of epochs
                 prev_lam_nn, prev_lam_graph = lam_nn, lam_graph
                 lam_nn, lam_graph = _get_adaptive_lambda_sobol(combined_losses, model_losses, graph_losses)
                 lambdas_adapted = True
 
-                # Log lambda change
                 lambda_history['changes'].append({
                     'epoch': epoch + 1,
                     'lambda_nn': float(lam_nn),
@@ -694,7 +657,7 @@ class GraphRegTrainer:
                 })
 
                 if self.verbose:
-                    print(f'  [Sobol] Lambda adapted at epoch {epoch + 1}')  
+                    print(f'  [Sobol] Lambda adapted at epoch {epoch + 1}')
 
         self.trained_loss_values['model_loss'] = model_losses
         self.trained_loss_values['graph_loss'] = graph_losses
@@ -710,9 +673,10 @@ class GraphRegTrainer:
             self.trained_loss_values['val_accuracy'] = val_accuracies
 
         if plot_convergence:
-            self._plot_convergence(combined_losses, None, model_losses, graph_losses,
-                                  val_losses=val_losses if val_features is not None else None,
-                                  best_epoch=self.best_epoch if hasattr(self, 'best_epoch') and self.best_epoch > 0 else None)
+            self._plot_convergence(combined_losses, model_losses, graph_losses,
+                                   val_losses=val_losses if val_features is not None else None,
+                                   best_epoch=self.best_epoch if hasattr(self,
+                                                                         'best_epoch') and self.best_epoch > 0 else None)
 
         return self
 
@@ -815,14 +779,13 @@ class GraphRegTrainer:
 
         return val_loss.item()
 
-    def _plot_convergence(self, losses, lmds_epoch, nn_losses=None, graph_losses=None,
+    def _plot_convergence(self, losses, nn_losses=None, graph_losses=None,
                           val_losses=None, best_epoch=None):
         """
         Plot training convergence graphs.
 
         Args:
             losses: combined loss values per epoch
-            lmds_epoch: lambda values per epoch (not used in current implementation)
             nn_losses: model loss values per epoch
             graph_losses: graph loss values per epoch
             val_losses: validation loss values per epoch (optional)
@@ -847,9 +810,9 @@ class GraphRegTrainer:
 
             if val_losses is not None and best_epoch is not None and best_epoch <= len(losses):
                 axes[0].axvline(x=best_epoch, color='gray', linestyle='--',
-                               linewidth=1, alpha=0.7, label=f'Best Val Epoch ({best_epoch})')
-                axes[0].axhline(y=losses[best_epoch-1], color='gray', linestyle='--',
-                               linewidth=1, alpha=0.7)
+                                linewidth=1, alpha=0.7, label=f'Best Val Epoch ({best_epoch})')
+                axes[0].axhline(y=losses[best_epoch - 1], color='gray', linestyle='--',
+                                linewidth=1, alpha=0.7)
 
             axes[0].set_xlabel('Epoch')
             axes[0].set_ylabel('Loss')
@@ -864,9 +827,9 @@ class GraphRegTrainer:
 
                 if val_losses is not None and best_epoch is not None and best_epoch <= len(nn_losses):
                     axes[1].axvline(x=best_epoch, color='gray', linestyle='--',
-                                   linewidth=1, alpha=0.7, label=f'Best Val Epoch ({best_epoch})')
-                    axes[1].axhline(y=nn_losses[best_epoch-1], color='green', linestyle='--',
-                                   linewidth=1, alpha=0.5)
+                                    linewidth=1, alpha=0.7, label=f'Best Val Epoch ({best_epoch})')
+                    axes[1].axhline(y=nn_losses[best_epoch - 1], color='green', linestyle='--',
+                                    linewidth=1, alpha=0.5)
 
                 axes[1].set_xlabel('Epoch')
                 axes[1].set_ylabel('Loss')
