@@ -14,7 +14,7 @@ from Adam.GradientIsomap import GradientIsomap
 from utils.DimensionalityAnalyser import DimensionalityAnalyser
 from utils.fps_implementation import memory_efficient_fps
 from utils.Projector import Projector
-from utils.cache_utils import load_or_compute_fps, set_global_seed
+from utils.utils import set_global_seed
 
 RANDOM_SEED = 42
 def mnist_manifold_learning_example(save_checkpoint_history=False):
@@ -72,12 +72,13 @@ def mnist_manifold_learning_example(save_checkpoint_history=False):
     latent_len = analyser.get_latent_dim(method='eigenvalue')
 
     print("\n=== FPS SAMPLING ===")
-    fps_indices = load_or_compute_fps(
-        output_dir=working_folder,
-        train_features=X_train,
-        num_basis=n_samples,
-        fps_function=memory_efficient_fps
-    )
+    if os.path.exists(f'{working_folder}/fps_indices.npy'):
+        fps_indices = np.load(f'{working_folder}/fps_indices.npy')
+        print(f'FPS indices loaded from {working_folder}/fps_indices.npy')
+    else:
+        fps_indices = memory_efficient_fps(features=X_train, n_samples=n_samples, batch_size=500)
+        np.save(f'{working_folder}/fps_indices.npy', fps_indices)
+        print(f'FPS indices saved to {working_folder}/fps_indices.npy')
 
     X_train_sparse = X_train[fps_indices]
     y_train_sparse = y_train[fps_indices]
@@ -115,13 +116,13 @@ def mnist_manifold_learning_example(save_checkpoint_history=False):
     print("\n=== COMPUTING PROJECTIONS ===")
     train_proj_path = os.path.join(working_folder, 'train_projections.npy')
 
-    X_basis = X_train[fps_indices]
-    Y_basis = base_projections
+    X_base = X_train[fps_indices]
+    Y_base = base_projections
 
     print("Computing projections for training data...")
     projector = Projector(
         source_data=X_train,
-        basis_indices=fps_indices,
+        base_indices=fps_indices,
         upper_triangular_distances=best_distances_matrix,
         n_neighbors=25,
         method='random_forest',

@@ -86,30 +86,9 @@ class Projector:
     3. Saving/loading projections to/from disk
     """
 
-    @staticmethod
-    def reconstruct_distance_matrix(upper_triangular_distances: np.ndarray, n_basis: int) -> np.ndarray:
-        """
-        Reconstruct symmetric distance matrix from upper-triangular format.
-
-        Args:
-            upper_triangular_distances: 1D array of shape [n_basis*(n_basis-1)/2]
-            n_basis: Number of basis points
-
-        Returns:
-            Symmetric distance matrix of shape [n_basis, n_basis]
-        """
-        weights_matrix = np.zeros((n_basis, n_basis))
-        idx = 0
-        for i in range(n_basis):
-            for j in range(i + 1, n_basis):
-                weights_matrix[i, j] = upper_triangular_distances[idx]
-                weights_matrix[j, i] = upper_triangular_distances[idx]
-                idx += 1
-        return weights_matrix
-
     def __init__(self,
                  source_data: np.ndarray,
-                 basis_indices: np.ndarray,
+                 base_indices: np.ndarray,
                  upper_triangular_distances: np.ndarray,
                  n_neighbors: int = 25,
                  method: str = 'ensemble_knn',
@@ -122,25 +101,27 @@ class Projector:
 
         Args:
             source_data: all data points [N, features]
-            basis_indices: indices of basis points in source_data
-            upper_triangular_distances: Upper-triangular distances [n_basis*(n_basis-1)/2] (optional)
+            base_indices: indices of base points in source_data
+            upper_triangular_distances: Upper-triangular distances [n_base*(n_base-1)/2] (optional)
             n_neighbors: number of neighbors for Isomap and interpolation (default: 25)
             method: projection method ('krr', 'ensemble_knn', 'random_forest')
             batch_size: batch size for projection methods
             device: 'cuda', 'cpu', or None (auto)
-            precomputed_base_projections: precomputed base projections [base_dim, proj_dim]
+            precomputed_base_projections: precomputed base projections [base_dim, proj_dim], reduce projection time if exists
             verbose: print progress messages
         """
 
-        n_basis = len(basis_indices)
-        weights_matrix = self.reconstruct_distance_matrix(upper_triangular_distances, n_basis)
         self.source_data = source_data.astype(float)
-        self.weights_matrix = weights_matrix
-        self.basis_indices = basis_indices
+        self.weights_matrix = self.reconstruct_distance_matrix(upper_triangular_distances, len(base_indices))
+        self.base_indices = base_indices
         self.n_neighbors = n_neighbors
-        self.method = method
         self.batch_size = batch_size
         self.verbose = verbose
+
+        if method not in self.available_methods:
+            raise Exception(f'Method "{method}" is not correct. Supported methods: {self.available_methods}')
+        else:
+            self.method = method
 
         if device is None:
             self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -153,69 +134,84 @@ class Projector:
             self.base_projections = precomputed_base_projections
         else:
             if self.verbose:
-                print("Projector: Base projections not provided - will compute when needed")
+                print("Projector: Base projections not provided")
             self.base_projections = None
 
         self.projection = None
 
-    def compute_base_projections(self):
+    @property
+    def available_methods(self):
+        return ['krr', 'ensemble_knn', 'random_forest']
+
+    @staticmethod
+    def reconstruct_distance_matrix(upper_triangular_distances: np.ndarray, n_base: int) -> np.ndarray:
         """
-        Compute base projections using Isomap on basis points.
+        Reconstruct symmetric distance matrix from upper-triangular format.
+
+        Args:
+            upper_triangular_distances: 1D array of shape [n_base*(n_base-1)/2]
+            n_base: Number of base points
 
         Returns:
-            base_projections: coordinates of basis points in hidden space [base_dim, proj_dim]
+            Symmetric distance matrix of shape [n_base, n_base]
+        """
+        weights_matrix = np.zeros((n_base, n_base))
+        idx = 0
+        for i in range(n_base):
+            for j in range(i + 1, n_base):
+                weights_matrix[i, j] = upper_triangular_distances[idx]
+                weights_matrix[j, i] = upper_triangular_distances[idx]
+                idx += 1
+        return weights_matrix
+
+    def compute_base_projections(self):
+        """
+        Compute base projections using Isomap on base points.
+        Returns:
+            base_projections: coordinates of base points in hidden space [base_dim, proj_dim]
         """
         if self.verbose:
             print("Projector: Computing base projections with Isomap...")
-
-        proj_dim = len(self.basis_indices)
-
+        proj_dim = len(self.base_indices)
         weights_tensor = torch.tensor(self.weights_matrix, dtype=torch.float64).to(self.device)
-
         isomap = IsomapNN(
             weights_initial_assumption=weights_tensor,
             n_components=proj_dim,
             n_neighbors=self.n_neighbors
         )
-
         projections = isomap.fit_transform(weights_tensor)
         self.base_projections = projections.detach().cpu().numpy()
-
         if self.verbose:
-            print(f"Projector: Base projections computed: {self.base_projections.shape}")
-
+            print(f"Projector: Base projections computed. Shape - {self.base_projections.shape}")
         return self.base_projections
 
     def compute_projection(self):
         """
-        Compute projections for ALL points using KNN interpolation from basis points.
-
+        Compute projections for ALL points using KNN interpolation from base points.
         Returns:
             projection: coordinates of all points in hidden space [N, proj_dim]
         """
-        # Ensure base projections exist
         if self.base_projections is None:
             self.compute_base_projections()
 
         if self.verbose:
             print(f"Projector: Computing projections for all {len(self.source_data)} points using {self.method}...")
 
-        X_basis = self.source_data[self.basis_indices]
-        Y_basis = self.base_projections
+        X_base = self.source_data[self.base_indices]
+        Y_base = self.base_projections
         X_all = self.source_data
 
-        # Choose projection method
         if self.method == 'krr':
-            Y_all = project_krr_optimized(X_basis, Y_basis, X_all, batch_size=self.batch_size)
+            Y_all = project_krr_optimized(X_base, Y_base, X_all, batch_size=self.batch_size)
         elif self.method == 'ensemble_knn':
-            Y_all = project_ensemble_knn(X_basis, Y_basis, X_all)
+            Y_all = project_ensemble_knn(X_base, Y_base, X_all)
         elif self.method == 'random_forest':
-            Y_all = project_random_forest(X_basis, Y_basis, X_all, batch_size=self.batch_size)
+            Y_all = project_random_forest(X_base, Y_base, X_all, batch_size=self.batch_size)
         else:
-            raise ValueError(f"Unknown projection method: {self.method}")
+            raise ValueError(f"Unknown projection method: {self.method}, supported methods: {self.available_methods}")
 
-        # Ensure basis points have exact projections (not interpolated)
-        Y_all[self.basis_indices] = Y_basis
+        # Ensure base points have exact projections (not interpolated)
+        Y_all[self.base_indices] = Y_base
 
         self.projection = Y_all
 
@@ -250,7 +246,7 @@ class Projector:
             'n_neighbors': self.n_neighbors,
             'method': self.method,
             'latent_dim': self.base_projections.shape[1] if self.base_projections is not None else None,
-            'n_basis_points': len(self.basis_indices),
+            'n_base_points': len(self.base_indices),
             'batch_size': self.batch_size,
             'device': self.device
         }

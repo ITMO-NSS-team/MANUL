@@ -6,8 +6,8 @@ Runs both stages sequentially:
   Stage 1: Manifold Learning with GradientIsomap
   Stage 2: Regression with Graph Regularization
 """
-import sys
 import os
+from datetime import datetime
 
 from stages.first_stage import synthetic_manifold_learning_pipeline
 from stages.second_stage import synthetic_graph_regularization
@@ -25,21 +25,41 @@ if __name__ == "__main__":
     print("Running Stage 1: Manifold Learning")
     print(f"{'='*60}\n")
 
-    stage1_results = synthetic_manifold_learning_pipeline()
-    print(f"\nStage 1 completed successfully")
+    # Here output directory for all runs can be specified
+    outputs_dir = 'outputs'
 
-    print(f"\n{'='*60}")
-    print("Running Stage 2: Graph Regularization")
-    print(f"{'='*60}\n")
+    geometries_to_process = [
+        'torus',
+        #'sphere',
+        #'swiss_roll',
+        #'swiss_hole',
+        #'s_curve',
+        #'pseudosphere',
+        #'hyperboloid',
+        #'helicoid',
+        #'multi_scale_torus',
+        #'nonuniform_sphere',
+        #'cone_surface',
+        #'genus_2_surface',
+        #'connected_multiscale_manifold',
+    ]
 
-    if stage1_results and 'geometry_folders' in stage1_results:
-        for geometry_name, folder_path in stage1_results['geometry_folders'].items():
-            print(f"\n{'='*40}")
-            print(f"Processing geometry: {geometry_name}")
-            print(f"{'='*40}\n")
+    for geom in geometries_to_process:
 
-            stage2_results = synthetic_graph_regularization(folder_path=folder_path)
-            print(f"\nStage 2 for {geometry_name} completed successfully")
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        working_folder = os.path.join(outputs_dir, f'{geom}_run_{timestamp}')
+        os.makedirs(working_folder, exist_ok=True)
+
+        stage1_results_folder = synthetic_manifold_learning_pipeline(geom, working_folder)
+
+        print(f"\nStage 1 completed successfully")
+
+        print(f"\n{'='*60}")
+        print("Running Stage 2: Graph Regularization")
+        print(f"{'='*60}\n")
+
+        stage2_results = synthetic_graph_regularization(folder_path=stage1_results_folder)
+        print(f"\nStage 2 for {geom} completed successfully")
 
     print("\n" + "="*60)
     print("Full pipeline completed successfully!")

@@ -1,38 +1,41 @@
 import os
 import numpy as np
 import torch
-from typing import Optional, Tuple, Callable, Dict
 import random
 import json
 from sklearn.model_selection import train_test_split
 from torchvision import datasets
 
 
-def load_or_compute_fps(output_dir: str, train_features: np.ndarray, num_basis: int,
-                        fps_function: Callable) -> np.ndarray:
-    """Loads FPS indices from cache or computes them.
+def split_data(X, y, proportions=(0.7, 0.15, 0.15), random_state=42):
+    """
+    Split data into train, validation, and test sets.
 
-    Args:
-        output_dir: Directory where FPS indices are/will be saved
-        train_features: Training features for FPS sampling
-        num_basis: Number of basis points to select
-        fps_function: Function to compute FPS (e.g., fps_torch)
+    Parameters:
+    X, y: Features and labels
+    proportions: tuple of (train_ratio, val_ratio, test_ratio)
+    random_state: Random seed for reproducibility
 
     Returns:
-        FPS indices array
+    (X_train, X_val, X_test, y_train, y_val, y_test)
     """
-    fps_path = os.path.join(output_dir, 'fps_indices.npy')
+    train_ratio, val_ratio, test_ratio = proportions
 
-    if os.path.exists(fps_path):
-        print(f"Found cached FPS indices at {fps_path}")
-        print(f"Loading {num_basis} basis points")
-        return np.load(fps_path)
-    else:
-        print(f"Computing FPS sampling for {num_basis} basis points...")
-        fps_indices = fps_function(torch.tensor(train_features), num_basis)
-        np.save(fps_path, fps_indices)
-        print(f"Saved FPS indices to {fps_path}")
-        return fps_indices
+    # First split: separate test set
+    test_size = test_ratio
+    X_trainval, X_test, y_trainval, y_test = train_test_split(
+        X, y, test_size=test_size, random_state=random_state
+    )
+
+    # Second split: separate validation from train
+    val_relative_ratio = val_ratio / (train_ratio + val_ratio)
+    X_train, X_val, y_train, y_val = train_test_split(
+        X_trainval, y_trainval,
+        test_size=val_relative_ratio,
+        random_state=random_state
+    )
+
+    return X_train, X_val, X_test, y_train, y_val, y_test
 
 
 def check_required_files(input_dir: str, required_files: list) -> bool:
@@ -55,6 +58,7 @@ def check_required_files(input_dir: str, required_files: list) -> bool:
     else:
         print(f"All required files found in {input_dir}")
         return True
+
 
 def set_global_seed(seed=42):
     """
@@ -89,7 +93,6 @@ def restore_mnist_splits(data_dir, test_size_outer=0.2, test_size_inner=0.2, ran
         Tuple of X_train, X_val, X_test, y_train, y_val, y_test
     """
     set_global_seed(random_state)
-
 
     mnist_dataset = datasets.MNIST(root=data_dir, train=True, download=True)
     X = mnist_dataset.data.numpy().reshape(len(mnist_dataset), -1).astype(np.float32) / 255.0
@@ -144,6 +147,7 @@ def restore_synthetic_splits(geometry_name, n_samples, noise_percent,
     print(f"Restored {geometry_name} splits: train={len(X_train)}, val={len(X_val)}, test={len(X_test)}")
 
     return X_train, X_val, X_test, y_train, y_val, y_test
+
 
 def restore_data_from_metadata(experiment_folder, project_root=None):
     """
@@ -204,6 +208,7 @@ def restore_data_from_metadata(experiment_folder, project_root=None):
         'y_val': y_val,
         'y_test': y_test
     }
+
 
 def load_data_from_folder(folder_path: str) -> dict:
     """

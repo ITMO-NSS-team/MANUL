@@ -13,7 +13,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 from regularizator.GraphRegTrainer import GraphRegTrainer
-from utils.cache_utils import check_required_files, restore_data_from_metadata, set_global_seed, \
+from utils.utils import check_required_files, restore_data_from_metadata, set_global_seed, \
                                load_data_from_folder
 from utils.Projector import Projector
 
@@ -229,7 +229,7 @@ def train_and_evaluate_model(X_train, y_train, X_val, y_val, X_test, y_test,
         train_features=X_train,
         train_target=y_train,
         weights_matrix=weights_matrix,
-        basis_indices=fps_indices,
+        base_indices=fps_indices,
         model=model,
         criterion=criterion,
         optimizer=optimizer,
@@ -496,8 +496,8 @@ def mnist_graph_regularization(folder_path: Optional[str] = None,
     train_projections = data['train_projections']
 
 
-    n_basis = len(fps_indices)
-    weights_matrix = Projector.reconstruct_distance_matrix(best_distances_matrix, n_basis)
+    n_base = len(fps_indices)
+    weights_matrix = Projector.reconstruct_distance_matrix(best_distances_matrix, n_base)
 
     print("\n" + "="*60)
     print("TRAINING CLASSIFIER WITH GRAPH REGULARIZATION")
@@ -583,7 +583,7 @@ def mnist_graph_regularization(folder_path: Optional[str] = None,
         'regularized_test_accuracy': float(reg_test_acc),
         'regularized_val_accuracy': float(reg_val_acc),
         'accuracy_improvement_percent': float((reg_test_acc - baseline_test_acc) * 100),
-        'n_basis_points': int(n_basis),
+        'n_base_points': int(n_base),
         'n_train_samples': len(X_train),
         'n_val_samples': len(X_val),
         'n_test_samples': len(X_test)

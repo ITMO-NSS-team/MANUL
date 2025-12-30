@@ -26,7 +26,7 @@ from matplotlib.gridspec import GridSpec
 
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from regularizator.GraphRegTrainer import GraphRegTrainer
-from utils.cache_utils import check_required_files, restore_data_from_metadata, set_global_seed, \
+from utils.utils import check_required_files, restore_data_from_metadata, set_global_seed, \
                                load_data_from_folder
 from utils.Projector import Projector
 
@@ -231,7 +231,7 @@ def train_and_evaluate_model(X_train, y_train, X_val, y_val, X_test, y_test,
         X_val, y_val: validation data
         X_test, y_test: test data
         weights_matrix: distance matrix
-        fps_indices: basis point indices
+        fps_indices: base point indices
         base_projections: precomputed projections from GradientIsomap
         train_projections: precomputed projections for training data
         lambda_graph: graph regularization coefficient (0 = no regularization)
@@ -262,7 +262,7 @@ def train_and_evaluate_model(X_train, y_train, X_val, y_val, X_test, y_test,
         train_features=X_train,
         train_target=y_train,
         weights_matrix=weights_matrix,
-        basis_indices=fps_indices,
+        base_indices=fps_indices,
         model=model,
         criterion=criterion,
         optimizer=optimizer,
@@ -501,7 +501,7 @@ def synthetic_graph_regularization(folder_path: Optional[str] = None,
     geometry_name = os.path.basename(folder_path).split('_')[-1]
 
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    experiment_folder = os.path.join(folder_path, f'experiment_{timestamp}')
+    experiment_folder = os.path.join(folder_path, f'regularization_{timestamp}')
     os.makedirs(experiment_folder, exist_ok=True)
 
     print(f"\n{'='*60}")
@@ -534,8 +534,8 @@ def synthetic_graph_regularization(folder_path: Optional[str] = None,
     base_projections = data['base_projections']
     train_projections = data['train_projections']
 
-    n_basis = len(fps_indices)
-    weights_matrix = Projector.reconstruct_distance_matrix(best_distances_matrix, n_basis)
+    n_base = len(fps_indices)
+    weights_matrix = Projector.reconstruct_distance_matrix(best_distances_matrix, n_base)
 
     print("\n" + "="*60)
     print("TRAINING REGRESSOR WITH GRAPH REGULARIZATION")
@@ -623,7 +623,7 @@ def synthetic_graph_regularization(folder_path: Optional[str] = None,
         'regularized_val_mse': float(reg_val_mse),
         'mse_improvement_percent': float((baseline_test_mse - reg_test_mse) / baseline_test_mse * 100),
         'latent_dim': int(latent_dim),
-        'n_basis_points': int(n_basis),
+        'n_base_points': int(n_base),
         'n_train_samples': len(X_train),
         'n_val_samples': len(X_val),
         'n_test_samples': len(X_test)

@@ -75,19 +75,19 @@ MANUL/
 **Process:**
 1. Load or generate dataset
 2. Split into train/val/test (70%/15%/15% for synthetic, stratified 64%/16%/20% for MNIST)
-3. Apply Farthest Point Sampling (FPS) to select representative basis points from training set
-4. Train GradientIsomap on basis points to learn geodesic distances
+3. Apply Farthest Point Sampling (FPS) to select representative base points from training set
+4. Train GradientIsomap on base points to learn geodesic distances
 5. Compute low-dimensional projections for all training data points
 6. Save results to `outputs/{run_folder_name}/`
 
 **Key Parameters (editable in `first_stage.py`):**
-- **MNIST:** `n_samples=2000` (FPS basis points), `latent_dim` (auto-detected), `epochs=15000`
-- **Synthetic:** `n_samples=10000` (total points), `n_basis_points=2000`, `noise_percent=0.05`, `latent_dim=2`, `epochs=500`
+- **MNIST:** `n_samples=2000` (FPS base points), `latent_dim` (auto-detected), `epochs=15000`
+- **Synthetic:** `n_samples=10000` (total points), `n_base_points=2000`, `noise_percent=0.05`, `latent_dim=2`, `epochs=500`
 
 **Outputs saved to `outputs/{run_folder_name}/`:**
-- `fps_indices.npy` - Selected basis point indices
+- `fps_indices.npy` - Selected base point indices
 - `best_distance_matrix.npy` - Learned geodesic distance matrix (upper triangular)
-- `base_projections.npy` - Low-dimensional projections of basis points
+- `base_projections.npy` - Low-dimensional projections of base points
 - `train_projections.npy` - Projections for training data (computed via ensemble KNN/random forest)
 - `experiment_metadata.json` - Configuration (includes `latent_dim`, `random_seed`, split params)
 - Visualization plots (Isomap convergence, dimension analysis for MNIST)

@@ -3,16 +3,9 @@ from datetime import datetime
 from typing import Callable
 
 import numpy as np
-from sklearn.neighbors import NearestNeighbors, KNeighborsRegressor
-from sklearn.ensemble import RandomForestRegressor, VotingRegressor
-from sklearn.kernel_ridge import KernelRidge
-from sklearn.model_selection import GridSearchCV
 import torch
 import torch.nn as nn
-from torch import randperm, tensor
-from torch.optim import Adam
 from torch import float64 as fl64
-from tqdm import tqdm
 from matplotlib import pyplot as plt
 from SALib import ProblemSpec
 
@@ -103,7 +96,7 @@ class GraphRegTrainer:
                  train_features: np.ndarray,
                  train_target: np.ndarray,
                  weights_matrix: np.ndarray,
-                 basis_indices: np.ndarray,
+                 base_indices: np.ndarray,
                  model: nn.Module,
                  criterion: Callable,
                  optimizer: torch.optim.Optimizer,
@@ -124,7 +117,7 @@ class GraphRegTrainer:
             train_features: training features [N, features]
             train_target: target values [N, ] or [N, output_dim]
             weights_matrix: graph weight matrix [base_dim, base_dim]
-            basis_indices: indices of basis points
+            base_indices: indices of base points
             model: custom neural network model (nn.Module)
             criterion: loss function (e.g., nn.MSELoss, nn.CrossEntropyLoss)
             optimizer: optimizer (e.g., torch.optim.Adam)
@@ -139,7 +132,7 @@ class GraphRegTrainer:
             device: 'cuda', 'cpu' or None (auto)
             cache_folder: folder for saving models
             verbose: show training progress
-            precomputed_base_projections: precomputed projections of basis points [base_dim, proj_dim]
+            precomputed_base_projections: precomputed projections of base points [base_dim, proj_dim]
                                           If provided, skips expensive Isomap computation
             precomputed_all_projections: precomputed projections of ALL points [N, proj_dim]
                                          If provided, skips expensive KNN interpolation
@@ -148,7 +141,7 @@ class GraphRegTrainer:
         self.target = train_target
 
         self.weights_matrix = weights_matrix
-        self.basis_indices = basis_indices
+        self.base_indices = base_indices
         self.source_data = train_features
         self.n_neighbors = n_neighbors
         self.method = method
@@ -225,12 +218,12 @@ class GraphRegTrainer:
 
     def _compute_base_projections(self):
         """
-        Compute projections of basis points to hidden geometry space using Isomap.
+        Compute projections of base points to hidden geometry space using Isomap.
 
         Returns:
-            projections: basis points coordinates in hidden space [base_dim, proj_dim]
+            projections: base points coordinates in hidden space [base_dim, proj_dim]
         """
-        proj_dim = len(self.basis_indices)
+        proj_dim = len(self.base_indices)
 
         weights_tensor = torch.tensor(self.weights_matrix,
                                       dtype=torch.float64).to(self.device)
@@ -255,20 +248,20 @@ class GraphRegTrainer:
         Returns:
             proj_all: projections of all points [N, proj_dim]
         """
-        X_basis = self.source_data[self.basis_indices]
-        Y_basis = self.proj_base_features
+        X_base = self.source_data[self.base_indices]
+        Y_base = self.proj_base_features
         X_all = self.source_data
 
         if method == 'krr':
-            Y_all = project_krr_optimized(X_basis, Y_basis, X_all, batch_size=self.batch_size)
+            Y_all = project_krr_optimized(X_base, Y_base, X_all, batch_size=self.batch_size)
         elif method == 'ensemble_knn':
-            Y_all = project_ensemble_knn(X_basis, Y_basis, X_all)
+            Y_all = project_ensemble_knn(X_base, Y_base, X_all)
         elif method == 'random_forest':
-            Y_all = project_random_forest(X_basis, Y_basis, X_all, batch_size=self.batch_size)
+            Y_all = project_random_forest(X_base, Y_base, X_all, batch_size=self.batch_size)
         else:
             raise ValueError(f"Unknown projection method: {method}")
 
-        Y_all[self.basis_indices] = Y_basis
+        Y_all[self.base_indices] = Y_base
 
         return Y_all
 
@@ -843,7 +836,8 @@ class GraphRegTrainer:
         if self.cache_folder is not None:
             save_path = os.path.join(self.cache_folder, f"{self.model_name}_convergence.png")
             plt.savefig(save_path)
+            plt.close()
             if self.verbose:
                 print(f"Convergence plot saved to {save_path}")
-
-        plt.show()
+        else:
+            plt.show()
