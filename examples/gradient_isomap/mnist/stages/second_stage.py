@@ -13,7 +13,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 from regularizator.GraphRegTrainer import GraphRegTrainer
-from utils.utils import check_required_files, restore_data_from_metadata, set_global_seed, \
+from utils.utils import restore_data_from_metadata, set_global_seed, \
                                load_data_from_folder
 from utils.Projector import Projector
 
@@ -265,10 +265,8 @@ def train_and_evaluate_model(X_train, y_train, X_val, y_val, X_test, y_test,
     print(f"\n{model_name} Classification Report:")
     print(classification_report(y_test, pred_classes, digits=4))
 
-    train_losses = trainer.trained_loss_values.get('model_loss', [])
-    val_losses = trainer.trained_loss_values.get('val_loss', [])
-    train_accuracies = trainer.trained_loss_values.get('train_accuracy', [])
-    val_accuracies = trainer.trained_loss_values.get('val_accuracy', [])
+    train_losses = trainer.convergence_history.get('model_loss', [])
+    val_losses = trainer.convergence_history.get('val_loss', [])
 
     return {
         'accuracy': accuracy,
@@ -277,8 +275,6 @@ def train_and_evaluate_model(X_train, y_train, X_val, y_val, X_test, y_test,
         'trainer': trainer,
         'train_losses': train_losses,
         'val_losses': val_losses,
-        'train_accuracies': train_accuracies,
-        'val_accuracies': val_accuracies,
         'best_epoch': trainer.best_epoch if hasattr(trainer, 'best_epoch') else num_epochs
     }
 
@@ -461,7 +457,7 @@ def mnist_graph_regularization(folder_path: Optional[str] = None,
     ]
 
     if folder_path is None or not check_required_files(folder_path, required_files):
-        print("\nPlease run Stage 1 (first_stage.py) first")
+        print("\nPlease run Stage 1 (manifold_learning.py) first")
         return None
 
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -607,7 +603,7 @@ if __name__ == "__main__":
 
     if not os.path.exists(folder_path):
         print(f"\nError: Folder not found: {folder_path}")
-        print("\nPlease update 'RUN_FOLDER_NAME' in this script or run first_stage.py")
+        print("\nPlease update 'RUN_FOLDER_NAME' in this script or run manifold_learning.py")
         sys.exit(1)
 
     results = mnist_graph_regularization(

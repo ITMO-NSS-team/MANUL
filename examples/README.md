@@ -134,7 +134,7 @@ MANUL/
 
 ```bash
 cd examples/gradient_isomap/mnist/stages  # or synthetic/stages
-python first_stage.py
+python manifold_learning.py
 ```
 
 This will create a timestamped folder like `outputs/run_20251210_150023_n2000/` (MNIST) or `outputs/torus_run_20251211_192332_n10000/` (synthetic).
@@ -153,7 +153,7 @@ RUN_FOLDER_NAME = 'torus_run_20251211_192332_n10000'  # Synthetic example
 **Step 3: Run Stage 2 (Graph Regularization)**
 
 ```bash
-python second_stage.py
+python second_stage_old.py
 ```
 
 This will automatically:
@@ -166,11 +166,11 @@ This will automatically:
 ```bash
 # For MNIST classification
 cd examples/gradient_isomap/mnist
-python run_pipeline.py  
+python manifold_learning_and_regularization.py  
 
 # For synthetic geometries
 cd examples/gradient_isomap/synthetic
-python run_pipeline.py 
+python manifold_learning_and_regularization.py 
 ```
 
 **Note:** Pipeline scripts automatically pass folder names between stages.

@@ -33,7 +33,7 @@ class GradientIsomap:
         self.checkpoint_each = checkpoint_each
         self.save_checkpoint_matrix = save_checkpoint_matrix
         self.stop_criteria_value = stop_criteria_value
-        self.device = self._init_device()
+        self._init_device()
         self.logs_folder = self._init_logs_folder(logs_folder)
         self.best_loss = np.inf
         self.best_isomap_model = None
@@ -69,11 +69,14 @@ class GradientIsomap:
             else:
                 device = 'cpu'
         print(f'Device is {device}')
-        return device
+        self.device = device
 
-    def train(self):
+    def train(self, use_init_assumption=False):
         start_time = time.time()
-        dist_train = self.generate_random_matrix(self.features.shape[0], dist_type='normal', device=self.device)
+        if use_init_assumption:
+            dist_train = torch.cdist(self.features, self.features)
+        else:
+            dist_train = self.generate_random_matrix(self.features.shape[0], dist_type='normal', device=self.device)
         isomap_model = IsomapNN(dist_train, n_components=self.latent_len, n_neighbors=self.n_neighbors, eigval_choice='MDS')
         isomap_model.to(self.device)
         isomap_optim = torch.optim.AdamW(params=isomap_model.parameters(), lr=0.0001)
@@ -84,6 +87,8 @@ class GradientIsomap:
         best_loss = np.inf
         epochs_list = []
         time_list = []
+        best_reproj_features = None
+        best_outputs = None
 
         for epoch in range(self.epochs):
             reproj_features = isomap_model().to(float32)
@@ -102,11 +107,10 @@ class GradientIsomap:
             losses.append(isomap_loss.item())
 
             if losses[-1] < best_loss or epoch == 0:
-                # update best state
                 best_epoch = epoch
                 best_loss = losses[-1]
                 self.best_isomap_model = isomap_model
-                self.best_distances_matrix = self._isomap_weights(isomap_model)
+                self.best_distances_matrix = isomap_model.distances_matrix
                 best_reproj_features = reproj_features.cpu().detach().numpy()
                 best_outputs = output.cpu().detach().numpy()
 
@@ -126,7 +130,6 @@ class GradientIsomap:
 
             if (self.checkpoint_each is not None and epoch % self.checkpoint_each == 0 or
                     epoch == (self.epochs - 1) or stop_criteria):
-                # Saving visualizations and logs each epoch checkpoint
                 reproj_features = reproj_features.cpu().detach().numpy()
                 output = output.cpu().detach().numpy()
                 isomap_weights = self._isomap_weights(isomap_model)
@@ -136,7 +139,7 @@ class GradientIsomap:
                     best_outputs, reproj_features,
                     output, self.targets,
                     isomap_weights,
-                    isomap_eigenvalues[:3], self.logs_folder,
+                    isomap_eigenvalues[:3], self.checkpoint_history_folder,
                     current_time
                 )
 
@@ -149,13 +152,11 @@ class GradientIsomap:
                 df.to_csv(f'{self.logs_folder}/convergence_log.csv', index=False)
 
                 torch.save(self.best_isomap_model.state_dict(), f'{self.logs_folder}/best_isomap_model.pt')
-                np.save(f'{self.logs_folder}/best_mapping.npy', best_reproj_features)
-                np.save(f'{self.logs_folder}/best_distance_matrix.npy', self.best_distances_matrix)
-                print(f'Mapping saved: f"{self.logs_folder}/best_mapping.npy"'
-                      f'\nDistances matrix saved:{self.logs_folder}/best_distance_matrix.npy')
+                np.save(f'{self.logs_folder}/best_distance_matrix.npy', self.best_distances_matrix.detach().cpu().numpy())
+                print(f'Distances matrix saved:{self.logs_folder}/best_distance_matrix.npy')
 
-                if self.save_checkpoint_matrix and self.checkpoint_history_folder is not None:
-                    self._save_checkpoint_weights_matrix(epoch, isomap_weights, losses[-1])
+                if self.save_checkpoint_matrix:
+                    self._save_checkpoint_weights_matrix(epoch, isomap_weights)
 
             if stop_criteria:
                 break
@@ -178,42 +179,18 @@ class GradientIsomap:
                                       output,
                                       save_path=f'{self.logs_folder}/prediction_train.png')
 
-    def _save_checkpoint_weights_matrix(self, epoch: int, distance_matrix: np.ndarray, loss: float):
+    def _save_checkpoint_weights_matrix(self, epoch: int, distance_matrix: np.ndarray):
         """
         Save distance matrix for current checkpoint to history folder.
 
         Args:
             epoch: Current epoch number
             distance_matrix: Distance matrix in upper triangular form (1D array)
-            loss: Current loss value
         """
         checkpoint_filename = f'{epoch}_epoch_distance_matrix.npy'
         checkpoint_path = os.path.join(self.checkpoint_history_folder, checkpoint_filename)
 
         np.save(checkpoint_path, distance_matrix)
-
-        self.checkpoint_metadata.append({
-            'epoch': int(epoch),
-            'loss': float(loss),
-            'filename': checkpoint_filename,
-            'timestamp': time.strftime("%Y-%m-%d %H:%M:%S")
-        })
-
-        metadata_path = os.path.join(self.checkpoint_history_folder, 'metadata.json')
-        metadata = {
-            'checkpoint_each': self.checkpoint_each,
-            'total_epochs': self.epochs,
-            'n_base_points': self.features.shape[0],
-            'latent_dim': self.latent_len,
-            'n_neighbors': self.n_neighbors,
-            'checkpoints': self.checkpoint_metadata
-        }
-
-        with open(metadata_path, 'w') as f:
-            json.dump(metadata, f, indent=2)
-
-        if epoch % (self.checkpoint_each * 10) == 0:
-            print(f'  Checkpoint history saved: epoch {epoch}')
 
     def _check_stop_criteria(self, loss_value: float):
         return loss_value <= self.stop_criteria_value
@@ -247,55 +224,3 @@ class GradientIsomap:
         matrix.fill_diagonal_(0)
         return matrix / matrix.max()
 
-    @staticmethod
-    def load_checkpoint_history(checkpoint_history_folder: str):
-        """
-        Load all checkpoint distance matrices from history folder.
-
-        Args:
-            checkpoint_history_folder: Path to checkpoint_history folder
-
-        Returns:
-            dict with metadata and all distance matrices:
-            {
-                'metadata': {
-                    'checkpoint_each': 100,
-                    'total_epochs': 10000,
-                    'n_base_points': 1000
-                },
-                'checkpoints': [
-                    {
-                        'epoch': 0,
-                        'loss': 0.5,
-                        'timestamp': '...',
-                        'distance_matrix': numpy array
-                    },
-                    ...
-                ]
-            }
-        """
-        metadata_path = os.path.join(checkpoint_history_folder, 'metadata.json')
-
-        if not os.path.exists(metadata_path):
-            raise FileNotFoundError(f"Metadata not found: {metadata_path}")
-
-        with open(metadata_path, 'r') as f:
-            metadata = json.load(f)
-
-        checkpoints = []
-        for checkpoint_info in metadata['checkpoints']:
-            checkpoint_path = os.path.join(checkpoint_history_folder, checkpoint_info['filename'])
-            distance_matrix = np.load(checkpoint_path)
-
-            checkpoints.append({
-                'epoch': checkpoint_info['epoch'],
-                'loss': checkpoint_info['loss'],
-                'timestamp': checkpoint_info['timestamp'],
-                'distance_matrix': distance_matrix
-            })
-
-        return {
-            'metadata': {k: v for k, v in metadata.items() if k != 'checkpoints'},
-            'checkpoints': checkpoints
-        }
-#todo: update readme with info about checpointing and adap lambdas options

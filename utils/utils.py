@@ -34,30 +34,7 @@ def split_data(X, y, proportions=(0.7, 0.15, 0.15), random_state=42):
         test_size=val_relative_ratio,
         random_state=random_state
     )
-
     return X_train, X_val, X_test, y_train, y_val, y_test
-
-
-def check_required_files(input_dir: str, required_files: list) -> bool:
-    """Checks if all required files exist in directory.
-
-    Args:
-        input_dir: Directory to check
-        required_files: List of required filenames
-
-    Returns:
-        True if all files exist, False otherwise
-    """
-    missing = [f for f in required_files if not os.path.exists(os.path.join(input_dir, f))]
-
-    if missing:
-        print(f"Error: Missing required files from Stage 1:")
-        for f in missing:
-            print(f"  - {f}")
-        return False
-    else:
-        print(f"All required files found in {input_dir}")
-        return True
 
 
 def set_global_seed(seed=42):
@@ -112,43 +89,6 @@ def restore_mnist_splits(data_dir, test_size_outer=0.2, test_size_inner=0.2, ran
     return X_train, X_val, X_test, y_train, y_val, y_test
 
 
-def restore_synthetic_splits(geometry_name, n_samples, noise_percent,
-                             test_size_outer=0.15, test_size_inner=0.176,
-                             random_state=42):
-    """
-    Restore train/val/test splits for synthetic geometry data.
-
-    Args:
-        geometry_name: Geometry name ('torus', 'sphere', etc.)
-        n_samples: Number of points to generate
-        noise_percent: Noise level (0.05 = 5%)
-        test_size_outer: Test set size
-        test_size_inner: Validation set size from trainval
-        random_state: Seed for reproducibility
-
-    Returns:
-        Tuple of X_train, X_val, X_test, y_train, y_val, y_test
-    """
-    from data.synthetic_geometries import geometries, noisy_manifold
-
-    set_global_seed(random_state)
-
-    base_func = geometries[geometry_name][0]
-    X, y = noisy_manifold(base_func, noise_percent=noise_percent, n_samples=n_samples)
-
-    X_trainval, X_test, y_trainval, y_test = train_test_split(
-        X, y, test_size=test_size_outer, random_state=random_state
-    )
-
-    X_train, X_val, y_train, y_val = train_test_split(
-        X_trainval, y_trainval, test_size=test_size_inner, random_state=random_state
-    )
-
-    print(f"Restored {geometry_name} splits: train={len(X_train)}, val={len(X_val)}, test={len(X_test)}")
-
-    return X_train, X_val, X_test, y_train, y_val, y_test
-
-
 def restore_data_from_metadata(experiment_folder, project_root=None):
     """
     Universal function for restoring data from metadata.
@@ -193,8 +133,6 @@ def restore_data_from_metadata(experiment_folder, project_root=None):
             geometry_name=metadata['geometry_name'],
             n_samples=metadata['n_samples'],
             noise_percent=metadata['noise_percent'],
-            test_size_outer=split_params.get('test_size_outer', 0.15),
-            test_size_inner=split_params.get('test_size_inner', 0.176),
             random_state=random_seed
         )
     else:
