@@ -42,7 +42,6 @@ def manifold_regularization(folder_path, model, num_epochs, batch_size, learning
         print("\n❌ Please run manifold learning or specify the correct folder!")
         raise
 
-    # === 2. REGULARIZED MODEL ===
     print(f"\n{'=' * 40}")
     print(f"TRAINING REGULARIZED MODEL")
     print(f"{'=' * 40}")
@@ -119,8 +118,8 @@ def manifold_regularization(folder_path, model, num_epochs, batch_size, learning
 
 
 if __name__ == "__main__":
-    folder_path = 'outputs_stat\pseudosphere\pseudosphere_run_20260113_231524'
-    num_epochs = 2000
+    folder_path = 'outputs_stat_0.01noise_5k_sobol_v3\sphere\sphere_run_20260114_201528'
+    num_epochs = 1000
     batch_size = 2048
     lr = 1e-3
     early_stop_patience = 100

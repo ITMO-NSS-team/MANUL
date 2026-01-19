@@ -220,7 +220,7 @@ class GraphRegTrainer:
         return graph_loss
 
     def train(self, plot_convergence: bool = False, adaptive_lambda=False,
-              early_stopping_patience: int = 100, adaptive_lambda_window: int = 50):
+              early_stopping_patience: int = 100, adaptive_lambda_window: int = 100):
         """
         Train the model with combined loss (model loss + graph regularization loss).
 
@@ -323,17 +323,28 @@ class GraphRegTrainer:
                                 f'Patience epoch: {increasing_counter}/{early_stopping_patience}')
                             if increasing_counter >= early_stopping_patience:
                                 print(f'\nEarly stopping triggered at epoch {epoch + 1}')
+                                self.convergence_history['model_lambda'].append(float(lam_nn))
+                                self.convergence_history['graph_lambda'].append(float(lam_graph))
                                 break
 
-            if adaptive_lambda == 'sobol' and epoch % adaptive_lambda_window == 0 and epoch != 0:
-                lam_nn, lam_graph = get_adaptive_lambda_sobol(self.convergence_history['combined_loss'],
-                                                              self.convergence_history['model_loss'],
-                                                              self.convergence_history['graph_loss'])
-
-                self.convergence_history['model_lambda'].append(float(lam_nn))
-                self.convergence_history['graph_lambda'].append(float(lam_graph))
+            if adaptive_lambda == 'sobol':
+                if epoch < adaptive_lambda_window:
+                    self.convergence_history['model_lambda'].append(1.0)
+                    self.convergence_history['graph_lambda'].append(1.0)
+                if epoch == adaptive_lambda_window:
+                    lam_nn, lam_graph = get_adaptive_lambda_sobol(self.convergence_history['combined_loss'],
+                                                                  self.convergence_history['model_loss'],
+                                                                  self.convergence_history['graph_loss'])
+                    self.convergence_history['model_lambda'].append(float(lam_nn))
+                    self.convergence_history['graph_lambda'].append(float(lam_graph))
+                if epoch > adaptive_lambda_window:
+                    self.convergence_history['model_lambda'].append(float(lam_nn))
+                    self.convergence_history['graph_lambda'].append(float(lam_graph))
 
         self.convergence_history['epoch'] = np.arange(1, len(self.convergence_history['model_loss']) + 1)
+        if adaptive_lambda is None:
+            self.convergence_history['model_lambda'] = np.ones(self.num_epochs)
+            self.convergence_history['graph_lambda'] = np.ones(self.num_epochs)
         df = pd.DataFrame({
             key: pd.Series(values)
             for key, values in self.convergence_history.items()
@@ -349,18 +360,20 @@ class GraphRegTrainer:
         """
         Plot training convergence graphs.
         """
-        losses = self.convergence_history['combined_loss']
-        nn_losses = self.convergence_history['model_loss']
-        graph_losses = self.convergence_history['graph_loss']
-        val_losses = self.convergence_history['val_loss']
+        combined_loss = self.convergence_history['combined_loss']
+        model_loss = self.convergence_history['model_loss']
+        graph_loss = self.convergence_history['graph_loss']
+        val_loss = self.convergence_history['val_loss']
+        model_lambda = self.convergence_history['model_lambda']
+        graph_lambda = self.convergence_history['graph_lambda']
 
         fig1, axes = plt.subplots(1, 2, figsize=(15, 5))
-        epochs = range(1, len(losses) + 1)
-        axes[0].plot(epochs, losses, label='Combined Loss', color='blue', linewidth=2)
-        if len(val_losses) != 0 and self.best_epoch is not None and self.best_epoch <= len(losses):
+        epochs = range(1, len(combined_loss) + 1)
+        axes[0].plot(epochs, combined_loss, label='Combined Loss', color='blue', linewidth=2)
+        if len(val_loss) != 0 and self.best_epoch is not None and self.best_epoch <= len(combined_loss):
             axes[0].axvline(x=self.best_epoch, color='gray', linestyle='--',
                             linewidth=1.5, alpha=0.7, label=f'Best Val Epoch ({self.best_epoch})')
-            axes[0].axhline(y=losses[self.best_epoch - 1], color='gray', linestyle='--',
+            axes[0].axhline(y=combined_loss[self.best_epoch - 1], color='gray', linestyle='--',
                             linewidth=1, alpha=0.5)
 
         axes[0].set_xlabel('Epoch')
@@ -371,54 +384,54 @@ class GraphRegTrainer:
         axes[0].set_yscale('log')
 
         # Plot 2: Model Loss vs Graph Loss
-        if len(nn_losses) != 0 and len(graph_losses) != 0:
-            axes[1].plot(epochs, nn_losses, label='Model Loss', color='green', linewidth=2)
-            axes[1].plot(epochs, graph_losses, label='Graph Loss', color='red', linewidth=2)
+        if len(model_loss) != 0 and len(graph_loss) != 0:
+            axes[1].plot(epochs, np.array(model_loss)*np.array(model_lambda), label='Model Loss', color='green', linewidth=2)
+            axes[1].plot(epochs, np.array(graph_loss)*np.array(graph_lambda), label='Graph Loss', color='red', linewidth=2)
 
-            if len(val_losses) != 0 and self.best_epoch != 0 and self.best_epoch <= len(nn_losses):
+            if len(val_loss) != 0 and self.best_epoch != 0 and self.best_epoch <= len(model_loss):
                 axes[1].axvline(x=self.best_epoch, color='gray', linestyle='--',
                                 linewidth=1.5, alpha=0.7, label=f'Best Val Epoch ({self.best_epoch})')
-                axes[1].axhline(y=nn_losses[self.best_epoch - 1], color='green', linestyle='--',
+                axes[1].axhline(y=model_loss[self.best_epoch - 1], color='green', linestyle='--',
                                 linewidth=1, alpha=0.5)
             axes[1].set_xlabel('Epoch')
             axes[1].set_ylabel('Loss')
             axes[1].set_title('Model Loss vs Graph Loss')
             axes[1].legend()
             axes[1].grid(True, alpha=0.3)
-            axes[1].set_yscale('log')
+            #axes[1].set_yscale('log')
         plt.tight_layout()
 
         if self.cache_folder is not None:
-            save_path1 = os.path.join(self.cache_folder, "Loss_Components_Convergence.png")
-            plt.savefig(save_path1, dpi=150, bbox_inches='tight')
+            save_path = os.path.join(self.cache_folder, "Loss_Components_Convergence.png")
+            plt.savefig(save_path, dpi=150, bbox_inches='tight')
             plt.close(fig1)
-            print(f"Convergence plot saved to {save_path1}")
+            print(f"Convergence plot saved to {save_path}")
         else:
             plt.show()
 
-        if len(val_losses) > 0:
+        if len(val_loss) > 0:
             fig2, ax = plt.subplots(figsize=(10, 6))
-            ax.plot(epochs, nn_losses, label='Training Model Loss',
+            ax.plot(epochs, model_loss, label='Training Model Loss',
                     color='blue', linewidth=2, alpha=0.8)
-            val_epochs = range(1, len(val_losses) + 1)
-            ax.plot(val_epochs, val_losses, label='Validation Loss',
+            val_epochs = range(1, len(val_loss) + 1)
+            ax.plot(val_epochs, val_loss, label='Validation Loss',
                     color='orange', linewidth=2, alpha=0.9, linestyle='-', markersize=4)
-            if self.best_epoch is not None and self.best_epoch <= len(nn_losses):
+            if self.best_epoch is not None and self.best_epoch <= len(model_loss):
                 ax.axvline(x=self.best_epoch, color='red', linestyle='--',
                            linewidth=2, alpha=0.8, label=f'Best Epoch ({self.best_epoch})')
-                if self.best_epoch <= len(val_losses):
-                    best_val_loss = val_losses[self.best_epoch - 1]
+                if self.best_epoch <= len(val_loss):
+                    best_val_loss = val_loss[self.best_epoch - 1]
                 else:
-                    best_val_loss = val_losses[-1] if val_losses else 0
+                    best_val_loss = val_loss[-1] if val_loss else 0
                 ax.plot(self.best_epoch, best_val_loss, 'r', markersize=5,
                         markerfacecolor='red', markeredgecolor='darkred', markeredgewidth=2,
                         label=f'Best Val Loss: {best_val_loss:.4f}')
                 ax.axhline(y=best_val_loss, color='red', linestyle=':',
                            linewidth=1, alpha=0.5)
-            train_info = f'Training epochs: {len(losses)}\n'
+            train_info = f'Training epochs: {len(combined_loss)}\n'
             if self.best_epoch is not None:
                 train_info += f'Best epoch: {self.best_epoch}\n'
-                train_info += f'Final train loss: {nn_losses[-1]:.6f}\n'
+                train_info += f'Final train loss: {model_loss[-1]:.6f}\n'
                 train_info += f'Best val loss: {best_val_loss:.6f}'
             props = dict(boxstyle='round', facecolor='wheat', alpha=0.8)
             ax.text(0.02, 0.98, train_info, transform=ax.transAxes,
@@ -429,13 +442,13 @@ class GraphRegTrainer:
             ax.legend(loc='upper right', fontsize=10)
             ax.grid(True, alpha=0.3)
             ax.set_yscale('log')
-            ax.set_xlim(0, max(len(losses), len(val_losses)) + 1)
+            ax.set_xlim(0, max(len(combined_loss), len(val_loss)) + 1)
             plt.tight_layout()
 
             if self.cache_folder is not None:
-                save_path2 = os.path.join(self.cache_folder, "Train_Validation_Convergence.png")
-                plt.savefig(save_path2, dpi=150, bbox_inches='tight')
+                save_path = os.path.join(self.cache_folder, "Train_Validation_Convergence.png")
+                plt.savefig(save_path, dpi=150, bbox_inches='tight')
                 plt.close(fig2)
-                print(f"Train vs Validation convergence plot saved to {save_path2}")
+                print(f"Train vs Validation convergence plot saved to {save_path}")
             else:
                 plt.show()

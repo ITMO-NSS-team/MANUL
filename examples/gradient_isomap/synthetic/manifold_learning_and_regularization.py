@@ -15,7 +15,7 @@ if __name__ == "__main__":
     print(f"{'=' * 60}\n")
 
     # Here output directory for all runs can be specified
-    outputs_dir = 'outputs_stat_0.01noise_5k_sobol'
+    outputs_dir = 'outputs_stat_0.01noise_5k_sobol_v3'
     n_runs = 5
 
     geometries_to_process = [
@@ -23,14 +23,14 @@ if __name__ == "__main__":
         'torus',
         'swiss_roll',
         'swiss_hole',
-        #'pseudosphere',
-        #'hyperboloid',
-        #'helicoid',
-        #'multi_scale_torus',
-        #'nonuniform_sphere',
-        #'cone_surface',
-        #'genus_2_surface',
-        #'s_curve'
+        'pseudosphere',
+        'hyperboloid',
+        'helicoid',
+        'multi_scale_torus',
+        'nonuniform_sphere',
+        'cone_surface',
+        'genus_2_surface',
+        's_curve'
     ]
 
     for geom in geometries_to_process:
@@ -98,35 +98,22 @@ if __name__ == "__main__":
 
         for idx, metric in enumerate(metrics_to_plot):
             ax = axes[idx]
-
-            # Create boxplot
             all_metrics.boxplot(column=metric, by='experiment_type', ax=ax)
-
-            # Add stripplot for individual points
             for i, exp_type in enumerate(['Baseline', 'Regularized']):
                 exp_data = all_metrics[all_metrics['experiment_type'] == exp_type][metric]
                 x_pos = i + 1
                 ax.scatter([x_pos] * len(exp_data), exp_data, alpha=0.6, s=30)
-
             ax.set_title(f'{metric.upper()}')
             ax.set_xlabel('')
             ax.set_ylabel('Value')
-
-            # Remove the default matplotlib title
             ax.get_figure().suptitle('')
-
-        # Adjust layout
         plt.suptitle(f'{geom.upper()} - Baseline vs Regularized Comparison',
                      fontsize=14, fontweight='bold', y=1.02)
         plt.tight_layout()
-
-        # Save the figure
         comparison_path = os.path.join(geom_folder, f'{geom}_comparison_boxplots.png')
         plt.savefig(comparison_path, dpi=150, bbox_inches='tight')
         plt.show()
         print(f"✓ Comparison plots saved to: {comparison_path}")
-
-        # Save combined metrics to CSV
         combined_metrics_path = os.path.join(geom_folder, f'{geom}_combined_metrics.csv')
         all_metrics.to_csv(combined_metrics_path, index=False)
         print(f"✓ Combined metrics saved to: {combined_metrics_path}")
