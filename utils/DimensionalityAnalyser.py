@@ -17,7 +17,6 @@ class DimensionalityAnalyser:
     def analyse_dimensions(self, X, n_samples=500, method='both'):
         """
         Comprehensive dimensionality analysis with multiple methods.
-
         Parameters:
             X : array (n_samples, n_features)
                 Input data
@@ -36,17 +35,25 @@ class DimensionalityAnalyser:
             print("Estimating dimensions using eigenvalue curvature method...")
             dims_curvature = local_pca_dimension(
                 X, n_neighbors=n_neighbors, n_samples=n_samples,
-                with_eigenvalues=True, curvature_threshold=self.default_curvature_threshold
-            )
+                with_eigenvalues=True, curvature_threshold=self.default_curvature_threshold)
             self.results['eigenvalue'] = dims_curvature
 
         if method in ['variance', 'both']:
             print("Estimating dimensions using variance threshold method...")
             dims_variance = local_pca_dimension(
                 X, n_neighbors=n_neighbors, n_samples=n_samples,
-                with_eigenvalues=False, threshold=self.default_threshold
-            )
+                with_eigenvalues=False, threshold=self.default_threshold)
             self.results['variance'] = dims_variance
+
+        if method == 'both':
+            dims1 = self.results['eigenvalue']
+            recommended_dim1 = int(np.percentile(dims1, 90))
+            dims2 = self.results['variance']
+            recommended_dim2 = int(np.percentile(dims2, 90))
+            return recommended_dim1, recommended_dim2
+        else:
+            dims = self.results[method]
+            return int(np.percentile(dims, 90))
 
     def plot_dimension_histograms(self, dataset_name: str, save_path: str = None):
         """
@@ -164,18 +171,8 @@ class DimensionalityAnalyser:
             plt.close()
         else:
             plt.show()
-
         return dims_by_threshold, dim_at_095
 
-    def get_latent_dim(self, method='eigenvalue'):
-        """
-        Get recommended latent dimension based on analysis.
-        """
-        if method not in self.results:
-            raise ValueError(f"Method {method} not found in results. Available: {list(self.results.keys())}")
 
-        dims = self.results[method]
-        recommended_dim = int(np.mean(dims))
 
-        print(f"Recommended latent dimension ({method} method): {recommended_dim}")
-        return recommended_dim
+

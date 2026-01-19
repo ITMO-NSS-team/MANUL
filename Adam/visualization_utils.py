@@ -120,8 +120,8 @@ def original_visualization_simple(features, targets, predictions, figsize=(12, 8
 
 
 def create_visualization(epoch, losses, best_epoch, best_loss, best_reproj_features,
-                            best_outputs, reproj_features, output,
-                            y_train, isomap_weights, isomap_eigenvalues, working_dir, current_time):
+                         best_outputs, reproj_features, output,
+                         y_train, isomap_weights, isomap_eigenvalues, working_dir, current_time):
     """
     Create visualization for data using adaptive dimensionality handling
     """
@@ -221,4 +221,3 @@ def create_visualization(epoch, losses, best_epoch, best_loss, best_reproj_featu
     plt.tight_layout()
     plt.savefig(f'{working_dir}/{epoch}.png', dpi=150)
     plt.close()
-
