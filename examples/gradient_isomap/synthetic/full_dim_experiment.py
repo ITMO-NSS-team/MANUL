@@ -12,21 +12,19 @@ from utils.fps_implementation import memory_efficient_fps
 from utils.Projector import Projector
 from utils.utils import split_data
 
-
-def normalize_points(points, new_min=0, new_max=20):
+def normalize_points(points, new_min=0, new_max=1):
     """Normalize points to [new_min, new_max]."""
     return new_min + (points - np.min(points)) * (new_max - new_min) / (np.max(points) - np.min(points))
 
 
 def combine_coordinates(u, v):
-    """Combine u and v using y = u² + v² (normalized to [0,1])."""
+    """Combine u and v using y = u + v ."""
     u_norm = (u - u.min()) / (u.max() - u.min()) if u.max() > u.min() else u
     v_norm = (v - v.min()) / (v.max() - v.min()) if v.max() > v.min() else v
-    combined = u_norm ** 2 + v_norm ** 2
+    combined = u_norm + v_norm
     return (combined - combined.min()) / (combined.max() - combined.min())
 
 
-# Full-dimensional geometry functions
 def sphere_full_dim(n_samples=1000, normalize=True):
     r = 3
     s = math.ceil(n_samples ** 0.5)
@@ -41,7 +39,7 @@ def sphere_full_dim(n_samples=1000, normalize=True):
 
     points = np.vstack([x, y, z]).T
     if normalize:
-        points = normalize_points(points)
+        points = normalize_points(points, 0, 1)
 
     return points[:n_samples], combine_coordinates(u_[:n_samples], v_[:n_samples])
 
@@ -60,7 +58,7 @@ def torus_full_dim(n_samples=1000, normalize=True):
 
     points = np.vstack([x, y, z]).T
     if normalize:
-        points = normalize_points(points)
+        points = normalize_points(points, 0, 1)
 
     return points[:n_samples], combine_coordinates(u_[:n_samples], v_[:n_samples])
 
@@ -68,26 +66,22 @@ def torus_full_dim(n_samples=1000, normalize=True):
 def swiss_roll_full_dim(n_samples=1000, normalize=True):
     X, t = make_swiss_roll(n_samples=n_samples, noise=0, random_state=42)
     if normalize:
-        X = normalize_points(X)
-    u = np.arctan2(X[:, 2], X[:, 0])
-    v = X[:, 1]
-    return X, combine_coordinates(u, v)
+        X = normalize_points(X, 0, 1)
+    return X, combine_coordinates(t, X[:, 1])
 
 
 def swiss_hole_full_dim(n_samples=1000, normalize=True):
     X, t = make_swiss_roll(n_samples=n_samples, noise=0, hole=True, random_state=42)
     if normalize:
-        X = normalize_points(X)
-    u = np.arctan2(X[:, 2], X[:, 0])
-    v = X[:, 1]
-    return X, combine_coordinates(u, v)
+        X = normalize_points(X, 0, 1)
+    return X, combine_coordinates(t, X[:, 1])
 
 
 def s_curve_full_dim(n_samples=1000, normalize=True):
     X, t = make_s_curve(n_samples, noise=0, random_state=0)
     if normalize:
-        X = normalize_points(X)
-    return X, combine_coordinates(X[:, 0], X[:, 2])
+        X = normalize_points(X, 0, 1)
+    return X, combine_coordinates(t, X[:, 1])
 
 
 def pseudosphere_full_dim(n_samples=1000, normalize=True):
@@ -104,7 +98,7 @@ def pseudosphere_full_dim(n_samples=1000, normalize=True):
 
     points = np.vstack([x, y, z]).T
     if normalize:
-        points = normalize_points(points)
+        points = normalize_points(points, 0, 1)
 
     return points[:n_samples], combine_coordinates(u_[:n_samples], v_[:n_samples])
 
@@ -123,7 +117,7 @@ def hyperboloid_full_dim(n_samples=1000, normalize=True):
 
     points = np.vstack([x, y, z]).T
     if normalize:
-        points = normalize_points(points)
+        points = normalize_points(points, 0, 1)
 
     return points[:n_samples], combine_coordinates(u_[:n_samples], v_[:n_samples])
 
@@ -141,25 +135,28 @@ def helicoid_full_dim(n_samples=1000, normalize=True):
 
     points = np.vstack([x, y, z]).T
     if normalize:
-        points = normalize_points(points)
+        points = normalize_points(points, 0, 1)
 
     return points[:n_samples], combine_coordinates(u_[:n_samples], v_[:n_samples])
 
 
 def multi_scale_torus_full_dim(n_samples=1000, normalize=True):
-    theta = np.linspace(0, 2 * np.pi, n_samples)
-    phi = np.linspace(0, 2 * np.pi, n_samples)
-    R, r = 3, 1
+    s = math.ceil(n_samples ** 0.5)
+    theta = np.linspace(0, 2 * np.pi, s)
+    phi = np.linspace(0, 2 * np.pi, s)
+    theta_, phi_ = np.meshgrid(theta, phi)
+    theta_, phi_ = np.ravel(theta_), np.ravel(phi_)
 
-    x = (R + r * np.cos(theta)) * np.cos(phi) + 0.3 * np.cos(8 * theta)
-    y = (R + r * np.cos(theta)) * np.sin(phi) + 0.3 * np.sin(8 * theta)
-    z = r * np.sin(theta) + 0.3 * np.cos(8 * phi)
+    R, r = 3, 1
+    x = (R + r * np.cos(theta_)) * np.cos(phi_) + 0.3 * np.cos(8 * theta_)
+    y = (R + r * np.cos(theta_)) * np.sin(phi_) + 0.3 * np.sin(8 * theta_)
+    z = r * np.sin(theta_) + 0.3 * np.cos(8 * phi_)
 
     points = np.vstack([x, y, z]).T
     if normalize:
-        points = normalize_points(points)
+        points = normalize_points(points, 0, 1)
 
-    return points, combine_coordinates(theta, phi)
+    return points[:n_samples], combine_coordinates(theta_[:n_samples], phi_[:n_samples])
 
 
 def nonuniform_sphere_full_dim(n_samples=1000, normalize=True):
@@ -174,7 +171,7 @@ def nonuniform_sphere_full_dim(n_samples=1000, normalize=True):
 
     points = np.vstack([x, y, z]).T
     if normalize:
-        points = normalize_points(points)
+        points = normalize_points(points, 0, 1)
 
     return points, combine_coordinates(u, v)
 
@@ -190,30 +187,31 @@ def cone_surface_full_dim(n_samples=1000, normalize=True):
 
     points = np.vstack([x, y, z]).T
     if normalize:
-        points = normalize_points(points)
+        points = normalize_points(points, 0, 1)
 
     return points, combine_coordinates(r, theta)
 
 
 def genus_2_surface_full_dim(n_samples=1000, normalize=True):
-    u = np.linspace(0, 2 * np.pi, int(np.sqrt(n_samples)))
-    v = np.linspace(0, 2 * np.pi, int(np.sqrt(n_samples)))
-    u, v = np.meshgrid(u, v)
-    u, v = u.ravel(), v.ravel()
+    s = math.ceil(n_samples ** 0.5)
+    u = np.linspace(0, 2 * np.pi, s)
+    v = np.linspace(0, 2 * np.pi, s)
+    u_, v_ = np.meshgrid(u, v)
+    u_, v_ = np.ravel(u_), np.ravel(v_)
 
-    x = np.cos(u) * (2 + np.cos(v))
-    y = np.sin(u) * (2 + np.cos(v))
-    z = np.sin(v) + 0.5 * np.sin(2 * v) * np.cos(u)
+    x = np.cos(u_) * (2 + np.cos(v_))
+    y = np.sin(u_) * (2 + np.cos(v_))
+    z = np.sin(v_) + 0.5 * np.sin(2 * v_) * np.cos(u_)
 
     points = np.vstack([x, y, z]).T
     if normalize:
-        points = normalize_points(points)
+        points = normalize_points(points, 0, 1)
 
-    return points, combine_coordinates(u, v)
+    return points[:n_samples], combine_coordinates(u_[:n_samples], v_[:n_samples])
 
 
 def connected_multiscale_manifold_full_dim(n_samples=1000, normalize=True):
-    """1D manifold - returns standard target."""
+    """1D manifold — returns standard target."""
     t = np.linspace(0, 4 * np.pi, n_samples)
 
     x = (2 + np.cos(t)) * np.cos(t)
@@ -222,9 +220,11 @@ def connected_multiscale_manifold_full_dim(n_samples=1000, normalize=True):
 
     points = np.vstack([x, y, z]).T
     if normalize:
-        points = normalize_points(points)
+        points = normalize_points(points, 0, 1)
 
-    return points, t / t.max()
+    # 1D manifold: target is just normalized t
+    target = (t - t.min()) / (t.max() - t.min())
+    return points, target
 
 
 full_dim_geometries = {
@@ -242,6 +242,7 @@ full_dim_geometries = {
     'genus_2_surface': genus_2_surface_full_dim,
     'connected_multiscale_manifold': connected_multiscale_manifold_full_dim
 }
+
 
 
 def synthetic_full_dim_pipeline(geometry_name, working_folder):
@@ -343,7 +344,7 @@ def synthetic_full_dim_pipeline(geometry_name, working_folder):
                       'Target type', 'Target formula', 'Latent dimension', 'Device',
                       'FPS time', 'Isomap train time', 'Projection method', 'Projection time'],
         'Value': [geometry_name, n_samples, n_base_points,
-                  'full_dimensional', 'u² + v²', latent_dim, device,
+                  'full_dimensional', 'u + v', latent_dim, device,
                   fps_extract_time, isomap_train_time, proj_method, projection_time]
     })
     metadata.to_csv(f'{working_folder}/metadata.csv', index=False)
@@ -366,7 +367,7 @@ if __name__ == "__main__":
     print("FULL-DIMENSIONAL TARGET EXPERIMENT")
     print(f"{'=' * 80}")
     print(f"Geometries: {len(geometries_to_test)}")
-    print(f"Target: y = u² + v²")
+    print(f"Target: y = u + v")
     print(f"Runs per geometry: {n_runs}")
     print(f"{'=' * 80}\n")
 
