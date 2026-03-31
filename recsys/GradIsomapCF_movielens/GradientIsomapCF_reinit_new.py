@@ -1,0 +1,310 @@
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import TensorDataset, DataLoader
+
+import os
+import sys
+import time
+from datetime import datetime
+
+import numpy as np
+import scipy.sparse as sp
+
+current_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(os.path.dirname(current_dir))
+sys.path.append(project_root)
+
+from MANUL.Adam.Isomap import IsomapNN
+from NeuMFOnManifold import NeuMFOnManifold
+from evaluation import evaluate_topk_isomap
+
+
+class GradientIsomapCF:
+
+    def __init__(self,
+                 train_feature: torch.Tensor,
+                 train_events,
+                 num_users: int,
+                 num_items: int,
+                 latent_len: int,
+                 n_neighbors: int = 10,
+                 epochs: int = 5,
+                 cf_epochs: int = 2,
+                 batch_size: int = 2048,
+                 lr_isomap: float = 1e-4,
+                 lr_ncf: float = 1e-3,
+                 factor_num: int = 16,
+                 num_layers: int = 3,
+                 dropout: float = 0.0,
+                 model_type: str = 'NeuMF-end',
+                 logs_folder: str | None = None,
+                 device: str | None = None,
+                 stop_criteria_value: float = 0.001,
+                 num_ng: int = 3):
+
+        self.features = train_feature
+        self.train_events = np.array(train_events, dtype=np.int64)
+        self.num_users = num_users
+        self.num_items = num_items
+        self.latent_len = latent_len
+        self.n_neighbors = n_neighbors
+
+        self.epochs = epochs
+        self.cf_epochs = cf_epochs
+
+        self.batch_size = batch_size
+        self.lr_isomap = lr_isomap
+        self.lr_ncf = lr_ncf
+        self.factor_num = factor_num
+        self.num_layers = num_layers
+        self.dropout = dropout
+        self.model_type = model_type
+        self.stop_criteria_value = stop_criteria_value
+        self.num_ng = num_ng
+
+        if device is None:
+            device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        self.device = torch.device(device)
+        print(f"Device is {self.device}")
+
+        if logs_folder is None:
+            logs_folder = f"gradisomap_cf_{datetime.now().strftime('%d%m%Y-%H.%M')}"
+        self.logs_folder = logs_folder
+        os.makedirs(self.logs_folder, exist_ok=True)
+        print(f"Logs folder: {self.logs_folder}")
+
+        # История для графиков
+        self.history = {
+            'epoch': [],
+            'train_loss': [],
+            'val_hr': [],
+            'val_ndcg': []
+        }
+
+        self.cf_history = {
+            'train_loss': [],
+            'val_loss': []
+        }
+
+        self.interactions = self._build_implicit_interactions()
+        self._build_dataloader_and_full_tensors()
+
+        self.isomap_model = None
+        self.ncf_model = None
+
+    def _build_implicit_interactions(self):
+        print("Building implicit interactions with negative sampling...")
+        train_mat = sp.dok_matrix((self.num_users, self.num_items), dtype=np.float32)
+        pos_pairs = []
+
+        for (u, m, r) in self.train_events:
+            u = int(u)
+            m = int(m)
+            pos_pairs.append((u, m))
+            train_mat[u, m] = 1.0
+
+        interactions = []
+
+        for (u, m) in pos_pairs:
+            interactions.append((u, m, 1))
+
+        rng = np.random.default_rng()
+        for (u, m) in pos_pairs:
+            for _ in range(self.num_ng):
+                j = int(rng.integers(low=0, high=self.num_items))
+                while (u, j) in train_mat:
+                    j = int(rng.integers(low=0, high=self.num_items))
+                interactions.append((u, j, 0))
+
+        interactions = np.array(interactions, dtype=np.int64)
+        print(f"Позитивов: {len(pos_pairs)}, всего интеракций (pos+neg): {len(interactions)}")
+        return interactions
+
+    def _build_dataloader_and_full_tensors(self):
+        users = torch.tensor(self.interactions[:, 0], dtype=torch.long)
+        items = torch.tensor(self.interactions[:, 1], dtype=torch.long)
+        labels = torch.tensor(self.interactions[:, 2], dtype=torch.float32)
+
+        dataset = TensorDataset(users, items, labels)
+        self.inter_loader = DataLoader(dataset, batch_size=self.batch_size, shuffle=True)
+
+        self.users_all = users.to(self.device)
+        self.items_all = items.to(self.device)
+        self.labels_all = labels.to(self.device)
+
+    @staticmethod
+    def _generate_random_matrix(n_samples, dist_type='normal', device='cuda'):
+        if dist_type == 'uniform':
+            matrix = torch.rand(n_samples, n_samples, device=device)
+        elif dist_type == 'normal':
+            matrix = torch.randn(n_samples, n_samples, device=device).abs()
+        elif dist_type == 'exp':
+            matrix = torch.rand(n_samples, n_samples, device=device).pow(2)
+        matrix = (matrix + matrix.T) / 2
+        matrix.fill_diagonal_(0)
+        return matrix / matrix.max()
+
+    def train(self, val_loader=None, top_k: int = 10, device=None, use_init_assumption: bool = True):
+
+        if device is None:
+            device = self.device
+        elif isinstance(device, str):
+            device = torch.device(device)
+
+        start_time = time.time()
+
+        self.features = self.features.to(torch.float32).to(self.device)
+        num_items = self.features.shape[0]
+
+        if use_init_assumption:
+            with torch.no_grad():
+                dist_train = torch.cdist(self.features, self.features)
+        else:
+            dist_train = self._generate_random_matrix(num_items, device=self.device)
+
+        isomap_model = IsomapNN(
+            dist_train,
+            n_components=self.latent_len,
+            n_neighbors=self.n_neighbors,
+            eigval_choice='MDS'
+        ).to(self.device)
+
+        isomap_optim = optim.AdamW(isomap_model.parameters(), lr=self.lr_isomap)
+        loss_fn = nn.BCEWithLogitsLoss()
+
+        best_train_loss = np.inf
+
+        for epoch in range(self.epochs):
+            epoch_start = time.time()
+
+            isomap_model.eval()
+            with torch.no_grad():
+                item_Z_epoch = isomap_model().to(torch.float32).detach()  # [num_items, latent_len]
+
+            ncf_model = NeuMFOnManifold(
+                user_num=self.num_users,
+                latent_dim=self.latent_len,
+                factor_num=self.factor_num,
+                num_layers=self.num_layers,
+                dropout=self.dropout,
+                model_type=self.model_type
+            ).to(self.device)
+            ncf_optim = optim.AdamW(ncf_model.parameters(), lr=self.lr_ncf)
+
+            ncf_model.train()
+            cf_train_losses = []
+            for cf_ep in range(self.cf_epochs):
+                total_cf_loss = 0.0
+                n_batches = 0
+
+                for batch_users, batch_items, batch_labels in self.inter_loader:
+                    batch_users = batch_users.to(self.device)
+                    batch_items = batch_items.to(self.device)
+                    batch_labels = batch_labels.to(self.device)
+
+                    preds_cf = ncf_model(batch_users, batch_items, item_Z_epoch)
+                    loss_cf = loss_fn(preds_cf, batch_labels)
+
+                    ncf_optim.zero_grad()
+                    loss_cf.backward()
+                    ncf_optim.step()
+
+                    total_cf_loss += loss_cf.item()
+                    n_batches += 1
+
+                avg_cf_train_loss = total_cf_loss / max(1, n_batches)
+                cf_train_losses.append(avg_cf_train_loss)
+
+            self.cf_history['train_loss'].append(cf_train_losses)
+
+            ncf_model.eval()
+            for p in ncf_model.parameters():
+                p.requires_grad_(False)
+
+            isomap_model.train()
+            isomap_optim.zero_grad()
+
+            item_Z_full = isomap_model().to(torch.float32)
+            preds_all = ncf_model(self.users_all, self.items_all, item_Z_full)
+            loss_iso = loss_fn(preds_all, self.labels_all)
+
+            loss_iso.backward()
+            isomap_optim.step()
+
+            avg_loss = float(loss_iso.item())
+            elapsed = time.time() - epoch_start
+
+            self.history['epoch'].append(epoch)
+            self.history['train_loss'].append(avg_loss)
+
+            print(f"[GI+NCF-reinit] epoch {epoch}/{self.epochs}, "
+                  f"Isomap-loss(BCE)={avg_loss:.4f}, time={elapsed:.1f}s")
+
+            if avg_loss < best_train_loss:
+                best_train_loss = avg_loss
+
+            if val_loader is not None:
+                hr_val, ndcg_val = evaluate_topk_isomap(ncf_model, isomap_model, val_loader, top_k, device)
+                self.history['val_hr'].append(hr_val)
+                self.history['val_ndcg'].append(ndcg_val)
+                print(f"[GI+NCF-reinit] epoch {epoch}: HR@{top_k}_val={hr_val:.4f}, "
+                      f"NDCG@{top_k}_val={ndcg_val:.4f}")
+            else:
+                self.history['val_hr'].append(None)
+                self.history['val_ndcg'].append(None)
+
+            if avg_loss <= self.stop_criteria_value:
+                print(f"Stop criteria reached: loss={avg_loss:.4f} <= {self.stop_criteria_value}")
+                break
+
+            del ncf_model, ncf_optim
+            torch.cuda.empty_cache()
+
+        total = time.time() - start_time
+        print(f"GradientIsomapCF finished in {time.strftime('%H:%M:%S', time.gmtime(total))}")
+        print(f"Best train Isomap-loss(BCE)={best_train_loss:.4f}")
+
+        isomap_model.eval()
+        with torch.no_grad():
+            item_Z_final = isomap_model().to(torch.float32).detach()
+
+        final_ncf = NeuMFOnManifold(
+            user_num=self.num_users,
+            latent_dim=self.latent_len,
+            factor_num=self.factor_num,
+            num_layers=self.num_layers,
+            dropout=self.dropout,
+            model_type=self.model_type
+        ).to(self.device)
+
+        final_optim = optim.AdamW(final_ncf.parameters(), lr=self.lr_ncf)
+        loss_fn = nn.BCEWithLogitsLoss()
+
+        for ep in range(3):
+            final_ncf.train()
+            total_loss = 0.0
+            n_batches = 0
+            for batch_users, batch_items, batch_labels in self.inter_loader:
+                batch_users = batch_users.to(self.device)
+                batch_items = batch_items.to(self.device)
+                batch_labels = batch_labels.to(self.device)
+
+                preds = final_ncf(batch_users, batch_items, item_Z_final)
+                loss = loss_fn(preds, batch_labels)
+
+                final_optim.zero_grad()
+                loss.backward()
+                final_optim.step()
+
+                total_loss += loss.item()
+                n_batches += 1
+            avg_loss = total_loss / max(1, n_batches)
+            print(f"[GI+NCF-final] inner epoch {ep}: loss={avg_loss:.4f}")
+
+        self.isomap_model = isomap_model
+        self.ncf_model = final_ncf
+
+        torch.save(self.isomap_model.state_dict(), os.path.join(self.logs_folder, "last_isomap_model.pt"))
+
+        return self.isomap_model, self.ncf_model
