@@ -13,11 +13,12 @@ from torch.utils.data import DataLoader
 #from GradientIsomapCF_correct import GradientIsomapCF
 #from GradientIsomapCF_reinit import GradientIsomapCF
 from GradientIsomapCF_reinit_new import GradientIsomapCF
+#from GradientIsomapCF_reinit_val import GradientIsomapCF
 from evaluation import evaluate_topk_isomap, evaluate_topk_pure
 from NCF_datasets import NCFTestDataset, NCFTrainDataset
 from NCF import NCF
 from prepare_data import prepare_sequences, subsample_users_items, train_val_test_split_next_item, build_movie_user_matrix
-from manifold_visualization import plot_manifold_isomap, plot_gi_convergence, plot_movie_pca, plot_cf_inner_losses
+from manifold_visualization import plot_gi_losses  # plot_manifold_isomap, plot_gi_convergence, plot_movie_pca, plot_cf_inner_losses
 
 
 def load_movielens_1m_ratings(ml1m_dir):
@@ -140,11 +141,11 @@ def main(
         train_events=train_events,
         num_users=num_users,
         num_items=num_movies,
-        latent_len=256,  # размерность manifold Z
+        latent_len=32,  # размерность manifold Z
         n_neighbors=10,
         epochs=gradisomap_epochs,  # outer_epochs
-        cf_epochs=3,  # внутренних эпох CF на фиксированном Z
-        # final_cf_epochs=2,  # количество эпох для финальной модели
+        cf_epochs=6,  # внутренних эпох CF на фиксированном Z
+        final_cf_epochs=30,  # количество эпох для финальной модели
         batch_size=2048,
         lr_isomap=1e-4,
         lr_ncf=1e-3,
@@ -167,6 +168,9 @@ def main(
     hr_iso, ndcg_iso = evaluate_topk_isomap(ncf_manifold_model, isomap_model, test_loader, top_k, device)
     print(f"GradientIsomapCF final on TEST: HR@{top_k}={hr_iso:.4f}, NDCG@{top_k}={ndcg_iso:.4f}")
     print(f"GI + NeuMFOnM HR@{top_k}={hr_iso:.4f}, NDCG@{top_k}={ndcg_iso:.4f}")
+
+    images_dir = os.path.join("logs_movielens_isomap_cf", "run27/images")
+    plot_gi_losses(gi_cf.history, gi_cf.cf_history, images_dir, run_name="ginmf")
 
     #plot_gi_convergence(gi_cf.history, top_k=top_k)
 
@@ -191,6 +195,6 @@ if __name__ == "__main__":
         num_ng=2,
         top_k=10,
         epochs_pure=30,
-        gradisomap_epochs=5,
+        gradisomap_epochs=3,
         run_ncf=False
         )

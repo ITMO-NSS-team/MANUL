@@ -234,3 +234,64 @@ def plot_cf_inner_losses(cf_history,
     plt.savefig(out_path, dpi=150)
     plt.close()
     print(f"График inner-лоссов NeuMF сохранён в {out_path}")
+
+
+def plot_gi_losses(history, cf_history, images_dir, run_name="run"):
+
+    os.makedirs(images_dir, exist_ok=True)
+
+    epochs = history.get('epoch', [])
+    train_loss = history.get('train_loss', [])
+    val_loss = history.get('val_loss', [])
+
+    plt.figure(figsize=(8, 5))
+    plt.plot(epochs, train_loss, marker='o', label='Isomap train BCE loss')
+    if any(v is not None for v in val_loss):
+        plt.plot(epochs, [v if v is not None else float('nan') for v in val_loss],
+                 marker='s', label='Isomap val BCE loss')
+    plt.xlabel('Outer epoch')
+    plt.ylabel('BCE loss')
+    plt.title('Isomap (outer) train/val loss')
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+
+    out_path_outer = os.path.join(images_dir, f"{run_name}_outer_isomap_loss.png")
+    plt.savefig(out_path_outer, dpi=150)
+    plt.close()
+    # print(f"Isomap outer-loss график сохранён в {out_path_outer}")
+
+    cf_train = cf_history.get('train_loss', [])
+    cf_val   = cf_history.get('val_loss', [])
+    num_outer = len(cf_train)
+
+    for outer_idx in range(num_outer):
+        inner_train = cf_train[outer_idx] if outer_idx < len(cf_train) else None
+        inner_val   = cf_val[outer_idx]   if outer_idx < len(cf_val)   else None
+
+        if inner_train is None or len(inner_train) == 0:
+            continue
+
+        x = list(range(len(inner_train)))
+
+        plt.figure(figsize=(8, 5))
+        plt.plot(x, inner_train, marker='o', label='NeuMF train BCE loss')
+
+        if inner_val is not None and any(v is not None for v in inner_val):
+            y_val = [v if v is not None else float('nan') for v in inner_val]
+            plt.plot(x, y_val, marker='s', label='NeuMF val BCE loss')
+
+        plt.xlabel('Inner epoch (cf_ep)')
+        plt.ylabel('BCE loss')
+        plt.title(f'NeuMF inner train/val loss (outer epoch {outer_idx})')
+        plt.legend()
+        plt.grid(True, alpha=0.3)
+        plt.tight_layout()
+
+        out_path_inner = os.path.join(
+            images_dir,
+            f"{run_name}_inner_neumf_losses_outer{outer_idx}.png"
+        )
+        plt.savefig(out_path_inner, dpi=150)
+        plt.close()
+        # print(f"NeuMF inner-loss график для outer={outer_idx} сохранён в {out_path_inner}")

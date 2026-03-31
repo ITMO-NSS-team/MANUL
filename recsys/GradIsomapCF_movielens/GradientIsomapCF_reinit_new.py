@@ -31,6 +31,7 @@ class GradientIsomapCF:
                  n_neighbors: int = 10,
                  epochs: int = 5,
                  cf_epochs: int = 2,
+                 final_cf_epochs = 3,
                  batch_size: int = 2048,
                  lr_isomap: float = 1e-4,
                  lr_ncf: float = 1e-3,
@@ -52,6 +53,7 @@ class GradientIsomapCF:
 
         self.epochs = epochs
         self.cf_epochs = cf_epochs
+        self.final_cf_epochs = final_cf_epochs
 
         self.batch_size = batch_size
         self.lr_isomap = lr_isomap
@@ -173,14 +175,14 @@ class GradientIsomapCF:
         isomap_optim = optim.AdamW(isomap_model.parameters(), lr=self.lr_isomap)
         loss_fn = nn.BCEWithLogitsLoss()
 
-        best_train_loss = np.inf
+        best_val_loss = np.inf
 
         for epoch in range(self.epochs):
             epoch_start = time.time()
 
             isomap_model.eval()
             with torch.no_grad():
-                item_Z_epoch = isomap_model().to(torch.float32).detach()  # [num_items, latent_len]
+                item_Z_epoch = isomap_model().to(torch.float32).detach()
 
             ncf_model = NeuMFOnManifold(
                 user_num=self.num_users,
@@ -194,10 +196,11 @@ class GradientIsomapCF:
 
             ncf_model.train()
             cf_train_losses = []
+            cf_val_losses = []
+
             for cf_ep in range(self.cf_epochs):
                 total_cf_loss = 0.0
                 n_batches = 0
-
                 for batch_users, batch_items, batch_labels in self.inter_loader:
                     batch_users = batch_users.to(self.device)
                     batch_items = batch_items.to(self.device)
@@ -216,7 +219,35 @@ class GradientIsomapCF:
                 avg_cf_train_loss = total_cf_loss / max(1, n_batches)
                 cf_train_losses.append(avg_cf_train_loss)
 
+                if val_loader is not None:
+                    ncf_model.eval()
+                    with torch.no_grad():
+                        total_val_loss = 0.0
+                        n_val_batches = 0
+                        for val_users, val_items, val_labels in val_loader:
+                            val_users = val_users.to(self.device)
+                            val_items = val_items.to(self.device)
+                            val_labels = val_labels.to(self.device)
+
+                            preds_val = ncf_model(val_users, val_items, item_Z_epoch)
+                            loss_val = loss_fn(preds_val, val_labels)
+
+                            total_val_loss += loss_val.item()
+                            n_val_batches += 1
+
+                    avg_cf_val_loss = total_val_loss / max(1, n_val_batches)
+                    cf_val_losses.append(avg_cf_val_loss)
+                    print(f"[Inner NCF] epoch {cf_ep + 1}/{self.cf_epochs}, "
+                          f"NCF-train={avg_cf_train_loss:.4f}, "
+                          f"NCF-val={avg_cf_val_loss if avg_cf_val_loss is not None else float('nan'):.4f}, "
+                          )
+
+                    ncf_model.train()
+                else:
+                    cf_val_losses.append(None)
+
             self.cf_history['train_loss'].append(cf_train_losses)
+            self.cf_history['val_loss'].append(cf_val_losses)
 
             ncf_model.eval()
             for p in ncf_model.parameters():
@@ -226,44 +257,72 @@ class GradientIsomapCF:
             isomap_optim.zero_grad()
 
             item_Z_full = isomap_model().to(torch.float32)
-            preds_all = ncf_model(self.users_all, self.items_all, item_Z_full)
-            loss_iso = loss_fn(preds_all, self.labels_all)
+            preds_all = ncf_model(self.users_all.to(self.device),
+                                  self.items_all.to(self.device),
+                                  item_Z_full)
+            loss_iso_train = loss_fn(preds_all, self.labels_all.to(self.device))
 
-            loss_iso.backward()
+            loss_iso_train.backward()
             isomap_optim.step()
 
-            avg_loss = float(loss_iso.item())
+            avg_train_loss = float(loss_iso_train.item())
             elapsed = time.time() - epoch_start
 
+            if val_loader is not None:
+                isomap_model.eval()
+                ncf_model.eval()
+                with torch.no_grad():
+                    item_Z_val = isomap_model().to(torch.float32)
+                    total_val_loss_outer = 0.0
+                    n_val_batches_outer = 0
+                    for val_users, val_items, val_labels in val_loader:
+                        val_users = val_users.to(self.device)
+                        val_items = val_items.to(self.device)
+                        val_labels = val_labels.to(self.device)
+
+                        preds_val_outer = ncf_model(val_users, val_items, item_Z_val)
+                        loss_val_outer = loss_fn(preds_val_outer, val_labels)
+
+                        total_val_loss_outer += loss_val_outer.item()
+                        n_val_batches_outer += 1
+
+                avg_val_loss = total_val_loss_outer / max(1, n_val_batches_outer)
+            else:
+                avg_val_loss = None
+
             self.history['epoch'].append(epoch)
-            self.history['train_loss'].append(avg_loss)
+            self.history['train_loss'].append(avg_train_loss)
+            self.history.setdefault('val_loss', []).append(avg_val_loss)
 
-            print(f"[GI+NCF-reinit] epoch {epoch}/{self.epochs}, "
-                  f"Isomap-loss(BCE)={avg_loss:.4f}, time={elapsed:.1f}s")
-
-            if avg_loss < best_train_loss:
-                best_train_loss = avg_loss
+            print(f"[GI+NCF-reinit] epoch {epoch+1}/{self.epochs}, "
+                  f"Isomap-train={avg_train_loss:.4f}, "
+                  f"Isomap-val={avg_val_loss if avg_val_loss is not None else float('nan'):.4f}, "
+                  f"time={elapsed:.1f}s")
 
             if val_loader is not None:
                 hr_val, ndcg_val = evaluate_topk_isomap(ncf_model, isomap_model, val_loader, top_k, device)
                 self.history['val_hr'].append(hr_val)
                 self.history['val_ndcg'].append(ndcg_val)
-                print(f"[GI+NCF-reinit] epoch {epoch}: HR@{top_k}_val={hr_val:.4f}, "
+                print(f"[GI+NCF-reinit] epoch {epoch+1}: HR@{top_k}_val={hr_val:.4f}, "
                       f"NDCG@{top_k}_val={ndcg_val:.4f}")
             else:
                 self.history['val_hr'].append(None)
                 self.history['val_ndcg'].append(None)
 
-            if avg_loss <= self.stop_criteria_value:
-                print(f"Stop criteria reached: loss={avg_loss:.4f} <= {self.stop_criteria_value}")
+            stop_loss = avg_val_loss if avg_val_loss is not None else avg_train_loss
+
+            if stop_loss < best_val_loss:
+                best_val_loss = stop_loss
+            if stop_loss <= self.stop_criteria_value:
+                print(f"Stop criteria reached: val_loss={stop_loss:.4f} <= {self.stop_criteria_value}")
                 break
 
             del ncf_model, ncf_optim
             torch.cuda.empty_cache()
 
         total = time.time() - start_time
-        print(f"GradientIsomapCF finished in {time.strftime('%H:%M:%S', time.gmtime(total))}")
-        print(f"Best train Isomap-loss(BCE)={best_train_loss:.4f}")
+        print(f"GradientIsomapCF (reinit, intrinsic-style) finished in {time.strftime('%H:%M:%S', time.gmtime(total))}")
+        print(f"Best outer val/train Isomap-loss(BCE)={best_val_loss:.4f}")
 
         isomap_model.eval()
         with torch.no_grad():
@@ -281,10 +340,16 @@ class GradientIsomapCF:
         final_optim = optim.AdamW(final_ncf.parameters(), lr=self.lr_ncf)
         loss_fn = nn.BCEWithLogitsLoss()
 
-        for ep in range(3):
+        patience = 3
+        best_val_loss_final = np.inf
+        best_state_final = None
+        no_improve = 0
+
+        for ep in range(self.final_cf_epochs):
             final_ncf.train()
-            total_loss = 0.0
-            n_batches = 0
+            total_train_loss = 0.0
+            n_train_batches = 0
+
             for batch_users, batch_items, batch_labels in self.inter_loader:
                 batch_users = batch_users.to(self.device)
                 batch_items = batch_items.to(self.device)
@@ -297,14 +362,58 @@ class GradientIsomapCF:
                 loss.backward()
                 final_optim.step()
 
-                total_loss += loss.item()
-                n_batches += 1
-            avg_loss = total_loss / max(1, n_batches)
-            print(f"[GI+NCF-final] inner epoch {ep}: loss={avg_loss:.4f}")
+                total_train_loss += loss.item()
+                n_train_batches += 1
+
+            avg_train_loss = total_train_loss / max(1, n_train_batches)
+
+            if val_loader is not None:
+                final_ncf.eval()
+                total_val_loss = 0.0
+                n_val_batches = 0
+                with torch.no_grad():
+                    for val_users, val_items, val_labels in val_loader:
+                        val_users = val_users.to(self.device)
+                        val_items = val_items.to(self.device)
+                        val_labels = val_labels.to(self.device)
+
+                        preds_val = final_ncf(val_users, val_items, item_Z_final)
+                        loss_val = loss_fn(preds_val, val_labels)
+
+                        total_val_loss += loss_val.item()
+                        n_val_batches += 1
+
+                avg_val_loss = total_val_loss / max(1, n_val_batches)
+
+                print(f"[GI+NCF-final] inner epoch {ep}: "
+                      f"train_loss={avg_train_loss:.4f}, val_loss={avg_val_loss:.4f}")
+
+                if avg_val_loss < best_val_loss_final:
+                    best_val_loss_final = avg_val_loss
+                    best_state_final = final_ncf.state_dict()
+                    no_improve = 0
+                else:
+                    no_improve += 1
+
+                if no_improve >= patience:
+                    print(f"[GI+NCF-final] early stopping at epoch {ep+1} (no improvement {patience} epochs)")
+                    break
+
+                if avg_val_loss <= self.stop_criteria_value:
+                    print(
+                        f"[GI+NCF-final] stop by threshold: val_loss={avg_val_loss:.4f} <= {self.stop_criteria_value}")
+                    break
+
+            else:
+                print(f"[GI+NCF-final] inner epoch {ep+1}: train_loss={avg_train_loss:.4f}")
+
+        if best_state_final is not None:
+            final_ncf.load_state_dict(best_state_final)
 
         self.isomap_model = isomap_model
         self.ncf_model = final_ncf
 
-        torch.save(self.isomap_model.state_dict(), os.path.join(self.logs_folder, "last_isomap_model.pt"))
+        torch.save(self.isomap_model.state_dict(),
+                   os.path.join(self.logs_folder, "last_isomap_model.pt"))
 
         return self.isomap_model, self.ncf_model
