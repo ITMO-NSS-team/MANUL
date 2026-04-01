@@ -283,7 +283,7 @@ def plot_gi_losses(history, cf_history, images_dir, run_name="run"):
 
         plt.xlabel('Inner epoch (cf_ep)')
         plt.ylabel('BCE loss')
-        plt.title(f'NeuMF inner train/val loss (outer epoch {outer_idx})')
+        plt.title(f'NeuMF inner train/val loss (outer epoch {outer_idx+1})')
         plt.legend()
         plt.grid(True, alpha=0.3)
         plt.tight_layout()
@@ -295,3 +295,31 @@ def plot_gi_losses(history, cf_history, images_dir, run_name="run"):
         plt.savefig(out_path_inner, dpi=150)
         plt.close()
         # print(f"NeuMF inner-loss график для outer={outer_idx} сохранён в {out_path_inner}")
+
+
+def plot_pure_ncf_losses(history, images_dir, run_name="pure_ncf"):
+    """
+    history: словарь с ключами 'epoch', 'train_loss', 'val_loss'
+    images_dir: папка для сохранения PNG
+    run_name: префикс имени файла
+    """
+    os.makedirs(images_dir, exist_ok=True)
+
+    epochs = history['epoch']
+    train_loss = history['train_loss']
+    val_loss = history['val_loss']
+
+    plt.figure(figsize=(8, 5))
+    plt.plot(epochs, train_loss, marker='o', label='Train BCE loss')
+    plt.plot(epochs, val_loss, marker='s', label='Val BCE loss')
+    plt.xlabel('Epoch')
+    plt.ylabel('BCE loss')
+    plt.title('Pure NeuMF: train/val loss vs epoch')
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+
+    out_path = os.path.join(images_dir, f"{run_name}_loss_curve.png")
+    plt.savefig(out_path, dpi=150)
+    plt.close()
+    print(f"График лоссов NCF сохранён в {out_path}")
