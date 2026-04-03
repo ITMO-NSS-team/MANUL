@@ -195,8 +195,8 @@ def main(
             latent_len=128,  # размерность manifold Z
             n_neighbors=10,
             epochs=gradisomap_epochs,  # outer_epochs
-            cf_epochs=60,  # внутренних эпох CF на фиксированном Z
-            final_cf_epochs=60,  # количество эпох для финальной модели
+            cf_epochs=100,  # внутренних эпох CF на фиксированном Z
+            final_cf_epochs=100,  # количество эпох для финальной модели
             batch_size=2048,
             lr_isomap=1e-4,  # 1e-4
             lr_ncf=1e-3,  # 1e-3
@@ -220,7 +220,7 @@ def main(
         print(f"GradientIsomapCF final on TEST: HR@{top_k}={hr_iso:.4f}, NDCG@{top_k}={ndcg_iso:.4f}")
         print(f"GI + NeuMFOnM HR@{top_k}={hr_iso:.4f}, NDCG@{top_k}={ndcg_iso:.4f}")
 
-        images_dir = os.path.join("logs_movielens_isomap_cf", "run33/images")
+        images_dir = os.path.join("logs_movielens_isomap_cf", "run35/images")
         plot_gi_losses(gi_cf.history, gi_cf.cf_history, images_dir, run_name="ginmf")
 
         #plot_gi_convergence(gi_cf.history, top_k=top_k)
@@ -246,7 +246,7 @@ if __name__ == "__main__":
         num_ng=2,
         top_k=10,
         epochs_pure=30,
-        gradisomap_epochs=50,
+        gradisomap_epochs=20,
         run_ncf=False,
         run_gincf=True
         )

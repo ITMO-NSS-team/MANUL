@@ -248,6 +248,84 @@ class GradientIsomapCF:
 
             self.cf_history['train_loss'].append(cf_train_losses)
             self.cf_history['val_loss'].append(cf_val_losses)
+            """
+            ncf_model.train()
+            cf_train_losses = []
+            cf_val_losses = []
+
+            best_inner_val_loss = float('inf')
+            no_improve_inner = 0
+
+            diff_threshold = 0.01  # насколько близко должны быть train и val лоссы
+            patience_inner = 5  # сколько inner-эпох подряд вал-лосс не должен улучшаться
+
+            for cf_ep in range(self.cf_epochs):
+                total_cf_loss = 0.0
+                n_batches = 0
+
+                for batch_users, batch_items, batch_labels in self.inter_loader:
+                    batch_users = batch_users.to(self.device)
+                    batch_items = batch_items.to(self.device)
+                    batch_labels = batch_labels.to(self.device)
+
+                    preds_cf = ncf_model(batch_users, batch_items, item_Z_epoch)
+                    loss_cf = loss_fn(preds_cf, batch_labels)
+
+                    ncf_optim.zero_grad()
+                    loss_cf.backward()
+                    ncf_optim.step()
+
+                    total_cf_loss += loss_cf.item()
+                    n_batches += 1
+
+                avg_cf_train_loss = total_cf_loss / max(1, n_batches)
+                cf_train_losses.append(avg_cf_train_loss)
+
+                if val_loader is not None:
+                    ncf_model.eval()
+                    total_val_loss = 0.0
+                    n_val_batches = 0
+                    with torch.no_grad():
+                        for val_users, val_items, val_labels in val_loader:
+                            val_users = val_users.to(self.device)
+                            val_items = val_items.to(self.device)
+                            val_labels = val_labels.to(self.device)
+
+                            preds_val = ncf_model(val_users, val_items, item_Z_epoch)
+                            loss_val = loss_fn(preds_val, val_labels)
+
+                            total_val_loss += loss_val.item()
+                            n_val_batches += 1
+
+                    avg_cf_val_loss = total_val_loss / max(1, n_val_batches)
+                    cf_val_losses.append(avg_cf_val_loss)
+
+                    print(f"[Inner NCF] epoch {cf_ep + 1}/{self.cf_epochs}, "
+                          f"NCF-train={avg_cf_train_loss:.4f}, NCF-val={avg_cf_val_loss:.4f}")
+
+                    eps = 1e-4
+                    if avg_cf_val_loss < best_inner_val_loss - eps:
+                        best_inner_val_loss = avg_cf_val_loss
+                        no_improve_inner = 0
+                    else:
+                        no_improve_inner += 1
+
+                    loss_diff = abs(avg_cf_train_loss - avg_cf_val_loss)
+                    if (loss_diff < diff_threshold) and (no_improve_inner >= patience_inner):
+                        print(f"[Inner NCF] early stop at inner epoch {cf_ep + 1} "
+                              f"(train≈val, no val improvement {patience_inner} epochs)")
+                        ncf_model.train()
+                        break
+
+                    ncf_model.train()
+                else:
+                    cf_val_losses.append(None)
+                    print(f"[Inner NCF] epoch {cf_ep + 1}/{self.cf_epochs}, "
+                          f"NCF-train={avg_cf_train_loss:.4f}, NCF-val=None")
+
+            self.cf_history['train_loss'].append(cf_train_losses)
+            self.cf_history['val_loss'].append(cf_val_losses)
+            """
 
             ncf_model.eval()
             for p in ncf_model.parameters():
