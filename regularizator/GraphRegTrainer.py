@@ -1,12 +1,12 @@
 import os
 import time
+import copy
 from typing import Callable
 
 import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
-from sklearn.metrics import pairwise_distances
 from torch import float64 as fl64
 from matplotlib import pyplot as plt
 from SALib import ProblemSpec
@@ -58,7 +58,7 @@ def get_adaptive_lambda_sobol(combines_loss, nn_loss, graph_loss):
         list [float, float]: normalized lambda coefficients [lam_nn, lam_graph]
 
     """
-    n_samples = 1  # can be changed to use more elements of lists
+    n_samples = 5  # can be changed to use more elements of lists
     sampling_D = 2  # as combine 2 features
 
     if n_samples * (sampling_D * 2 + 2) > len(combines_loss):
@@ -123,7 +123,8 @@ class GraphRegTrainer:
                  num_epochs: int = 100,
                  batch_size: int = 64,
                  device: str = None,
-                 cache_folder: str = None):
+                 cache_folder: str = None,
+                 knn_k: int = 100):
         """
         Args:
             train_features: training features [N, features]
@@ -133,25 +134,32 @@ class GraphRegTrainer:
             criterion: loss function (e.g., nn.MSELoss, nn.CrossEntropyLoss)
             optimizer: optimizer (e.g., torch.optim.Adam)
             val_features: validation features
-            val_targets:validation targets
+            val_targets: validation targets
             target_metric: evaluation metric
             num_epochs: number of epochs
             batch_size: batch size
             device: 'cuda', 'cpu' or None (auto)
             cache_folder: folder for saving models
+            knn_k: KNN sparsification k (None = no sparsification, dense affinity)
         """
         self.best_model = None
+        self._best_model_state = None
         self.best_epoch = 0
         self.features = train_features.astype(float)
         self.target = train_target
         self.val_features = val_features
         self.val_targets = val_targets
-        # fill nans for correct regularization
+
+        # NaN-safe distance handling: NaN distances → affinity 0
+        self._nan_mask = np.isnan(weights_matrix)
         self.weights_matrix = np.nan_to_num(weights_matrix)
+
         self.base_indices = base_indices
         self.num_epochs = num_epochs
         self.batch_size = batch_size
         self.cache_folder = cache_folder
+        self._knn_k = knn_k
+
         if cache_folder is not None and not os.path.exists(cache_folder):
             os.makedirs(cache_folder)
 
@@ -171,6 +179,14 @@ class GraphRegTrainer:
         self.optimizer = optimizer
         self.target_metric = target_metric
 
+        self._base_idx_to_pos = {int(idx): pos for pos, idx in enumerate(self.base_indices)}
+
+        # Precompute base point features tensor for full-graph loss
+        self._base_features_tensor = torch.tensor(
+            self.features[self.base_indices], dtype=fl64)
+
+        self._precompute_affinity()
+
     def init_device(self, device: str = None):
         """
         Initialize computing device (CUDA or CPU).
@@ -186,60 +202,96 @@ class GraphRegTrainer:
                 device = 'cpu'
         return device
 
-    def _compute_graph_loss_global(self, all_predictions: torch.Tensor, batch_indices=None) -> torch.Tensor:
-        """
-        Compute global graph regularization loss using pairwise distances.
+    def _precompute_affinity(self):
+        """Precompute RBF affinity matrix with NaN fix, optional local sigma, optional KNN sparsification."""
+        W = torch.tensor(self.weights_matrix, dtype=fl64)
+        n = W.shape[0]
 
-        Computes weighted sum of prediction differences across all point pairs:
-        Loss = (1/2N^2) * sum_ij (A_ij * ||f(i) - f(j)||^2)
-        where A=exp(-W**2) and W is the precomputed distance matrix and f(i) are model predictions.
-        Args:
-            all_predictions: model predictions for all points [N, output_dim]
-            batch_indices: indices of the current batch (optional). If provided,
-                           computes loss only for pairs within the batch.
-        Returns:
-            graph_loss: scalar regularization loss value
-        """
-        F = all_predictions.cpu().detach().numpy()
-        if batch_indices is not None:
-            # loss calculates only on graph base points to save weights_matrix dimensionality
-            real_indices_in_base = np.intersect1d(batch_indices,
-                                                  self.base_indices)  # find batch indices which are in base
-            indices_in_batch_indices = np.argwhere(np.isin(batch_indices, real_indices_in_base))[:, 0]
-            F = F[indices_in_batch_indices]
-            prediction_dists = pairwise_distances(F, F) ** 2
+        triu_idx = torch.triu_indices(n, n, offset=1)
+        upper_tri_dists = W[triu_idx[0], triu_idx[1]]
 
-            # find valid indices to cut weights_matrix with base dimensionality
-            indices_in_base = np.argwhere(np.isin(self.base_indices, real_indices_in_base))[:, 0]
-            batch_weights_matrix = self.weights_matrix[indices_in_base][:, indices_in_base]
-            graph_loss = np.sum(prediction_dists * np.exp(-batch_weights_matrix ** 2)) / (
-                        2 * len(real_indices_in_base) ** 2)
+        # Exclude NaN-originated zeros from sigma computation
+        if self._nan_mask.any():
+            nan_mask_t = torch.tensor(self._nan_mask, dtype=torch.bool)
+            nan_upper = nan_mask_t[triu_idx[0], triu_idx[1]]
+            valid_dists = upper_tri_dists[~nan_upper]
+            valid_dists = valid_dists[valid_dists > 0]
+            if len(valid_dists) > 0:
+                sigma_sq = torch.median(valid_dists) ** 2
+            else:
+                sigma_sq = torch.median(upper_tri_dists) ** 2
+            nan_count = self._nan_mask.sum()
+            print(f"  [Affinity] {nan_count} NaN entries masked (affinity=0)")
         else:
-            prediction_dists = pairwise_distances(F, F) ** 2
-            graph_loss = np.sum(prediction_dists * np.exp(-self.weights_matrix ** 2)) / (2 * F.shape[0] ** 2)
-        return graph_loss
+            sigma_sq = torch.median(upper_tri_dists) ** 2
+
+        if sigma_sq < 1e-12:
+            print("  [Affinity] WARNING: sigma^2 ~ 0, falling back to 1.0")
+            sigma_sq = torch.tensor(1.0, dtype=fl64)
+
+        A = torch.exp(-(W ** 2) / sigma_sq)
+        print(f"  [Affinity] Global sigma^2 = {sigma_sq.item():.6f}")
+
+        A.fill_diagonal_(0)
+
+        # Zero out NaN-originated entries
+        if self._nan_mask.any():
+            A[torch.tensor(self._nan_mask, dtype=torch.bool)] = 0.0
+
+        # KNN sparsification
+        if self._knn_k is not None:
+            k = min(self._knn_k, n - 1)
+            topk_vals, topk_idx = A.topk(k, dim=1)
+            A_sparse = torch.zeros_like(A)
+            rows = torch.arange(n).unsqueeze(1).expand(-1, k)
+            A_sparse[rows, topk_idx] = topk_vals
+            A = (A_sparse + A_sparse.T) / 2  # symmetrize
+            nnz = (A > 0).sum().item()
+            print(f"  [Affinity] KNN sparsification k={k}: "
+                  f"{nnz} non-zero ({100*nnz/A.numel():.1f}%)")
+        else:
+            nnz = (A > 0).sum().item()
+            print(f"  [Affinity] Dense (no sparsification): "
+                  f"{nnz} non-zero ({100*nnz/A.numel():.1f}%)")
+
+        self._affinity_matrix = A.to(self.device)
+        print(f"  [Affinity] Matrix: {self._affinity_matrix.shape}, "
+              f"range=[{A.min().item():.6f}, {A.max().item():.6f}]")
+
+    def _compute_pairwise_graph_loss(self, feat, affinity):
+        """Compute graph smoothness loss: sum A_ij * ||f(i)-f(j)||^2 / (2*n^2)."""
+        if feat.dim() == 1:
+            feat = feat.unsqueeze(1)
+        sq_norms = (feat ** 2).sum(dim=1, keepdim=True)
+        pairwise_sq_dists = sq_norms + sq_norms.T - 2.0 * (feat @ feat.T)
+        pairwise_sq_dists = torch.clamp(pairwise_sq_dists, min=0.0)
+        n = feat.shape[0]
+        return (pairwise_sq_dists * affinity).sum() / (2.0 * n * n)
+
+    def _compute_full_graph_loss(self):
+        """Full graph loss on ALL base points (output layer). Returns loss value."""
+        self.model.train()
+        base_x = self._base_features_tensor.to(self.device)
+        base_out = self.model(base_x)
+        return self._compute_pairwise_graph_loss(base_out, self._affinity_matrix)
+
+    def _save_best_model(self):
+        self._best_model_state = copy.deepcopy(self.model.state_dict())
+
+    def _load_best_model(self):
+        if self._best_model_state is not None:
+            self.model.load_state_dict(self._best_model_state)
+        self.best_model = self.model
 
     def train(self, plot_convergence: bool = False, adaptive_lambda=False,
-              early_stopping_patience: int = 100, adaptive_lambda_window: int = 100):
-        """
-        Train the model with combined loss (model loss + graph regularization loss).
-
-        Args:
-            plot_convergence: whether to plot convergence graphs after training
-            adaptive_lambda: adaptive lambda method - False (disabled) or 'sobol' (once after 10% epochs)
-            early_stopping_patience: number of epochs to wait for improvement before stopping (None = no early stopping)
-            adaptive_lambda_window: number of epochs to update weights of combined loss components
-        Returns:
-            self: trained model instance
-        """
+              early_stopping_patience: int = 100, adaptive_lambda_window: int = 100,
+              lambda_graph: float = 1.0):
         self.model.train()
 
         best_val_loss = float('inf')
         increasing_counter = 0
-
-        lam_nn = 1
-        lam_graph = 1
-
+        lam_nn = 1.0
+        lam_graph = float(lambda_graph)
         no_changes_epochs = 100
 
         if adaptive_lambda == 'sobol':
@@ -268,25 +320,31 @@ class GraphRegTrainer:
                 batch_y = torch.tensor(self.target[batch_indices], dtype=fl64).to(self.device)
                 output = self.model(batch_x)
                 model_loss = self.criterion(output, batch_y.reshape_as(output))
-                graph_loss = self._compute_graph_loss_global(output, batch_indices=batch_indices)
 
-                combined_loss = lam_nn * model_loss + lam_graph * graph_loss
+                # Per-batch: only supervised loss; graph loss computed after all batches
+                combined_loss = lam_nn * model_loss
 
                 self.optimizer.zero_grad()
                 combined_loss.backward()
                 self.optimizer.step()
 
                 epoch_model_loss += model_loss.item()
-                epoch_graph_loss += graph_loss.item()
                 epoch_combined_loss += combined_loss.item()
-                num_batches += 1
+
+            # Full-epoch graph loss: one forward pass on all base points
+            full_gl = self._compute_full_graph_loss()
+            self.optimizer.zero_grad()
+            (lam_graph * full_gl).backward()
+            self.optimizer.step()
+            epoch_graph_loss = full_gl.item()
+            epoch_combined_loss += lam_graph * full_gl.item()
 
             current_time = time.strftime("%H:%M:%S", time.gmtime(time.time() - start_time))
             self.convergence_history['time_spent'].append(current_time)
 
-            avg_model_loss = epoch_model_loss / num_batches if num_batches > 0 else epoch_model_loss
-            avg_graph_loss = epoch_graph_loss / num_batches if num_batches > 0 else epoch_graph_loss
-            avg_combined_loss = epoch_combined_loss / num_batches if num_batches > 0 else epoch_combined_loss
+            avg_model_loss = epoch_model_loss / num_batches
+            avg_graph_loss = epoch_graph_loss
+            avg_combined_loss = epoch_model_loss / num_batches + lam_graph * epoch_graph_loss
 
             self.convergence_history['model_loss'].append(avg_model_loss)
             self.convergence_history['graph_loss'].append(avg_graph_loss)
@@ -310,7 +368,7 @@ class GraphRegTrainer:
                 if early_stopping_patience is not None:
                     if val_model_loss < best_val_loss:
                         best_val_loss = val_model_loss
-                        self.best_model = self.model
+                        self._save_best_model()
                         self.best_epoch = epoch + 1
 
                     if len(self.convergence_history['val_loss']) > no_changes_epochs:
@@ -341,15 +399,20 @@ class GraphRegTrainer:
                     self.convergence_history['model_lambda'].append(float(lam_nn))
                     self.convergence_history['graph_lambda'].append(float(lam_graph))
 
-        self.convergence_history['epoch'] = np.arange(1, len(self.convergence_history['model_loss']) + 1)
-        if adaptive_lambda is None:
-            self.convergence_history['model_lambda'] = np.ones(self.num_epochs)
-            self.convergence_history['graph_lambda'] = np.ones(self.num_epochs)
+        self._load_best_model()
+
+        self.convergence_history['epoch'] = np.arange(
+            1, len(self.convergence_history['model_loss']) + 1)
+        if adaptive_lambda is None or adaptive_lambda is False:
+            self.convergence_history['model_lambda'] = np.ones(len(self.convergence_history['model_loss']))
+            self.convergence_history['graph_lambda'] = np.ones(len(self.convergence_history['model_loss'])) * float(lambda_graph)
+
         df = pd.DataFrame({
             key: pd.Series(values)
             for key, values in self.convergence_history.items()
         })
-        df.to_csv(f'{self.cache_folder}/convergence_log.csv', index=False)
+        if self.cache_folder is not None:
+            df.to_csv(f'{self.cache_folder}/convergence_log.csv', index=False)
 
         if plot_convergence:
             self._plot_convergence()
@@ -367,15 +430,19 @@ class GraphRegTrainer:
         model_lambda = self.convergence_history['model_lambda']
         graph_lambda = self.convergence_history['graph_lambda']
 
-        fig1, axes = plt.subplots(1, 2, figsize=(15, 5))
         epochs = range(1, len(combined_loss) + 1)
-        axes[0].plot(epochs, combined_loss, label='Combined Loss', color='blue', linewidth=2)
-        if len(val_loss) != 0 and self.best_epoch is not None and self.best_epoch <= len(combined_loss):
-            axes[0].axvline(x=self.best_epoch, color='gray', linestyle='--',
-                            linewidth=1.5, alpha=0.7, label=f'Best Val Epoch ({self.best_epoch})')
-            axes[0].axhline(y=combined_loss[self.best_epoch - 1], color='gray', linestyle='--',
-                            linewidth=1, alpha=0.5)
 
+        fig1, axes = plt.subplots(1, 2, figsize=(15, 5))
+
+        axes[0].plot(epochs, combined_loss, label='Combined Loss',
+                     color='blue', linewidth=2)
+        if len(val_loss) != 0 and self.best_epoch is not None \
+                and self.best_epoch <= len(combined_loss):
+            axes[0].axvline(x=self.best_epoch, color='gray', linestyle='--',
+                            linewidth=1.5, alpha=0.7,
+                            label=f'Best Val Epoch ({self.best_epoch})')
+            axes[0].axhline(y=combined_loss[self.best_epoch - 1],
+                            color='gray', linestyle='--', linewidth=1, alpha=0.5)
         axes[0].set_xlabel('Epoch')
         axes[0].set_ylabel('Loss')
         axes[0].set_title('Combined Training Loss')
@@ -385,14 +452,22 @@ class GraphRegTrainer:
 
         # Plot 2: Model Loss vs Graph Loss
         if len(model_loss) != 0 and len(graph_loss) != 0:
-            axes[1].plot(epochs, np.array(model_loss)*np.array(model_lambda), label='Model Loss', color='green', linewidth=2)
-            axes[1].plot(epochs, np.array(graph_loss)*np.array(graph_lambda), label='Graph Loss', color='red', linewidth=2)
-
-            if len(val_loss) != 0 and self.best_epoch != 0 and self.best_epoch <= len(model_loss):
+            n_plot = min(len(model_loss), len(model_lambda), len(graph_lambda))
+            axes[1].plot(
+                list(epochs)[:n_plot],
+                np.array(model_loss[:n_plot]) * np.array(model_lambda[:n_plot]),
+                label='Model Loss', color='green', linewidth=2)
+            axes[1].plot(
+                list(epochs)[:n_plot],
+                np.array(graph_loss[:n_plot]) * np.array(graph_lambda[:n_plot]),
+                label='Graph Loss', color='red', linewidth=2)
+            if len(val_loss) != 0 and self.best_epoch != 0 \
+                    and self.best_epoch <= len(model_loss):
                 axes[1].axvline(x=self.best_epoch, color='gray', linestyle='--',
-                                linewidth=1.5, alpha=0.7, label=f'Best Val Epoch ({self.best_epoch})')
-                axes[1].axhline(y=model_loss[self.best_epoch - 1], color='green', linestyle='--',
-                                linewidth=1, alpha=0.5)
+                                linewidth=1.5, alpha=0.7,
+                                label=f'Best Val Epoch ({self.best_epoch})')
+                axes[1].axhline(y=model_loss[self.best_epoch - 1],
+                                color='green', linestyle='--', linewidth=1, alpha=0.5)
             axes[1].set_xlabel('Epoch')
             axes[1].set_ylabel('Loss')
             axes[1].set_title('Model Loss vs Graph Loss')
@@ -415,30 +490,34 @@ class GraphRegTrainer:
                     color='blue', linewidth=2, alpha=0.8)
             val_epochs = range(1, len(val_loss) + 1)
             ax.plot(val_epochs, val_loss, label='Validation Loss',
-                    color='orange', linewidth=2, alpha=0.9, linestyle='-', markersize=4)
+                    color='orange', linewidth=2, alpha=0.9)
+
             if self.best_epoch is not None and self.best_epoch <= len(model_loss):
                 ax.axvline(x=self.best_epoch, color='red', linestyle='--',
-                           linewidth=2, alpha=0.8, label=f'Best Epoch ({self.best_epoch})')
-                if self.best_epoch <= len(val_loss):
-                    best_val_loss = val_loss[self.best_epoch - 1]
-                else:
-                    best_val_loss = val_loss[-1] if val_loss else 0
-                ax.plot(self.best_epoch, best_val_loss, 'r', markersize=5,
-                        markerfacecolor='red', markeredgecolor='darkred', markeredgewidth=2,
-                        label=f'Best Val Loss: {best_val_loss:.4f}')
-                ax.axhline(y=best_val_loss, color='red', linestyle=':',
+                           linewidth=2, alpha=0.8,
+                           label=f'Best Epoch ({self.best_epoch})')
+                best_val = (val_loss[self.best_epoch - 1]
+                            if self.best_epoch <= len(val_loss) else val_loss[-1])
+                ax.plot(self.best_epoch, best_val, 'r', markersize=5,
+                        markerfacecolor='red', markeredgecolor='darkred',
+                        markeredgewidth=2,
+                        label=f'Best Val Loss: {best_val:.4f}')
+                ax.axhline(y=best_val, color='red', linestyle=':',
                            linewidth=1, alpha=0.5)
+
             train_info = f'Training epochs: {len(combined_loss)}\n'
             if self.best_epoch is not None:
                 train_info += f'Best epoch: {self.best_epoch}\n'
                 train_info += f'Final train loss: {model_loss[-1]:.6f}\n'
-                train_info += f'Best val loss: {best_val_loss:.6f}'
+                train_info += f'Best val loss: {best_val:.6f}'
             props = dict(boxstyle='round', facecolor='wheat', alpha=0.8)
             ax.text(0.02, 0.98, train_info, transform=ax.transAxes,
                     fontsize=10, verticalalignment='top', bbox=props)
+
             ax.set_xlabel('Epoch', fontsize=12)
             ax.set_ylabel('Loss', fontsize=12)
-            ax.set_title('Training vs Validation Convergence', fontsize=14, fontweight='bold')
+            ax.set_title('Training vs Validation Convergence',
+                         fontsize=14, fontweight='bold')
             ax.legend(loc='upper right', fontsize=10)
             ax.grid(True, alpha=0.3)
             ax.set_yscale('log')
