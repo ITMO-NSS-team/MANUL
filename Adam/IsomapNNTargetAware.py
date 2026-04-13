@@ -168,8 +168,13 @@ class IsomapNNTargetAware(nn.Module):
 
         # Compute target_diff once and register as buffer
         if use_target_modification and targets is not None:
-            targets = targets.flatten().float()
-            target_diff = torch.abs(targets.unsqueeze(0) - targets.unsqueeze(1))
+            if targets.dim() == 2 and targets.shape[1] > 1:
+                # Multi-dim targets (e.g., one-hot): pairwise L2 distance
+                target_diff = torch.cdist(targets.float(), targets.float())
+            else:
+                # Scalar targets: absolute difference
+                targets = targets.flatten().float()
+                target_diff = torch.abs(targets.unsqueeze(0) - targets.unsqueeze(1))
             max_diff = target_diff.max()
             if max_diff > 0:
                 target_diff = target_diff / max_diff

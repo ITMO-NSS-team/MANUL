@@ -1,3 +1,4 @@
+import json
 import numpy as np
 import matplotlib.pyplot as plt
 from .local_pca_implementation import local_pca_dimension
@@ -28,7 +29,7 @@ class DimensionalityAnalyser:
         if self.max_neighbors is None:
             self.max_neighbors = X.shape[1] - 1
 
-        n_neighbors = min(self.max_neighbors, X.shape[1] - 1)
+        n_neighbors = min(self.max_neighbors, X.shape[1] - 1, X.shape[0] - 1)
         print(f"Using n_neighbors: {n_neighbors}")
 
         if method in ['eigenvalue', 'both']:
@@ -44,16 +45,6 @@ class DimensionalityAnalyser:
                 X, n_neighbors=n_neighbors, n_samples=n_samples,
                 with_eigenvalues=False, threshold=self.default_threshold)
             self.results['variance'] = dims_variance
-
-        if method == 'both':
-            dims1 = self.results['eigenvalue']
-            recommended_dim1 = int(np.percentile(dims1, 90))
-            dims2 = self.results['variance']
-            recommended_dim2 = int(np.percentile(dims2, 90))
-            return recommended_dim1, recommended_dim2
-        else:
-            dims = self.results[method]
-            return int(np.percentile(dims, 90))
 
     def plot_dimension_histograms(self, dataset_name: str, save_path: str = None):
         """
@@ -108,7 +99,7 @@ class DimensionalityAnalyser:
         if thresholds is None:
             thresholds = np.arange(0.75, 1.0, 0.05)
 
-        n_neighbors = self.max_neighbors
+        n_neighbors = min(self.max_neighbors, X.shape[0] - 1)
 
         dims_by_threshold = {}
         median_dims = []
@@ -173,6 +164,41 @@ class DimensionalityAnalyser:
             plt.show()
         return dims_by_threshold, dim_at_095
 
+    def get_latent_dim(self, method='eigenvalue'):
+        """
+        Get recommended latent dimension based on analysis using 90th percentile.
+        """
+        if method not in self.results:
+            raise ValueError(f"Method {method} not found in results. Available: {list(self.results.keys())}")
 
+        dims = self.results[method]
+        recommended_dim = int(np.percentile(dims, 90))
 
+        print(f"Recommended latent dimension ({method} method, 90th percentile): {recommended_dim}")
+        return recommended_dim
 
+    def save_results(self, save_path):
+        """
+        Save dimension analysis results: per-method statistics, percentiles,
+        and raw dimension arrays.
+        """
+        summary = {}
+        for method, dims in self.results.items():
+            unique_dims, counts = np.unique(dims, return_counts=True)
+            summary[method] = {
+                'median': float(np.median(dims)),
+                'mean': float(np.mean(dims)),
+                'std': float(np.std(dims)),
+                'min': int(np.min(dims)),
+                'max': int(np.max(dims)),
+                'p90': int(np.percentile(dims, 90)),
+                'p95': int(np.percentile(dims, 95)),
+                'mode': int(unique_dims[np.argmax(counts)]),
+                'mode_count': int(np.max(counts)),
+                'n_samples': len(dims),
+                'distribution': {int(d): int(c) for d, c in zip(unique_dims, counts)},
+            }
+
+        with open(save_path, 'w') as f:
+            json.dump(summary, f, indent=2)
+        print(f"Dimension analysis saved to {save_path}")

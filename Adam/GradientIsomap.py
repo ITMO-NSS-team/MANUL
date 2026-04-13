@@ -1,6 +1,5 @@
 import os
 import time
-import json
 from datetime import datetime
 import numpy as np
 import pandas as pd
@@ -41,6 +40,17 @@ class GradientIsomap:
         self.checkpoint_history_folder = None
         self.checkpoint_metadata = []
 
+        # Infer output_dim from target shape
+        if train_target.dim() == 1 or (train_target.dim() == 2 and train_target.shape[1] == 1):
+            self.output_dim = 1
+            self.multi_target = False
+        else:
+            self.output_dim = train_target.shape[1]
+            self.multi_target = True
+
+        print(f'Target shape: {train_target.shape}, output_dim: {self.output_dim}, '
+              f'multi_target: {self.multi_target}')
+
         if self.save_checkpoint_matrix is not None:
             if self.checkpoint_each is None:
                 print('To save distance matrices on checkpoints set "checkpoint_each" parameter differ from None')
@@ -71,6 +81,24 @@ class GradientIsomap:
         print(f'Device is {device}')
         self.device = device
 
+    def _to_viz_colors(self, tensor_or_array):
+        """
+        Convert targets/outputs to 1D array for scatter plot coloring.
+        - Scalar targets [N] or [N,1] → return as-is (flattened)
+        - Multi-dim targets [N, C] → argmax to get class indices [N]
+        """
+        if isinstance(tensor_or_array, torch.Tensor):
+            arr = tensor_or_array.cpu().detach().numpy()
+        else:
+            arr = tensor_or_array
+
+        if arr.ndim == 1:
+            return arr
+        elif arr.ndim == 2 and arr.shape[1] == 1:
+            return arr.flatten()
+        else:
+            return np.argmax(arr, axis=1).astype(float)
+
     def train(self, use_init_assumption=False):
         start_time = time.time()
         if use_init_assumption:
@@ -97,6 +125,7 @@ class GradientIsomap:
             task_model = IntrinsicNN(features,
                                      self.targets,
                                      self.latent_len,
+                                     output_dim=self.output_dim,
                                      plot_convergence=self.plot_convergence,
                                      epochs=500)
             task_model.train()
@@ -130,14 +159,23 @@ class GradientIsomap:
 
             if (self.checkpoint_each is not None and epoch % self.checkpoint_each == 0 or
                     epoch == (self.epochs - 1) or stop_criteria):
-                reproj_features = reproj_features.cpu().detach().numpy()
-                output = output.cpu().detach().numpy()
+                reproj_features_np = reproj_features.cpu().detach().numpy()
+                output_np = output.cpu().detach().numpy()
                 isomap_weights = self._isomap_weights(isomap_model)
+
+                # Convert multi-dim targets/outputs to 1D for visualization
+                viz_targets = self._to_viz_colors(self.targets)
+                viz_output = self._to_viz_colors(output_np)
+                viz_best_outputs = self._to_viz_colors(best_outputs)
+
+                # Temporarily replace targets with 1D version for create_visualization
+                # create_visualization expects y_train as a torch tensor with .cpu().detach().numpy()
+                viz_targets_tensor = torch.tensor(viz_targets, dtype=torch.float32)
 
                 create_visualization(
                     epoch, losses, best_epoch, best_loss, best_reproj_features,
-                    best_outputs, reproj_features,
-                    output, self.targets,
+                    viz_best_outputs, reproj_features_np,
+                    viz_output.reshape(-1, 1), viz_targets_tensor,
                     isomap_weights,
                     isomap_eigenvalues[:3], self.checkpoint_history_folder,
                     current_time
@@ -170,13 +208,19 @@ class GradientIsomap:
         task_model = IntrinsicNN(features,
                                  self.targets,
                                  self.latent_len,
+                                 output_dim=self.output_dim,
                                  plot_convergence=self.plot_convergence,
                                  epochs=500)
         task_model.train()
-        output = task_model.model(features).flatten().cpu().detach().numpy()
+
+        output_raw = task_model.model(features)
+        # Convert to 1D for visualization
+        output_viz = self._to_viz_colors(output_raw)
+        targets_viz = self._to_viz_colors(self.targets)
+
         original_visualization_simple(self.features.cpu().detach().numpy(),
-                                      self.targets.cpu().detach().numpy(),
-                                      output,
+                                      targets_viz,
+                                      output_viz,
                                       save_path=f'{self.logs_folder}/prediction_train.png')
 
     def _save_checkpoint_weights_matrix(self, epoch: int, distance_matrix: np.ndarray):
