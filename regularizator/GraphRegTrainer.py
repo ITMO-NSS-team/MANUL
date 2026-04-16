@@ -284,7 +284,7 @@ class GraphRegTrainer:
             self.model.load_state_dict(self._best_model_state)
         self.best_model = self.model
 
-    def train(self, plot_convergence: bool = False, adaptive_lambda=False,
+    def train(self, plot_convergence: bool = False, adaptive_lambda='sobol',
               early_stopping_patience: int = 100, adaptive_lambda_window: int = 100,
               lambda_graph: float = 1.0):
         self.model.train()

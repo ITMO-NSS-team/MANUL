@@ -18,9 +18,6 @@ import warnings
 warnings.filterwarnings('ignore', category=FutureWarning,
                         message='unique with argument that is not not a Series')
 
-# ============================================================
-# CONFIGURATION
-# ============================================================
 PRETRAINED_FOLDER = 'outputs_stat_0.01noise_5k_sobol_v3\\sphere\\sphere_run_20260318_133356'
 
 N_RUNS = 5
@@ -29,14 +26,9 @@ BATCH_SIZE = 2048
 LEARNING_RATE = 1e-3
 EARLY_STOPPING_PATIENCE = 100
 
-# GraphRegTrainer settings
-LAMBDA_METHOD = 'sobol'
 LAMBDA_GRAPH = 1.0
 
 
-# ============================================================
-# REGULARIZATION RUNNER
-# ============================================================
 def run_regularization(folder_path, model, exp_prefix="reg"):
     from torch import float64 as fl64
     from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
@@ -73,7 +65,7 @@ def run_regularization(folder_path, model, exp_prefix="reg"):
 
     trainer.train(
         plot_convergence=(exp_prefix.startswith("final")),
-        adaptive_lambda=LAMBDA_METHOD,
+        adaptive_lambda='sobol',
         early_stopping_patience=EARLY_STOPPING_PATIENCE,
         lambda_graph=LAMBDA_GRAPH,
     )
@@ -98,9 +90,6 @@ def run_regularization(folder_path, model, exp_prefix="reg"):
     return metrics, experiment_folder
 
 
-# ============================================================
-# MAIN
-# ============================================================
 if __name__ == "__main__":
     assert os.path.exists(PRETRAINED_FOLDER), f"Not found: {PRETRAINED_FOLDER}"
     geometry_name = os.path.basename(PRETRAINED_FOLDER).split('_')[0]
@@ -146,9 +135,6 @@ if __name__ == "__main__":
         )
         all_metrics.append(metrics_reg)
 
-    # ================================================================
-    # Aggregate baselines from saved metrics.csv
-    # ================================================================
     print(f"\nAggregating results...")
 
     for exp_f in sorted(os.listdir(PRETRAINED_FOLDER)):
@@ -168,13 +154,10 @@ if __name__ == "__main__":
     combined_df = pd.concat([baseline_df, reg_df], ignore_index=True)
 
     # Save
-    config_tag = f'lam_{LAMBDA_METHOD}' if LAMBDA_METHOD else f'lam_{LAMBDA_GRAPH}'
+    config_tag = f'lam_{LAMBDA_GRAPH}'
     outputs_dir = os.path.dirname(PRETRAINED_FOLDER)
     combined_df.to_csv(os.path.join(outputs_dir, f'{geometry_name}_{config_tag}_metrics.csv'), index=False)
 
-    # ================================================================
-    # Visualization
-    # ================================================================
     metrics_to_plot = ['test_mse', 'test_mae', 'test_r2',
                        'val_mse', 'val_mae', 'val_r2',
                        'train_mse', 'train_mae', 'train_r2']

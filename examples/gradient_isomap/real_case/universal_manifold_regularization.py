@@ -15,7 +15,7 @@ warnings.filterwarnings('ignore', category=FutureWarning)
 
 def manifold_regularization(folder_path, model, num_epochs, batch_size,
                              learning_rate, early_stop_patience,
-                             lambda_method, lambda_graph=1.0, knn_k=100):
+                             lambda_graph=1.0, knn_k=100):
     """
     Train classifier with graph regularization.
 
@@ -23,8 +23,7 @@ def manifold_regularization(folder_path, model, num_epochs, batch_size,
         folder_path: folder with manifold learning artifacts
         model: nn.Module
         num_epochs, batch_size, learning_rate, early_stop_patience: training params
-        lambda_method: 'sobol' or None
-        lambda_graph: graph loss weight (used when lambda_method is None)
+        lambda_graph: graph loss weight
     """
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     experiment_folder = os.path.join(folder_path, f'regularization_{timestamp}')
@@ -67,7 +66,7 @@ def manifold_regularization(folder_path, model, num_epochs, batch_size,
 
     trainer.train(
         plot_convergence=True,
-        adaptive_lambda=lambda_method,
+        adaptive_lambda='sobol',
         early_stopping_patience=early_stop_patience,
         lambda_graph=lambda_graph,
     )

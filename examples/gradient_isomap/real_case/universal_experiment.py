@@ -23,8 +23,7 @@ LEARNING_RATE = 1e-3
 EARLY_STOPPING_PATIENCE = 200
 DROPOUT = 0.3
 MANIFOLD_SEED = 42
-LAMBDA_METHOD = 'sobol'   # or None for fixed lambda
-LAMBDA_GRAPH = 1.0        # used when LAMBDA_METHOD is None
+LAMBDA_GRAPH = 1.0
 KNN_K = 200
 
 DATASET = 'mnist'
@@ -101,7 +100,6 @@ if __name__ == "__main__":
                 batch_size=BATCH_SIZE,
                 learning_rate=LEARNING_RATE,
                 early_stop_patience=EARLY_STOPPING_PATIENCE,
-                lambda_method=LAMBDA_METHOD,
                 lambda_graph=LAMBDA_GRAPH,
                 knn_k=KNN_K,
             )
