@@ -176,6 +176,7 @@ class GraphRegTrainer:
         self.device = self.init_device(device)
         self.model = model.to(self.device)
         self.criterion = criterion
+        self._is_ce = isinstance(criterion, nn.CrossEntropyLoss)
         self.optimizer = optimizer
         self.target_metric = target_metric
 
@@ -301,8 +302,6 @@ class GraphRegTrainer:
 
         start_time = time.time()
         for epoch in range(self.num_epochs):
-            print(f'Epoch {epoch + 1}/{self.num_epochs}')
-
             self.model.train()
 
             indices = np.arange(len(self.features))
@@ -319,7 +318,7 @@ class GraphRegTrainer:
                 batch_x = torch.tensor(self.features[batch_indices], dtype=fl64).to(self.device)
                 batch_y = torch.tensor(self.target[batch_indices], dtype=fl64).to(self.device)
                 output = self.model(batch_x)
-                model_loss = self.criterion(output, batch_y.reshape_as(output))
+                model_loss = self.criterion(output, batch_y.long() if self._is_ce else batch_y.reshape_as(output))
 
                 # Per-batch: only supervised loss; graph loss computed after all batches
                 combined_loss = lam_nn * model_loss
@@ -350,10 +349,12 @@ class GraphRegTrainer:
             self.convergence_history['graph_loss'].append(avg_graph_loss)
             self.convergence_history['combined_loss'].append(avg_combined_loss)
 
-            print(
-                f'  Model loss: {avg_model_loss:.6f}, Graph loss: {avg_graph_loss:.6f}, '
-                f'Combined: {avg_combined_loss:.6f}, '
-                f'Lambdas: lam_nn={lam_nn:.6f}, lam_graph={lam_graph:.6f}')
+            if epoch % 100 == 0:
+                print(
+                    f'  Epoch {epoch+1}/{self.num_epochs}: '
+                    f'Model={avg_model_loss:.6f}, Graph={avg_graph_loss:.6f}, '
+                    f'Combined={avg_combined_loss:.6f}, '
+                    f'lam_nn={lam_nn:.6f}, lam_graph={lam_graph:.6f}')
 
             if self.val_features is not None and self.val_targets is not None:
                 self.model.eval()
@@ -361,9 +362,10 @@ class GraphRegTrainer:
                     val_x = torch.tensor(self.val_features, dtype=fl64).to(self.device)
                     val_y = torch.tensor(self.val_targets, dtype=fl64).to(self.device)
                     val_output = self.model(val_x)
-                    val_model_loss = self.criterion(val_output, val_y.reshape_as(val_output)).item()
+                    val_model_loss = self.criterion(val_output, val_y.long() if self._is_ce else val_y.reshape_as(val_output)).item()
                 self.convergence_history['val_loss'].append(val_model_loss)
-                print(f'  Val   - Model loss: {val_model_loss:.6f}')
+                if epoch % 100 == 0:
+                    print(f'    Val={val_model_loss:.6f}')
 
                 if early_stopping_patience is not None:
                     if val_model_loss < best_val_loss:

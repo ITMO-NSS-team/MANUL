@@ -8,7 +8,7 @@ import torch
 
 from regularizator.GraphRegTrainer import GraphRegTrainer
 from utils.utils import split_data
-from dataset_loader import labels_to_onehot, evaluate_classifier
+from dataset_loader import evaluate_classifier
 import warnings
 warnings.filterwarnings('ignore', category=FutureWarning)
 
@@ -43,17 +43,17 @@ def manifold_regularization(folder_path, model, num_epochs, batch_size,
     labels = np.load(f'{folder_path}/all_targets.npy')
 
     X_train, X_val, X_test, y_train_int, y_val_int, y_test_int = split_data(features, labels)
-    y_train_oh = labels_to_onehot(y_train_int, n_classes)
-    y_val_oh = labels_to_onehot(y_val_int, n_classes)
+    y_train_ce = y_train_int.astype(np.int64)
+    y_val_ce = y_val_int.astype(np.int64)
 
-    criterion = nn.MSELoss()
+    criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
     trainer = GraphRegTrainer(
         train_features=X_train,
-        train_target=y_train_oh,
+        train_target=y_train_ce,
         val_features=X_val,
-        val_targets=y_val_oh,
+        val_targets=y_val_ce,
         weights_matrix=dist_matrix,
         base_indices=fps_indices,
         model=model,

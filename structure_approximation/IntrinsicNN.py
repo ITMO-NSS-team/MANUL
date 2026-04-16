@@ -63,7 +63,7 @@ class IntrinsicNN:
         if self.convergence_history is not None:
             plt.plot(np.arange(len(self.convergence_history)), self.convergence_history)
             plt.title(f'Convergence, latent_dim={self.latent_len}, output_dim={self.output_dim}')
-            plt.ylabel('MSE loss')
+            plt.ylabel('Loss')
             plt.xlabel('Epoch')
             plt.show()
         else:

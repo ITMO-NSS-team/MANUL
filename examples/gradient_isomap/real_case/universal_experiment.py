@@ -27,8 +27,8 @@ LAMBDA_METHOD = 'sobol'   # or None for fixed lambda
 LAMBDA_GRAPH = 1.0        # used when LAMBDA_METHOD is None
 KNN_K = 200
 
-PRETRAINED_FOLDER = 'outputs_fmnist/fmnist_run_ta_20260406_150746'
-DATASET = os.path.basename(PRETRAINED_FOLDER).split('_run')[0] if PRETRAINED_FOLDER else 'mnist'
+DATASET = 'mnist'
+PRETRAINED_FOLDER = None
 
 RUN_BASELINE = True
 RUN_REGULARIZATION = True

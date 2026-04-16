@@ -10,7 +10,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from sklearn.decomposition import PCA
 from utils.utils import split_data
-from dataset_loader import labels_to_onehot, evaluate_classifier
+from dataset_loader import evaluate_classifier
 
 
 def make_classifier(input_dim, hidden_dim, n_classes=10, dropout=0.3):
@@ -40,25 +40,21 @@ def baseline_train_test(folder_path, baseline_model, epochs, batch_size,
     labels = np.load(f'{folder_path}/all_targets.npy')
     X_train, X_val, X_test, y_train_int, y_val_int, y_test_int = split_data(features, labels)
 
-    y_train = labels_to_onehot(y_train_int, n_classes)
-    y_val = labels_to_onehot(y_val_int, n_classes)
-    y_test = labels_to_onehot(y_test_int, n_classes)
-
     train_loader = DataLoader(
         TensorDataset(torch.tensor(X_train, dtype=torch.float64),
-                      torch.tensor(y_train, dtype=torch.float64)),
+                      torch.tensor(y_train_int, dtype=torch.long)),
         batch_size=batch_size, shuffle=False, num_workers=0)
     val_loader = DataLoader(
         TensorDataset(torch.tensor(X_val, dtype=torch.float64),
-                      torch.tensor(y_val, dtype=torch.float64)),
+                      torch.tensor(y_val_int, dtype=torch.long)),
         batch_size=batch_size, shuffle=False, num_workers=0)
     test_loader = DataLoader(
         TensorDataset(torch.tensor(X_test, dtype=torch.float64),
-                      torch.tensor(y_test, dtype=torch.float64)),
+                      torch.tensor(y_test_int, dtype=torch.long)),
         batch_size=batch_size, shuffle=False, num_workers=0)
 
     baseline_model = baseline_model.to(device)
-    criterion = nn.MSELoss()
+    criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(baseline_model.parameters(), lr=learning_rate)
 
     train_losses, val_losses = [], []
