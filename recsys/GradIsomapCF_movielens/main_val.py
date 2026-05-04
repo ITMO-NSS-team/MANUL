@@ -7,18 +7,23 @@ import numpy as np
 import pandas as pd
 import scipy.sparse as sp
 from torch.utils.data import DataLoader
+import json
 
 #from GradientIsomapCF_val import GradientIsomapCF
 #from GradientIsomapCF_alternating import GradientIsomapCF
 #from GradientIsomapCF_correct import GradientIsomapCF
 #from GradientIsomapCF_reinit import GradientIsomapCF
-from GradientIsomapCF_reinit_new import GradientIsomapCF
+
+#from GradientIsomapCF_reinit_new import GradientIsomapCF
+from GradientIsomapCF_normalization import GradientIsomapCF
+
 #from GradientIsomapCF_reinit_val import GradientIsomapCF
 from evaluation import evaluate_topk_isomap, evaluate_topk_pure
 from NCF_datasets import NCFTestDataset, NCFTrainDataset
 from NCF import NCF
 from prepare_data import prepare_sequences, subsample_users_items, train_val_test_split_next_item, build_movie_user_matrix
-from manifold_visualization import plot_gi_losses, plot_pure_ncf_losses  # plot_manifold_isomap, plot_gi_convergence, plot_movie_pca, plot_cf_inner_losses
+from manifold_visualization import plot_gi_losses, plot_pure_ncf_losses, plot_gi_convergence, plot_isomap_deltas  # plot_manifold_isomap, plot_gi_convergence, plot_movie_pca, plot_cf_inner_losses
+from isomap_analysis import analyze_distance_matrices
 
 
 def load_movielens_1m_ratings(ml1m_dir):
@@ -198,8 +203,8 @@ def main(
             cf_epochs=100,  # внутренних эпох CF на фиксированном Z
             final_cf_epochs=100,  # количество эпох для финальной модели
             batch_size=2048,
-            lr_isomap=1e-4,  # 1e-4
-            lr_ncf=1e-3,  # 1e-3
+            lr_isomap=1e-1,  # 1e-4
+            lr_ncf=5e-4, #1e-3,  # 1e-3
             factor_num=32,
             num_layers=3,
             dropout=0.0,  # 0.0
@@ -220,10 +225,30 @@ def main(
         print(f"GradientIsomapCF final on TEST: HR@{top_k}={hr_iso:.4f}, NDCG@{top_k}={ndcg_iso:.4f}")
         print(f"GI + NeuMFOnM HR@{top_k}={hr_iso:.4f}, NDCG@{top_k}={ndcg_iso:.4f}")
 
-        images_dir = os.path.join("logs_movielens_isomap_cf", "run35/images")
+        images_dir = os.path.join("logs_movielens_isomap_cf", "run48/images")
         plot_gi_losses(gi_cf.history, gi_cf.cf_history, images_dir, run_name="ginmf")
 
-        #plot_gi_convergence(gi_cf.history, top_k=top_k)
+        with open("logs_movielens_isomap_cf/run48/images/history.json", 'w', encoding='utf-8') as f:
+            json.dump(gi_cf.history, f, ensure_ascii=False, indent=4)
+
+        with open("logs_movielens_isomap_cf/run48/images/dist_history.json", 'w', encoding='utf-8') as f:
+            json.dump(gi_cf.dist_history, f, ensure_ascii=False, indent=4)
+
+        images_dir = os.path.join("logs_movielens_isomap_cf", "run48/images")
+        plot_isomap_deltas(gi_cf.dist_history, images_dir, run_name="ginmf")
+
+        images_dir_png = os.path.join("logs_movielens_isomap_cf", "run48/images/metrics.png")
+        plot_gi_convergence(gi_cf.history, top_k=top_k, save_path=images_dir_png)
+
+        logs = gi_cf.logs_folder
+
+        D_paths = {}
+        for i in range(gradisomap_epochs):
+            D_paths[f"epoch{i}"] = os.path.join(logs, f"D_epoch{i}.npy")
+
+        images_dir = os.path.join(logs, "run48/images/D_analysis")
+        analyze_distance_matrices(D_paths, k=10, images_dir=images_dir, run_name="ginmf")
+
 
         # 4. Визуализация manifold'а фильмов (Isomap)
         #plot_manifold_isomap(isomap_model, train_events, num_movies, color_by='rating')
@@ -246,7 +271,7 @@ if __name__ == "__main__":
         num_ng=2,
         top_k=10,
         epochs_pure=30,
-        gradisomap_epochs=20,
+        gradisomap_epochs=30,
         run_ncf=False,
         run_gincf=True
         )

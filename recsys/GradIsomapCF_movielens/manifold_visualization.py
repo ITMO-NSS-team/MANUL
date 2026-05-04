@@ -25,7 +25,7 @@ def compute_movie_stats(train_events, num_items):
     return mean_rating, popularity
 
 
-def plot_gi_convergence(history, top_k=10):
+def plot_gi_convergence(history, save_path, top_k=10):
 
     epochs = history['epoch']
     train_loss = history['train_loss']
@@ -64,7 +64,9 @@ def plot_gi_convergence(history, top_k=10):
                  ha='center', va='center', transform=plt.gca().transAxes)
 
     plt.tight_layout()
-    plt.show()
+
+    plt.savefig(save_path, dpi=150, bbox_inches='tight')
+    plt.close()
 
 
 def plot_manifold_isomap(isomap_model,
@@ -323,3 +325,36 @@ def plot_pure_ncf_losses(history, images_dir, run_name="pure_ncf"):
     plt.savefig(out_path, dpi=150)
     plt.close()
     print(f"График лоссов NCF сохранён в {out_path}")
+
+
+def plot_isomap_deltas(dist_history, images_dir, run_name="ginmf_isomap"):
+    """
+    dist_history: словарь с ключами 'epoch', 'delta_prev', 'delta_init'
+    images_dir: папка для сохранения PNG
+    run_name: префикс имени файлов
+    """
+    os.makedirs(images_dir, exist_ok=True)
+
+    epochs = dist_history.get('epoch', [])
+    delta_prev = dist_history.get('delta_prev', [])
+    delta_init = dist_history.get('delta_init', [])
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
+
+    ax1.plot(epochs, delta_prev, marker='o')
+    ax1.set_xlabel('Outer epoch')
+    ax1.set_ylabel('Δ_prev (||D_t - D_{t-1}|| / ||D_{t-1}||)')
+    ax1.set_title('Isomap: относительное изменение (к предыдущей эпохе)')
+    ax1.grid(True, alpha=0.3)
+
+    ax2.plot(epochs, delta_init, marker='s', color='tab:orange')
+    ax2.set_xlabel('Outer epoch')
+    ax2.set_ylabel('Δ_init (||D_t - D_0|| / ||D_0||)')
+    ax2.set_title('Isomap: относительное изменение (к начальному состоянию)')
+    ax2.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+
+    out_combined = os.path.join(images_dir, f"{run_name}_delta_combined.png")
+    plt.savefig(out_combined, dpi=150)
+    plt.close()
