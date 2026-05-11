@@ -15,7 +15,8 @@ import json
 #from GradientIsomapCF_reinit import GradientIsomapCF
 
 #from GradientIsomapCF_reinit_new import GradientIsomapCF
-from GradientIsomapCF_normalization import GradientIsomapCF
+#from GradientIsomapCF_normalization import GradientIsomapCF
+from GradientIsomapCF_log import GradientIsomapCF
 
 #from GradientIsomapCF_reinit_val import GradientIsomapCF
 from evaluation import evaluate_topk_isomap, evaluate_topk_pure
@@ -65,6 +66,11 @@ def main(
         min_seq_len=min_seq_len,
     )
 
+    user_pos_set = {
+        u: set(m for (m, ts, r) in seq)
+        for u, seq in user2seq_sub.items()
+    }
+
     print("\nTrain/Val/Test split (next-item)...")
     train_events, val_next, test_next = train_val_test_split_next_item(user2seq_sub, min_len=3)
     print(f"Train событий: {len(train_events)}, Val пользователей: {len(val_next)}, Test пользователей: {len(test_next)}")
@@ -82,9 +88,13 @@ def main(
         train_pairs.append((u, m))
         train_mat[u, m] = 1.0
 
-    train_dataset = NCFTrainDataset(train_pairs, num_movies, train_mat, num_ng=num_ng)
-    val_dataset = NCFTestDataset(val_next,  num_movies, train_mat, num_ng=99)
-    test_dataset = NCFTestDataset(test_next, num_movies, train_mat, num_ng=99)
+    #train_dataset = NCFTrainDataset(train_pairs, num_movies, train_mat, num_ng=num_ng)
+    #val_dataset = NCFTestDataset(val_next,  num_movies, train_mat, num_ng=99)
+    #test_dataset = NCFTestDataset(test_next, num_movies, train_mat, num_ng=99)
+
+    train_dataset = NCFTrainDataset(train_pairs, num_movies, user_pos_set, num_ng=num_ng, seed=42)
+    val_dataset = NCFTestDataset(val_next, num_movies, user_pos_set, num_ng=99, seed=43)
+    test_dataset = NCFTestDataset(test_next, num_movies, user_pos_set, num_ng=99, seed=44)
 
     train_loader = DataLoader(train_dataset, batch_size=256, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=100, shuffle=False)
@@ -94,9 +104,9 @@ def main(
         pure_model = NCF(
             user_num=num_users,
             item_num=num_movies,
-            factor_num=32,
+            factor_num=64,
             num_layers=3,
-            dropout=0.1,
+            dropout=0.0,
             model='NeuMF-end'
         ).to(device)
 
@@ -105,8 +115,8 @@ def main(
 
         best_hr_val, best_ndcg_val, best_epoch_pure = 0.0, 0.0, 0
         best_state_pure = None
+        best_val_loss = 10
 
-        # история для графика
         pure_history = {
             'epoch': [],
             'train_loss': [],
@@ -114,7 +124,6 @@ def main(
         }
 
         for epoch in range(epochs_pure):
-            # ----- TRAIN -----
             pure_model.train()
             train_dataset.ng_sample()
             total_train_loss = 0.0
@@ -136,7 +145,6 @@ def main(
 
             avg_train_loss = total_train_loss / max(1, n_train_batches)
 
-            # ----- VAL BCE-LOSS -----
             pure_model.eval()
             total_val_loss = 0.0
             n_val_batches = 0
@@ -153,38 +161,35 @@ def main(
 
             avg_val_loss = total_val_loss / max(1, n_val_batches)
 
-            # ----- VAL HR/NDCG -----
             hr_val, ndcg_val = evaluate_topk_pure(pure_model, val_loader, top_k, device)
 
             print(f"[PURE NCF] epoch {epoch}: "
                   f"train_loss={avg_train_loss:.4f}, val_loss={avg_val_loss:.4f}, "
                   f"HR@{top_k}_val={hr_val:.4f}, NDCG@{top_k}_val={ndcg_val:.4f}")
 
-            # логируем историю
             pure_history['epoch'].append(epoch)
             pure_history['train_loss'].append(avg_train_loss)
             pure_history['val_loss'].append(avg_val_loss)
 
-            # выбор лучшей эпохи по HR@K (как было)
-            if hr_val > best_hr_val:
-                best_hr_val, best_ndcg_val, best_epoch_pure = hr_val, ndcg_val, epoch
+            #if hr_val > best_hr_val:
+            #    best_hr_val, best_ndcg_val, best_epoch_pure = hr_val, ndcg_val, epoch
+            #    best_state_pure = pure_model.state_dict()
+            if avg_val_loss < best_val_loss:
+                best_val_loss, best_epoch_pure = avg_val_loss, epoch
                 best_state_pure = pure_model.state_dict()
 
         print(f"PURE NCF best epoch {best_epoch_pure}: "
               f"HR@{top_k}_val={best_hr_val:.4f}, NDCG@{top_k}_val={best_ndcg_val:.4f}")
 
-        # восстанавливаем лучшую по HR модель
         if best_state_pure is not None:
             pure_model.load_state_dict(best_state_pure)
 
-        # финальная оценка на тесте
         hr_test_pure, ndcg_test_pure = evaluate_topk_pure(pure_model, test_loader, top_k, device)
         print(f"PURE NCF final on TEST: HR@{top_k}={hr_test_pure:.4f}, NDCG@{top_k}={ndcg_test_pure:.4f}")
 
-        # строим и сохраняем график train/val-loss
-        images_dir = os.path.join("logs_pure_ncf", "images")  # можно подставить свой путь/имя run'а
+        images_dir = os.path.join("logs_pure_ncf", "images")
         os.makedirs(images_dir, exist_ok=True)
-        plot_pure_ncf_losses(pure_history, images_dir, run_name="pure_ncf")
+        plot_pure_ncf_losses(pure_history, images_dir, run_name="pure_ncf_run582")
 
     if run_gincf:
         print("\n=== Обучение GradientIsomapCF (IsomapNN + NeuMFOnManifold) ===")
@@ -197,19 +202,19 @@ def main(
             train_events=train_events,
             num_users=num_users,
             num_items=num_movies,
-            latent_len=128,  # размерность manifold Z
+            latent_len=256,  # размерность manifold Z
             n_neighbors=10,
             epochs=gradisomap_epochs,  # outer_epochs
             cf_epochs=100,  # внутренних эпох CF на фиксированном Z
-            final_cf_epochs=100,  # количество эпох для финальной модели
+            final_cf_epochs=20,  # количество эпох для финальной модели
             batch_size=2048,
-            lr_isomap=1e-1,  # 1e-4
+            lr_isomap=5e-2,  # 1e-4
             lr_ncf=5e-4, #1e-3,  # 1e-3
-            factor_num=32,
+            factor_num=64,
             num_layers=3,
             dropout=0.0,  # 0.0
             model_type='NeuMF-end',
-            logs_folder="logs_movielens_isomap_cf",
+            logs_folder="logs_movielens_isomap_cf/run62",
             device=str(device),
             stop_criteria_value=0.001,
             num_ng=num_ng
@@ -225,29 +230,29 @@ def main(
         print(f"GradientIsomapCF final on TEST: HR@{top_k}={hr_iso:.4f}, NDCG@{top_k}={ndcg_iso:.4f}")
         print(f"GI + NeuMFOnM HR@{top_k}={hr_iso:.4f}, NDCG@{top_k}={ndcg_iso:.4f}")
 
-        images_dir = os.path.join("logs_movielens_isomap_cf", "run48/images")
+        images_dir = os.path.join("logs_movielens_isomap_cf", "run62/images")
         plot_gi_losses(gi_cf.history, gi_cf.cf_history, images_dir, run_name="ginmf")
 
-        with open("logs_movielens_isomap_cf/run48/images/history.json", 'w', encoding='utf-8') as f:
+        with open("logs_movielens_isomap_cf/run62/images/history.json", 'w', encoding='utf-8') as f:
             json.dump(gi_cf.history, f, ensure_ascii=False, indent=4)
 
-        with open("logs_movielens_isomap_cf/run48/images/dist_history.json", 'w', encoding='utf-8') as f:
-            json.dump(gi_cf.dist_history, f, ensure_ascii=False, indent=4)
+        #with open("logs_movielens_isomap_cf/run48/images/dist_history.json", 'w', encoding='utf-8') as f:
+        #    json.dump(gi_cf.dist_history, f, ensure_ascii=False, indent=4)
 
-        images_dir = os.path.join("logs_movielens_isomap_cf", "run48/images")
-        plot_isomap_deltas(gi_cf.dist_history, images_dir, run_name="ginmf")
+        #images_dir = os.path.join("logs_movielens_isomap_cf", "run48/images")
+        #plot_isomap_deltas(gi_cf.dist_history, images_dir, run_name="ginmf")
 
-        images_dir_png = os.path.join("logs_movielens_isomap_cf", "run48/images/metrics.png")
+        images_dir_png = os.path.join("logs_movielens_isomap_cf", "run62/images/metrics.png")
         plot_gi_convergence(gi_cf.history, top_k=top_k, save_path=images_dir_png)
 
-        logs = gi_cf.logs_folder
+        #logs = gi_cf.logs_folder
 
-        D_paths = {}
-        for i in range(gradisomap_epochs):
-            D_paths[f"epoch{i}"] = os.path.join(logs, f"D_epoch{i}.npy")
+        #D_paths = {}
+        #for i in range(gradisomap_epochs):
+        #    D_paths[f"epoch{i}"] = os.path.join(logs, f"D_epoch{i}.npy")
 
-        images_dir = os.path.join(logs, "run48/images/D_analysis")
-        analyze_distance_matrices(D_paths, k=10, images_dir=images_dir, run_name="ginmf")
+        #images_dir = os.path.join(logs, "run48/images/D_analysis")
+        #analyze_distance_matrices(D_paths, k=10, images_dir=images_dir, run_name="ginmf")
 
 
         # 4. Визуализация manifold'а фильмов (Isomap)
@@ -265,13 +270,13 @@ def main(
 if __name__ == "__main__":
 
     main(
-        max_users=300,
-        max_movies=800,
+        max_users=1000,
+        max_movies=1500,
         min_seq_len=5,
         num_ng=2,
         top_k=10,
-        epochs_pure=30,
-        gradisomap_epochs=30,
+        epochs_pure=3,
+        gradisomap_epochs=20,
         run_ncf=False,
         run_gincf=True
         )
