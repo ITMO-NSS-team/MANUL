@@ -5,21 +5,26 @@ import numpy as np
 
 
 class NCFTrainDataset(Dataset):
-    def __init__(self, features_pos, num_items, train_mat, num_ng=4):
-        self.features_pos = features_pos
-        self.num_items = num_items
-        self.train_mat = train_mat
-        self.num_ng = num_ng
+
+    def __init__(self, features_pos, num_items, user_pos_set, num_ng=4, seed=42):
+        self.features_pos = list(features_pos)
+        self.num_items = int(num_items)
+        self.user_pos_set = user_pos_set
+        self.num_ng = int(num_ng)
+        self.rng = np.random.default_rng(seed)
+
         self.ng_sample()
 
     def ng_sample(self):
         features_ng = []
         for (u, i) in self.features_pos:
+            u = int(u)
             for _ in range(self.num_ng):
-                j = np.random.randint(self.num_items)
-                while (u, j) in self.train_mat:
-                    j = np.random.randint(self.num_items)
+                j = int(self.rng.integers(self.num_items))
+                while j in self.user_pos_set[u]:
+                    j = int(self.rng.integers(self.num_items))
                 features_ng.append((u, j))
+
         labels_pos = [1] * len(self.features_pos)
         labels_ng = [0] * len(features_ng)
 
@@ -38,19 +43,31 @@ class NCFTrainDataset(Dataset):
 
 
 class NCFTestDataset(Dataset):
-    def __init__(self, test_next, num_items, train_mat, num_ng=99):
+
+    def __init__(self, test_next, num_items, user_pos_set, num_ng=99, seed=123):
+        self.num_items = int(num_items)
+        self.user_pos_set = user_pos_set
+        self.num_ng = int(num_ng)
+        self.rng = np.random.default_rng(seed)
+
         self.users = []
         self.items = []
         self.labels = []
+
         for (u, _, target_m) in test_next:
+            u = int(u)
+            target_m = int(target_m)
+
             self.users.append(u)
             self.items.append(target_m)
             self.labels.append(1.0)
+
             negs = 0
-            while negs < num_ng:
-                j = np.random.randint(num_items)
-                if (u, j) in train_mat or j == target_m:
+            while negs < self.num_ng:
+                j = int(self.rng.integers(self.num_items))
+                if j in self.user_pos_set[u]:
                     continue
+
                 self.users.append(u)
                 self.items.append(j)
                 self.labels.append(0.0)
