@@ -200,7 +200,9 @@ class GradientIsomapCF:
                  train_events,
                  num_users: int,
                  num_items: int,
-                 latent_len: int,
+                 user_pos_set=None,
+                 ng_seed=42,
+                 latent_len: int = 128,
                  n_neighbors: int = 10,
                  epochs: int = 5,
                  cf_epochs: int = 2,
@@ -221,6 +223,10 @@ class GradientIsomapCF:
         self.train_events = np.array(train_events, dtype=np.int64)
         self.num_users = num_users
         self.num_items = num_items
+
+        self.user_pos_set = user_pos_set
+        self.ng_seed = ng_seed
+
         self.latent_len = latent_len
         self.n_neighbors = n_neighbors
 
@@ -268,7 +274,7 @@ class GradientIsomapCF:
         self.interactions = self._build_implicit_interactions()
         self._build_dataloader_and_full_tensors()
 
-    def _build_implicit_interactions(self):
+    def _build_implicit_interactions2(self):
         print("Building implicit interactions with negative sampling...")
         train_mat = sp.dok_matrix((self.num_users, self.num_items), dtype=np.float32)
         pos_pairs = []
@@ -290,6 +296,47 @@ class GradientIsomapCF:
 
         interactions = np.array(interactions, dtype=np.int64)
         print(f"Позитивов: {len(pos_pairs)}, всего: {len(interactions)}")
+        return interactions
+
+    def _build_implicit_interactions(self):
+        print("Building implicit interactions with negative sampling...")
+
+        pos_pairs = []
+        for (u, m, r) in self.train_events:
+            u, m = int(u), int(m)
+            pos_pairs.append((u, m))
+
+        # Если user_pos_set не передан — строим только из train
+        # (менее корректно, но совместимо со старым поведением)
+        if self.user_pos_set is not None:
+            check_set = self.user_pos_set
+            print("  Негативы проверяются по ПОЛНОМУ user_pos_set (train+val+test)")
+        else:
+            # Строим train_only множества
+            train_only = {}
+            for (u, m) in pos_pairs:
+                if u not in train_only:
+                    train_only[u] = set()
+                train_only[u].add(m)
+            check_set = train_only
+            print("  ВНИМАНИЕ: негативы проверяются только по train взаимодействиям")
+
+        interactions = [(u, m, 1) for (u, m) in pos_pairs]
+
+        # Воспроизводимый генератор
+        rng = np.random.default_rng(self.ng_seed)
+
+        for (u, m) in pos_pairs:
+            u = int(u)
+            for _ in range(self.num_ng):
+                j = int(rng.integers(low=0, high=self.num_items))
+                while j in check_set.get(u, set()):
+                    j = int(rng.integers(low=0, high=self.num_items))
+                interactions.append((u, j, 0))
+
+        interactions = np.array(interactions, dtype=np.int64)
+        print(f"Позитивов: {len(pos_pairs)}, "
+              f"всего интеракций (pos+neg): {len(interactions)}")
         return interactions
 
     def _build_dataloader_and_full_tensors(self):
@@ -381,7 +428,7 @@ class GradientIsomapCF:
                 min_delta=1e-4,
                 convergence_delta=0.001,
                 overfit_gap=0.003,
-                overfit_patience=2,
+                overfit_patience=1,
             )
             cf_train_losses = []
             cf_val_losses = []
