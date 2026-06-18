@@ -5,7 +5,6 @@ This repository contains code and experiments for the research project on **stud
 The main idea is to move beyond an *a priori* choice of geometry (Euclidean / hyperbolic) and instead **learn an item-item distance matrix** end-to-end and then **analyze the resulting manifold geometry**.
 
 ---
-
 ## What is inside
 
 - **Pure NCF (NeuMF) baseline** for implicit feedback recommendation.
@@ -32,7 +31,7 @@ Dataset: https://grouplens.org/datasets/movielens/1m/
 
 ## How to run
 
-The main entry point is the `main()` function in the experiment script.
+The main entry point is the `main()` function in the experiment script - file main_new2.py.
 
 You can enable:
 - `run_ncf=True` to run the **baseline NCF**
