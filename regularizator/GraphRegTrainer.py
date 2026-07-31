@@ -58,10 +58,11 @@ def get_adaptive_lambda_sobol(combines_loss, nn_loss, graph_loss):
         list [float, float]: normalized lambda coefficients [lam_nn, lam_graph]
 
     """
-    n_samples = 1  # can be changed to use more elements of lists
     sampling_D = 2  # as combine 2 features
+    group_size = sampling_D * 2 + 2  # required sample multiple for calc_second_order=True
+    n_samples = len(combines_loss) // group_size  # use as much of the given window as fits
 
-    if n_samples * (sampling_D * 2 + 2) > len(combines_loss):
+    if n_samples < 1:
         print('Epochs number is too small to calculate adaptive lambda')
         return [1, 1]
 
@@ -74,8 +75,9 @@ def get_adaptive_lambda_sobol(combines_loss, nn_loss, graph_loss):
     bounds = [[-100, 100] for i in range(sampling_D)]
     names = ['x{}'.format(i) for i in range(sampling_D)]
 
-    X_array = X_array[:n_samples * (X_array.shape[1] * 2 + 2)]
-    combines_loss = combines_loss[:n_samples * (X_array.shape[1] * 2 + 2)]
+    n_used = n_samples * group_size
+    X_array = X_array[:n_used]
+    combines_loss = combines_loss[:n_used]
 
     sp = ProblemSpec({'names': names, 'bounds': bounds})
     sp.set_samples(X_array)
@@ -220,15 +222,24 @@ class GraphRegTrainer:
         return graph_loss
 
     def train(self, plot_convergence: bool = False, adaptive_lambda=False,
-              early_stopping_patience: int = 100, adaptive_lambda_window: int = 100):
+              early_stopping_patience: int = 100, adaptive_lambda_window: int = 100,
+              adaptive_lambda_recompute: bool = False):
         """
         Train the model with combined loss (model loss + graph regularization loss).
 
         Args:
             plot_convergence: whether to plot convergence graphs after training
-            adaptive_lambda: adaptive lambda method - False (disabled) or 'sobol' (once after 10% epochs)
+            adaptive_lambda: adaptive lambda method - False (disabled) or 'sobol'
             early_stopping_patience: number of epochs to wait for improvement before stopping (None = no early stopping)
-            adaptive_lambda_window: number of epochs to update weights of combined loss components
+            adaptive_lambda_window: size (in epochs) of the loss history window the Sobol analysis
+                is run on. With adaptive_lambda_recompute=False this is also the single epoch at
+                which lambdas are computed once and then kept fixed for the rest of training. With
+                adaptive_lambda_recompute=True it is also the recompute period (lambdas are
+                recalculated every adaptive_lambda_window epochs, each time from the most recent
+                window of loss history) - this makes recomputation cheap since Sobol analysis only
+                runs once per window instead of every epoch.
+            adaptive_lambda_recompute: if True, keep recalculating lambdas every
+                adaptive_lambda_window epochs for the whole training run instead of only once.
         Returns:
             self: trained model instance
         """
@@ -331,13 +342,20 @@ class GraphRegTrainer:
                 if epoch < adaptive_lambda_window:
                     self.convergence_history['model_lambda'].append(1.0)
                     self.convergence_history['graph_lambda'].append(1.0)
-                if epoch == adaptive_lambda_window:
-                    lam_nn, lam_graph = get_adaptive_lambda_sobol(self.convergence_history['combined_loss'],
-                                                                  self.convergence_history['model_loss'],
-                                                                  self.convergence_history['graph_loss'])
+                elif epoch == adaptive_lambda_window or (
+                        adaptive_lambda_recompute and
+                        (epoch - adaptive_lambda_window) % adaptive_lambda_window == 0):
+                    # Recompute from the most recent window of loss history - on the first
+                    # trigger (epoch == adaptive_lambda_window) that is the whole window;
+                    # on later periodic triggers it is the window since the previous recompute.
+                    window_start = epoch - adaptive_lambda_window + 1
+                    lam_nn, lam_graph = get_adaptive_lambda_sobol(
+                        self.convergence_history['combined_loss'][window_start:epoch + 1],
+                        self.convergence_history['model_loss'][window_start:epoch + 1],
+                        self.convergence_history['graph_loss'][window_start:epoch + 1])
                     self.convergence_history['model_lambda'].append(float(lam_nn))
                     self.convergence_history['graph_lambda'].append(float(lam_graph))
-                if epoch > adaptive_lambda_window:
+                else:
                     self.convergence_history['model_lambda'].append(float(lam_nn))
                     self.convergence_history['graph_lambda'].append(float(lam_graph))
 
