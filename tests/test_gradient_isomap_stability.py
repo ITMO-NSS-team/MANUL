@@ -4,14 +4,23 @@ Regression tests for the numerical-stability fixes in GradientIsomap:
   letting a bad backward pass (eigh's backward divides by
   (eigenvalue_i - eigenvalue_j), which can blow up near-degenerate pairs)
   permanently corrupt the distance matrix.
-- _stable_eigenvalues() reacts to that observed failure (had_bad_grad) in
-  addition to the original small-top-eigenvalue check. It deliberately does
-  NOT key off "some eigenvalue pair is close together" - among the handful
-  of kept components (~latent_dim, not the full spectrum) a close pair is a
-  common, healthy spectrum shape and does not by itself mean anything went
-  wrong. An earlier version of this fix checked exactly that and ended up
-  permanently stuck at the "degenerate" high learning rate, stalling
-  training instead of protecting it.
+- LR switching in _stable_eigenvalues() stays on the original, long-proven
+  check (top eigenvalue magnitude only). An occasional NaN/Inf gradient is
+  normal and self-corrects within a few epochs on its own - it must NOT
+  bump the LR by itself. An earlier version of this fix (a) keyed the LR
+  switch off "some eigenvalue pair is close together" among the handful of
+  kept components (~latent_dim, not the full spectrum) - a common, healthy
+  spectrum shape, not a sign of trouble - and (b) keyed it off any single
+  bad-gradient epoch. Both ended up permanently/mostly stuck at the
+  "degenerate" high learning rate, stalling training instead of protecting
+  it.
+- A SEPARATE, much coarser counter tracks consecutive bad-gradient epochs
+  (not tied to the LR at all). Only once degenerate_kick_patience epochs in
+  a row have had a bad gradient - a genuinely sustained, non-self-correcting
+  run, not an occasional one-off - does _stable_eigenvalues perturb the
+  distance matrix with noise, since a stuck optimizer's gradient for the
+  affected entries is exactly zero (diagnosed on real MNIST-scale data) and
+  no LR can move it.
 """
 import os
 import sys
@@ -26,7 +35,8 @@ import torch
 from Adam.GradientIsomap import GradientIsomap
 
 
-def _make_isomap(tmp_dir, n_points=10, latent_len=2):
+def _make_isomap(tmp_dir, n_points=10, latent_len=2, degenerate_kick_patience=100,
+                 degenerate_kick_noise_std=0.02):
     torch.manual_seed(0)
     features = torch.rand(n_points, 3)
     targets = torch.rand(n_points)
@@ -37,6 +47,8 @@ def _make_isomap(tmp_dir, n_points=10, latent_len=2):
         checkpoint_each=None,
         logs_folder=tmp_dir,
         epochs=1,
+        degenerate_kick_patience=degenerate_kick_patience,
+        degenerate_kick_noise_std=degenerate_kick_noise_std,
     )
 
 
@@ -54,15 +66,16 @@ class StableEigenvaluesTests(unittest.TestCase):
         self.isomap._stable_eigenvalues(eigenvalues, self.optim, had_bad_grad=False)
         self.assertAlmostEqual(self.optim.param_groups[0]['lr'], 0.01)
 
-    def test_bad_gradient_is_flagged_degenerate_even_with_healthy_eigenvalues(self):
+    def test_single_bad_gradient_does_not_bump_lr(self):
+        # Regression guard: an occasional NaN/Inf gradient is normal and must
+        # NOT switch the LR by itself - only sustained trouble (tracked by the
+        # separate kick counter) should get a stronger response than "ignore it
+        # and let the guard zero it out this epoch".
         eigenvalues = np.array([10.0, 5.0, 1.0, 0.5])
         self.isomap._stable_eigenvalues(eigenvalues, self.optim, had_bad_grad=True)
-        self.assertAlmostEqual(self.optim.param_groups[0]['lr'], 0.01)
+        self.assertAlmostEqual(self.optim.param_groups[0]['lr'], 0.0001)
 
     def test_close_eigenvalue_pair_alone_is_not_flagged_degenerate(self):
-        # Regression guard: a close pair among the ~latent_dim kept components is
-        # common and, on its own (no actual bad gradient observed), must NOT force
-        # the high-lr branch - that previously left training permanently stuck.
         eigenvalues = np.array([10.0, 9.995, 1.0, 0.5])
         self.isomap._stable_eigenvalues(eigenvalues, self.optim, had_bad_grad=False)
         self.assertAlmostEqual(self.optim.param_groups[0]['lr'], 0.0001)
@@ -71,6 +84,62 @@ class StableEigenvaluesTests(unittest.TestCase):
         eigenvalues = np.array([10.0, 5.0, 1.0, 0.5])
         self.isomap._stable_eigenvalues(eigenvalues, self.optim, had_bad_grad=False)
         self.assertAlmostEqual(self.optim.param_groups[0]['lr'], 0.0001)
+
+
+class DegenerateKickTests(unittest.TestCase):
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.isomap = _make_isomap(self._tmpdir.name, degenerate_kick_patience=3)
+        self.optim = torch.optim.AdamW([torch.nn.Parameter(torch.zeros(1))], lr=0.0001)
+        self.healthy_eigenvalues = np.array([10.0, 5.0, 1.0, 0.5])
+
+    def tearDown(self):
+        self._tmpdir.cleanup()
+
+    def _isomap_model(self):
+        # Build a real IsomapNN the same way train() does, so .layer exists.
+        from Adam.Isomap import IsomapNN
+        dist = torch.rand(6, 6)
+        dist = (dist + dist.T) / 2
+        dist.fill_diagonal_(0)
+        return IsomapNN(dist, n_components=2, n_neighbors=3)
+
+    def test_counter_resets_on_non_bad_grad_epoch(self):
+        model = self._isomap_model()
+        self.isomap._stable_eigenvalues(self.healthy_eigenvalues, self.optim, had_bad_grad=True, isomap_model=model)
+        self.assertEqual(self.isomap._consecutive_bad_grad_epochs, 1)
+        self.isomap._stable_eigenvalues(self.healthy_eigenvalues, self.optim, had_bad_grad=False, isomap_model=model)
+        self.assertEqual(self.isomap._consecutive_bad_grad_epochs, 0)
+
+    def test_single_bad_grad_epoch_does_not_kick(self):
+        model = self._isomap_model()
+        original_layer = model.layer.detach().clone()
+        self.isomap._stable_eigenvalues(self.healthy_eigenvalues, self.optim, had_bad_grad=True, isomap_model=model)
+        self.assertTrue(torch.equal(model.layer, original_layer),
+                        "a single bad-gradient epoch must not perturb the layer")
+
+    def test_kick_perturbs_layer_after_patience_exceeded(self):
+        model = self._isomap_model()
+        original_layer = model.layer.detach().clone()
+
+        # patience=3: first two consecutive bad-gradient epochs must NOT kick yet.
+        self.isomap._stable_eigenvalues(self.healthy_eigenvalues, self.optim, had_bad_grad=True, isomap_model=model)
+        self.isomap._stable_eigenvalues(self.healthy_eigenvalues, self.optim, had_bad_grad=True, isomap_model=model)
+        self.assertTrue(torch.equal(model.layer, original_layer),
+                        "layer must be untouched before the patience threshold is reached")
+
+        # Third consecutive bad-gradient epoch crosses patience=3 -> kick.
+        self.isomap._stable_eigenvalues(self.healthy_eigenvalues, self.optim, had_bad_grad=True, isomap_model=model)
+        self.assertFalse(torch.equal(model.layer, original_layer),
+                         "layer should be perturbed once the patience threshold is reached")
+        self.assertEqual(self.isomap._consecutive_bad_grad_epochs, 0,
+                        "counter must reset immediately after a kick")
+
+    def test_no_kick_without_isomap_model(self):
+        # _stable_eigenvalues must not crash if no model is passed (e.g. old call sites).
+        for _ in range(5):
+            self.isomap._stable_eigenvalues(self.healthy_eigenvalues, self.optim, had_bad_grad=True)
+        # nothing to assert beyond "did not raise"
 
 
 class NanGradientGuardTests(unittest.TestCase):

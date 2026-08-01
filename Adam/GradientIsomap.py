@@ -22,7 +22,9 @@ class GradientIsomap:
                  checkpoint_each: [int, None] = 100,
                  save_checkpoint_matrix: bool = False,
                  logs_folder: [str, None] = None,
-                 stop_criteria_value: float = 0.001
+                 stop_criteria_value: float = 0.001,
+                 degenerate_kick_patience: int = 100,
+                 degenerate_kick_noise_std: float = 0.02
                  ):
         self.features = train_feature
         self.targets = train_target
@@ -33,6 +35,16 @@ class GradientIsomap:
         self.checkpoint_each = checkpoint_each
         self.save_checkpoint_matrix = save_checkpoint_matrix
         self.stop_criteria_value = stop_criteria_value
+        # An occasional NaN/Inf gradient (see the guard in train()) is normal and
+        # self-corrects on its own within a few epochs - it must not trigger any
+        # response by itself. Only a genuinely SUSTAINED run of consecutive bad
+        # gradients (degenerate_kick_patience epochs in a row) means the optimizer
+        # is actually stuck rather than self-correcting, at which point the
+        # distance matrix is directly perturbed with noise instead of waiting
+        # indefinitely for a gradient signal that may never arrive.
+        self.degenerate_kick_patience = degenerate_kick_patience
+        self.degenerate_kick_noise_std = degenerate_kick_noise_std
+        self._consecutive_bad_grad_epochs = 0
         self._init_device()
         self.logs_folder = self._init_logs_folder(logs_folder)
         self.best_loss = np.inf
@@ -135,7 +147,7 @@ class GradientIsomap:
             print(f'epoch {epoch}/{self.epochs},  loss={losses[-1]}, lr={isomap_optim.param_groups[0]["lr"]}')
 
             isomap_eigenvalues = isomap_model.kernel_pca_.eigenvalues_.data.cpu().detach().numpy()
-            self._stable_eigenvalues(isomap_eigenvalues, isomap_optim, had_bad_grad)
+            self._stable_eigenvalues(isomap_eigenvalues, isomap_optim, had_bad_grad, isomap_model)
             current_time = time.strftime("%H:%M:%S", time.gmtime(time.time() - start_time))
 
             epochs_list.append(epoch)
@@ -217,19 +229,34 @@ class GradientIsomap:
         isomap_weights = weights_matrix[upper_tri_indices[0], upper_tri_indices[1]]
         return isomap_weights.cpu().detach().numpy() if hasattr(isomap_weights, 'cpu') else isomap_weights
 
-    def _stable_eigenvalues(self, isomap_eigenvalues, isomap_optim, had_bad_grad=False):
-        # had_bad_grad reflects whether THIS epoch's backward actually produced a
-        # non-finite gradient (see train()) - a direct symptom of eigh's backward
-        # blowing up on close eigenvalue pairs. A close pair among the handful of
-        # kept components does not by itself mean anything went wrong (it is a
-        # common, healthy spectrum shape), so we react to the observed failure
-        # instead of guessing from eigenvalue gaps.
-        degenerate = abs(isomap_eigenvalues[0]) < 0.01 or had_bad_grad
-
+    def _stable_eigenvalues(self, isomap_eigenvalues, isomap_optim, had_bad_grad=False, isomap_model=None):
+        # LR switching is back to the original, long-proven check (top eigenvalue
+        # magnitude only). An occasional NaN/Inf gradient (see train()'s guard) is
+        # normal and self-corrects on its own within a few epochs - it must NOT
+        # bump the LR on every single occurrence, that overreacts to a non-problem
+        # and was observed to stall convergence instead of protecting it.
+        degenerate = abs(isomap_eigenvalues[0]) < 0.01
         for param_group in isomap_optim.param_groups:
             param_group['lr'] = 0.01 if degenerate else 0.0001
         if degenerate:
             print('Egv degenerate')
+
+        # Separate, much coarser safety net: only a genuinely SUSTAINED run of
+        # consecutive bad-gradient epochs (not an occasional one-off) means the
+        # optimizer is actually stuck rather than self-correcting - only then is
+        # a direct perturbation of the distance matrix warranted.
+        if had_bad_grad:
+            self._consecutive_bad_grad_epochs += 1
+        else:
+            self._consecutive_bad_grad_epochs = 0
+
+        if self._consecutive_bad_grad_epochs >= self.degenerate_kick_patience and isomap_model is not None:
+            with torch.no_grad():
+                isomap_model.layer.add_(
+                    torch.randn_like(isomap_model.layer) * self.degenerate_kick_noise_std)
+            print(f'Kicked distance matrix after {self._consecutive_bad_grad_epochs} '
+                  f'consecutive bad-gradient epochs')
+            self._consecutive_bad_grad_epochs = 0
 
     @staticmethod
     def generate_random_matrix(n_samples, dist_type='normal', device='cuda'):
