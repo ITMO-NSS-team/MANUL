@@ -116,6 +116,14 @@ class GradientIsomap:
 
             isomap_optim.zero_grad(set_to_none=True)
             isomap_loss.backward()
+            # eigh's backward divides by (eigenvalue_i - eigenvalue_j); near-degenerate
+            # eigenvalues can turn that into NaN/Inf even when the forward loss is finite.
+            # Zero those out instead of letting them corrupt the distance matrix permanently -
+            # equivalent to skipping this epoch's update for the affected entries.
+            for group in isomap_optim.param_groups:
+                for p in group['params']:
+                    if p.grad is not None:
+                        torch.nan_to_num_(p.grad, nan=0.0, posinf=0.0, neginf=0.0)
             isomap_optim.step()
             print(f'epoch {epoch}/{self.epochs},  loss={losses[-1]}, lr={isomap_optim.param_groups[0]["lr"]}')
 
@@ -203,13 +211,17 @@ class GradientIsomap:
         return isomap_weights.cpu().detach().numpy() if hasattr(isomap_weights, 'cpu') else isomap_weights
 
     def _stable_eigenvalues(self, isomap_eigenvalues, isomap_optim):
-        if abs(isomap_eigenvalues[0]) < 0.01:
-            for param_group in isomap_optim.param_groups:
-                param_group['lr'] = 0.01
-                print('Egv degenerate')
-        if abs(isomap_eigenvalues[0]) >= 0.01:
-            for param_group in isomap_optim.param_groups:
-                param_group['lr'] = 0.0001
+        # eigh's backward blows up on close eigenvalue PAIRS (1/(lambda_i - lambda_j)),
+        # not just a small top eigenvalue - check the smallest gap between sorted
+        # eigenvalues too, since that is what actually drives backward instability.
+        sorted_abs = np.sort(np.abs(isomap_eigenvalues))
+        min_gap = np.min(np.diff(sorted_abs)) if len(sorted_abs) > 1 else np.inf
+        degenerate = abs(isomap_eigenvalues[0]) < 0.01 or min_gap < 0.01
+
+        for param_group in isomap_optim.param_groups:
+            param_group['lr'] = 0.01 if degenerate else 0.0001
+        if degenerate:
+            print('Egv degenerate')
 
     @staticmethod
     def generate_random_matrix(n_samples, dist_type='normal', device='cuda'):

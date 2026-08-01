@@ -251,7 +251,7 @@ class IsomapNN(nn.Module):
         G = self.dist_matrix_**2
         G *= -0.5
 
-        G_reg = G + torch.eye(G.size(0), device=G.device) * 1e-6
+        G_reg = G + torch.eye(G.size(0), device=G.device) * 1e-4
 
         self.embedding_ = self.kernel_pca_.fit_transform(G_reg)
 
