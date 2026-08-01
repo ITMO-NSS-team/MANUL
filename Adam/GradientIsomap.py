@@ -119,16 +119,23 @@ class GradientIsomap:
             # eigh's backward divides by (eigenvalue_i - eigenvalue_j); near-degenerate
             # eigenvalues can turn that into NaN/Inf even when the forward loss is finite.
             # Zero those out instead of letting them corrupt the distance matrix permanently -
-            # equivalent to skipping this epoch's update for the affected entries.
+            # equivalent to skipping this epoch's update for the affected entries. Remember
+            # whether this actually happened so _stable_eigenvalues reacts to a real bad
+            # backward pass instead of guessing from the eigenvalue spectrum shape alone
+            # (a close eigenvalue pair among the handful of kept components is common and
+            # does not by itself mean the gradient was bad).
+            had_bad_grad = False
             for group in isomap_optim.param_groups:
                 for p in group['params']:
                     if p.grad is not None:
+                        if not torch.isfinite(p.grad).all():
+                            had_bad_grad = True
                         torch.nan_to_num_(p.grad, nan=0.0, posinf=0.0, neginf=0.0)
             isomap_optim.step()
             print(f'epoch {epoch}/{self.epochs},  loss={losses[-1]}, lr={isomap_optim.param_groups[0]["lr"]}')
 
             isomap_eigenvalues = isomap_model.kernel_pca_.eigenvalues_.data.cpu().detach().numpy()
-            self._stable_eigenvalues(isomap_eigenvalues, isomap_optim)
+            self._stable_eigenvalues(isomap_eigenvalues, isomap_optim, had_bad_grad)
             current_time = time.strftime("%H:%M:%S", time.gmtime(time.time() - start_time))
 
             epochs_list.append(epoch)
@@ -210,13 +217,14 @@ class GradientIsomap:
         isomap_weights = weights_matrix[upper_tri_indices[0], upper_tri_indices[1]]
         return isomap_weights.cpu().detach().numpy() if hasattr(isomap_weights, 'cpu') else isomap_weights
 
-    def _stable_eigenvalues(self, isomap_eigenvalues, isomap_optim):
-        # eigh's backward blows up on close eigenvalue PAIRS (1/(lambda_i - lambda_j)),
-        # not just a small top eigenvalue - check the smallest gap between sorted
-        # eigenvalues too, since that is what actually drives backward instability.
-        sorted_abs = np.sort(np.abs(isomap_eigenvalues))
-        min_gap = np.min(np.diff(sorted_abs)) if len(sorted_abs) > 1 else np.inf
-        degenerate = abs(isomap_eigenvalues[0]) < 0.01 or min_gap < 0.01
+    def _stable_eigenvalues(self, isomap_eigenvalues, isomap_optim, had_bad_grad=False):
+        # had_bad_grad reflects whether THIS epoch's backward actually produced a
+        # non-finite gradient (see train()) - a direct symptom of eigh's backward
+        # blowing up on close eigenvalue pairs. A close pair among the handful of
+        # kept components does not by itself mean anything went wrong (it is a
+        # common, healthy spectrum shape), so we react to the observed failure
+        # instead of guessing from eigenvalue gaps.
+        degenerate = abs(isomap_eigenvalues[0]) < 0.01 or had_bad_grad
 
         for param_group in isomap_optim.param_groups:
             param_group['lr'] = 0.01 if degenerate else 0.0001
