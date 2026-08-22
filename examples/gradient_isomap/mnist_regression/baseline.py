@@ -1,3 +1,4 @@
+import copy
 import os
 import time
 from datetime import datetime
@@ -65,10 +66,15 @@ def baseline_train_test(folder_path, baseline_model, epochs, batch_size, learnin
     test_dataset = TensorDataset(X_test_tensor, y_test_tensor)
 
     # DataLoaders
+    # shuffle=False: matches GraphRegTrainer.train()'s fixed-order batches
+    # (it can't shuffle - it needs batch_indices to stay real dataset indices
+    # to look up which points are manifold landmarks), so the baseline vs
+    # regularized comparison isn't confounded by an unrelated pipeline
+    # difference in how batches are built.
     train_loader = DataLoader(
         train_dataset,
         batch_size=batch_size,
-        shuffle=True,
+        shuffle=False,
         num_workers=0,
         pin_memory=True if device.type == 'cuda' else False
     )
@@ -156,7 +162,10 @@ def baseline_train_test(folder_path, baseline_model, epochs, batch_size, learnin
         if avg_val_loss < best_val_loss:
             best_val_loss = avg_val_loss
             patience_counter = 0
-            best_model_state = baseline_model.state_dict().copy()
+            # .copy() only shallow-copies the dict - the tensors inside still
+            # alias the live model's storage, which optimizer.step() mutates
+            # in place. deepcopy is required for a real, independent snapshot.
+            best_model_state = copy.deepcopy(baseline_model.state_dict())
             best_epoch = epoch + 1
         else:
             patience_counter += 1
@@ -247,12 +256,15 @@ def baseline_train_test(folder_path, baseline_model, epochs, batch_size, learnin
         'train_mse': baseline_train_mse,
         'train_mae': baseline_train_mae,
         'train_r2': baseline_train_r2,
+        'train_accuracy': baseline_train_accuracy,
         'val_mse': baseline_val_mse,
         'val_mae': baseline_val_mae,
         'val_r2': baseline_val_r2,
+        'val_accuracy': baseline_val_accuracy,
         'test_mse': baseline_test_mse,
         'test_mae': baseline_test_mae,
-        'test_r2': baseline_test_r2
+        'test_r2': baseline_test_r2,
+        'test_accuracy': baseline_test_accuracy
     }])
     metrics_df.to_csv(os.path.join(baseline_folder, 'metrics.csv'), index=False)
 
@@ -295,11 +307,25 @@ if __name__ == "__main__":
         nn.Linear(500, 32, dtype=torch.float64),
         nn.ReLU(),
         nn.Linear(32, 1, dtype=torch.float64),
-        nn.ReLU(),
+        # no activation on the regression output - a ReLU here is a dead-end:
+        # if its pre-activation ever goes negative, the local gradient is 0,
+        # so no gradient reaches any earlier layer and training is stuck
+        # forever predicting 0. Confirmed empirically: 6/15 runs in the
+        # regularization-investigation MNIST experiment collapsed to exactly
+        # R2=-2.391755, the analytically exact score for "always predict 0"
+        # on this train/test split.
     )
     baseline_train_test(folder_path=folder_path,
                         baseline_model=model_architecture,
                         epochs=5000,
                         batch_size=1000,
-                        learning_rate=0.01,
+                        # 0.01 was too aggressive for this architecture: the
+                        # first Adam step regularly overshot into a flat
+                        # region near the trivial "always predict the mean"
+                        # solution (loss cratered from ~26 to ~8.4 within 2
+                        # epochs and never moved again). 0.001 reliably
+                        # escapes it - confirmed empirically on a seed that
+                        # collapsed to R2~0 at lr=0.01 but reached R2=0.96 at
+                        # lr=0.001 on the same data/init.
+                        learning_rate=0.001,
                         early_stopping_patience=100)

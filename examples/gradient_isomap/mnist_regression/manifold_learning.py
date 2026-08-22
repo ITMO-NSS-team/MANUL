@@ -14,7 +14,7 @@ from utils.fps_implementation import memory_efficient_fps
 from utils.utils import split_data
 
 
-def mnist_manifold_learning(mnist_folder):
+def mnist_manifold_learning(mnist_folder, latent_dim_override=None):
     n_samples = 60000  # Number of images to use from dataset
     n_base_points = 2000
     epochs = 20000  # Number of total epochs for GradientIsomap training (early stopping exists)
@@ -46,6 +46,9 @@ def mnist_manifold_learning(mnist_folder):
         method='eigenvalue',
         n_samples=1000)
     print(f'Latent dimensionality calculated: {latent_dim}')
+    if latent_dim_override is not None:
+        print(f'Overriding calculated latent dimensionality with explicit latent_dim_override={latent_dim_override}')
+        latent_dim = latent_dim_override
 
     if detail_analyse_dimensionality:
         print('Detailed analysis of  intrinsic dimensionality')

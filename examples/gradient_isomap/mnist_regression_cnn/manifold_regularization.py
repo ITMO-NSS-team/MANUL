@@ -28,7 +28,8 @@ def calc_accuracy(targets, predictions):
 
 
 def manifold_regularization(folder_path, model, num_epochs, batch_size, learning_rate, early_stop_patience,
-                            lambda_method, adaptive_lambda_recompute=False):
+                            lambda_method, adaptive_lambda_recompute=False, normalize_graph_loss=False,
+                            calibrate_rbf_bandwidth=False):
     print(f"\n{'=' * 60}")
     print("STAGE 2: GRAPH REGULARIZATION TRAINING")
     print(f"{'=' * 60}\n")
@@ -90,6 +91,8 @@ def manifold_regularization(folder_path, model, num_epochs, batch_size, learning
         adaptive_lambda=lambda_method,
         early_stopping_patience=early_stop_patience,
         adaptive_lambda_recompute=adaptive_lambda_recompute,
+        normalize_graph_loss=normalize_graph_loss,
+        calibrate_rbf_bandwidth=calibrate_rbf_bandwidth,
     )
 
     fl64 = torch.float64
@@ -126,12 +129,15 @@ def manifold_regularization(folder_path, model, num_epochs, batch_size, learning
         'train_mse': reg_train_mse,
         'train_mae': reg_train_mae,
         'train_r2': reg_train_r2,
+        'train_accuracy': reg_train_accuracy,
         'val_mse': reg_val_mse,
         'val_mae': reg_val_mae,
         'val_r2': reg_val_r2,
+        'val_accuracy': reg_val_accuracy,
         'test_mse': reg_test_mse,
         'test_mae': reg_test_mae,
-        'test_r2': reg_test_r2
+        'test_r2': reg_test_r2,
+        'test_accuracy': reg_test_accuracy
     }])
     metrics_df.to_csv(os.path.join(experiment_folder, 'metrics.csv'), index=False)
     return experiment_folder
@@ -141,7 +147,7 @@ if __name__ == "__main__":
     folder_path = 'outputs_60000/mnist_run_20260115_234826'
     num_epochs = 1000
     batch_size = 1000
-    lr = 0.01
+    lr = 0.001  # 0.01 collapsed training on the MLP counterpart, see baseline.py
     early_stop_patience = 100
     lambda_method = None
 
