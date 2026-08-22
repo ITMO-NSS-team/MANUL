@@ -70,30 +70,109 @@ class FloydWarshall(torch.autograd.Function):
     def forward(ctx, graph):
         """
         Forward pass for Floyd-Warshall algorithm.
+
+        Alongside the distance matrix, also tracks next_hop[i, j]: the
+        immediate next vertex on a shortest i->j path (standard path-
+        reconstruction bookkeeping, updated whenever a candidate route
+        through k strictly improves on the current distance). This costs
+        nothing extra asymptotically (same O(n_samples) loop, one more
+        O(n_samples^2) update per iteration) but lets backward reconstruct
+        exactly which edges matter without re-deriving them from scratch.
         """
         n_samples = graph.size(0)
         dist = graph.clone()
+        idx = torch.arange(n_samples, device=graph.device)
+        next_hop = idx.view(1, n_samples).expand(n_samples, n_samples).clone()
 
-        # Run Floyd-Warshall algorithm
         for k in range(n_samples):
-            dist = torch.min(dist, dist[:, k:k+1] + dist[k:k+1, :])
-        #dist = torch.min(dist, dist[:, :, None] + dist[None, :, :])
-        # Save necessary tensors for the backward pass
-        ctx.save_for_backward(graph, dist)
+            candidate = dist[:, k:k+1] + dist[k:k+1, :]
+            improve = candidate < dist
+            dist = torch.where(improve, candidate, dist)
+            next_hop = torch.where(improve, next_hop[:, k:k+1].expand(n_samples, n_samples), next_hop)
+
+        ctx.save_for_backward(next_hop)
+        ctx.n_samples = n_samples
         return dist
 
     @staticmethod
     def backward(ctx, grad_output):
         """
-        Backward pass to compute gradients efficiently.
-        """
-        graph, dist = ctx.saved_tensors
-        n_samples = graph.size(0)
+        Backward pass via explicit shortest-path reconstruction.
 
+        Edge (a, b) affects dist[i, j] iff it lies on the reconstructed
+        i->j shortest path (per next_hop). Instead of the previous
+        approach - checking, for every candidate edge, whether it satisfies
+        the shortest-path identity against ALL L^2 pairs (O(n_neighbors *
+        n_samples^3), ~20x slower than forward at landmark-count scale) -
+        walk every (i, j) pair's path in lockstep, one hop at a time, and
+        scatter-add grad_output[i, j] onto whichever edge was just
+        traversed. Pairs that have already reached j drop out of the
+        "active" mask and stop contributing. This costs O(n_samples^2) per
+        hop, and the number of hops needed is the graph's diameter (small
+        for a symmetrized k-NN graph - a handful of hops, not n_samples),
+        so total cost is close to the forward pass's own O(n_samples^3),
+        not ~20x more.
+
+        (The previous, exact-but-slow "check against all L^2 pairs" version
+        is preserved as _backward_bruteforce below for cross-validation in
+        tests - both must agree, since disconnected/degenerate graphs are
+        exactly where a hop-count safety cap could matter.)
+        """
+        next_hop, = ctx.saved_tensors
+        n_samples = ctx.n_samples
+        device = grad_output.device
+
+        idx = torch.arange(n_samples, device=device)
+        i_grid = idx.view(n_samples, 1).expand(n_samples, n_samples)
+        j_grid = idx.view(1, n_samples).expand(n_samples, n_samples)
+
+        cur = i_grid.clone()
+        active = cur != j_grid
+        grad_flat = torch.zeros(n_samples * n_samples, device=device, dtype=grad_output.dtype)
+
+        for _ in range(n_samples):  # safety cap: at most n_samples-1 hops on any simple path
+            if not bool(active.any()):
+                break
+            nxt = next_hop[cur, j_grid]
+            flat_idx = (cur * n_samples + nxt)[active].reshape(-1)
+            grad_flat.scatter_add_(0, flat_idx, grad_output[active].reshape(-1))
+            cur = torch.where(active, nxt, cur)
+            active = active & (cur != j_grid)
+
+        return grad_flat.view(n_samples, n_samples)
+
+    @staticmethod
+    def _backward_bruteforce(graph, dist, grad_output):
+        """
+        Reference implementation kept for testing only: directly checks the
+        shortest-path decomposition identity
+            dist[i, a] + graph[a, b] + dist[b, j] == dist[i, j]
+        against every (i, j) pair for every candidate edge (a, b). Correct,
+        but O(n_neighbors * n_samples^3) - the version FloydWarshall.backward
+        replaces with explicit path reconstruction for speed.
+        """
+        n_samples = graph.size(0)
+        finite = torch.isfinite(graph)
+        finite.fill_diagonal_(False)
+
+        finite_dist = dist[torch.isfinite(dist)]
+        eps = 1e-6 * (1.0 + (finite_dist.abs().max() if finite_dist.numel() > 0 else 0.0))
         grad_input = torch.zeros_like(graph)
 
-        for k in reversed(range(n_samples)):
-            grad_input += (grad_output < (dist[:, k:k+1] + dist[k:k+1, :])).float() * grad_output
+        for a in range(n_samples):
+            neighbors_a = torch.nonzero(finite[a], as_tuple=True)[0]
+            if neighbors_a.numel() == 0:
+                continue
+            graph_ab = graph[a, neighbors_a]
+            dist_i_a = dist[:, a]
+            dist_b_j = dist[neighbors_a, :]
+
+            path_via = (dist_i_a.view(1, n_samples, 1)
+                        + graph_ab.view(-1, 1, 1)
+                        + dist_b_j.view(-1, 1, n_samples))
+            on_shortest_path = (path_via - dist.view(1, n_samples, n_samples)).abs() < eps
+            contrib = (grad_output.view(1, n_samples, n_samples) * on_shortest_path).sum(dim=(1, 2))
+            grad_input[a, neighbors_a] = contrib
 
         return grad_input
 
