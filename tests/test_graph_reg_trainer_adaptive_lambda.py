@@ -109,5 +109,58 @@ class AdaptiveLambdaModeTests(unittest.TestCase):
                     f"window boundaries, got {set(after_window)}")
 
 
+class NonSobolLambdaHistoryTests(unittest.TestCase):
+    """train()'s epoch loop only ever appends to
+    convergence_history['model_lambda'/'graph_lambda'] under
+    `if adaptive_lambda == 'sobol':` - for any other value (False, the
+    parameter's own default; None; anything else) those lists stay empty
+    while every *_loss list has one entry per completed epoch. The
+    end-of-training fallback used to check `if adaptive_lambda is None:`,
+    which missed the False case entirely, so calling train() with
+    adaptive_lambda left at its default (or explicitly False) crashed
+    building the convergence_log.csv DataFrame on a length mismatch."""
+
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+
+    def tearDown(self):
+        self._tmpdir.cleanup()
+
+    def _make_trainer(self, num_epochs=5):
+        rng = np.random.RandomState(0)
+        n_points, n_features, n_base = 20, 3, 8
+        X = rng.randn(n_points, n_features).astype(np.float64)
+        y = rng.randn(n_points).astype(np.float64)
+        base_indices = rng.choice(n_points, n_base, replace=False)
+        weights_matrix = np.abs(rng.randn(n_base, n_base))
+        weights_matrix = (weights_matrix + weights_matrix.T) / 2
+        np.fill_diagonal(weights_matrix, 0)
+        model = nn.Sequential(nn.Linear(n_features, 8, dtype=torch.float64), nn.ReLU(),
+                             nn.Linear(8, 1, dtype=torch.float64))
+        optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+        return GraphRegTrainer(
+            train_features=X, train_target=y, weights_matrix=weights_matrix,
+            base_indices=base_indices, model=model, criterion=nn.MSELoss(),
+            optimizer=optimizer, num_epochs=num_epochs, batch_size=32,
+            device='cpu', cache_folder=self._tmpdir.name,
+        )
+
+    def test_default_adaptive_lambda_does_not_crash(self):
+        trainer = self._make_trainer()
+        trainer.train(plot_convergence=False, early_stopping_patience=None)  # adaptive_lambda left at its default (False)
+
+    def test_explicit_false_does_not_crash_and_fills_history(self):
+        trainer = self._make_trainer(num_epochs=7)
+        trainer.train(plot_convergence=False, adaptive_lambda=False, early_stopping_patience=None)
+        self.assertEqual(len(trainer.convergence_history['model_lambda']), 7)
+        self.assertEqual(len(trainer.convergence_history['graph_lambda']), 7)
+        self.assertTrue(np.all(np.array(trainer.convergence_history['model_lambda']) == 1.0))
+
+    def test_none_does_not_crash(self):
+        trainer = self._make_trainer(num_epochs=6)
+        trainer.train(plot_convergence=False, adaptive_lambda=None, early_stopping_patience=None)
+        self.assertEqual(len(trainer.convergence_history['graph_lambda']), 6)
+
+
 if __name__ == '__main__':
     unittest.main()

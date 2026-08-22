@@ -1,3 +1,4 @@
+import copy
 import os
 import time
 from typing import Callable
@@ -6,7 +7,6 @@ import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
-from sklearn.metrics import pairwise_distances
 from torch import float64 as fl64
 from matplotlib import pyplot as plt
 from SALib import ProblemSpec
@@ -151,6 +151,18 @@ class GraphRegTrainer:
         # fill nans for correct regularization
         self.weights_matrix = np.nan_to_num(weights_matrix)
         self.base_indices = base_indices
+
+        # RBF bandwidth for the A_ij = exp(-W_ij^2 / sigma_sq) affinity used
+        # by _compute_graph_loss_global* (calibrate_rbf_bandwidth=True).
+        # Median-based, same approach compute_full_rbf_affinity already uses
+        # elsewhere in this file (that function is otherwise unused). Without
+        # this, exp(-W_ij^2) implicitly assumes W spans well below/above 1 -
+        # but the learned manifold distances here were found to sit in
+        # roughly [0, 1], so the raw kernel barely discriminates near vs far
+        # (empirically: A ranged 0.37-1.0, std 0.06 - close to a constant).
+        offdiag_mask = ~np.eye(self.weights_matrix.shape[0], dtype=bool)
+        median_dist = np.median(self.weights_matrix[offdiag_mask]) if self.weights_matrix.shape[0] > 1 else 0.0
+        self.rbf_sigma_sq = float(median_dist ** 2) if median_dist > 1e-12 else 1.0
         self.num_epochs = num_epochs
         self.batch_size = batch_size
         self.cache_folder = cache_folder
@@ -188,42 +200,121 @@ class GraphRegTrainer:
                 device = 'cpu'
         return device
 
-    def _compute_graph_loss_global(self, all_predictions: torch.Tensor, batch_indices=None) -> torch.Tensor:
+    def _compute_graph_loss_global(self, all_predictions: torch.Tensor, batch_indices=None,
+                                   sigma_sq: float = 1.0) -> torch.Tensor:
         """
         Compute global graph regularization loss using pairwise distances.
 
         Computes weighted sum of prediction differences across all point pairs:
         Loss = (1/2N^2) * sum_ij (A_ij * ||f(i) - f(j)||^2)
-        where A=exp(-W**2) and W is the precomputed distance matrix and f(i) are model predictions.
+        where A=exp(-W**2/sigma_sq) and W is the precomputed distance matrix and f(i) are model predictions.
         Args:
             all_predictions: model predictions for all points [N, output_dim]
             batch_indices: indices of the current batch (optional). If provided,
                            computes loss only for pairs within the batch.
+            sigma_sq: RBF bandwidth (default 1.0 = original, uncalibrated
+                behavior). Pass self.rbf_sigma_sq (median-distance-based) to
+                calibrate the kernel to the manifold's actual distance scale -
+                see the calibrate_rbf_bandwidth note in train().
         Returns:
-            graph_loss: scalar regularization loss value
+            graph_loss: scalar regularization loss tensor (kept on the autograd
+                graph - see note below on why this matters)
         """
-        F = all_predictions.cpu().detach().numpy()
+        # F used to be detached to numpy here, and prediction_dists/graph_loss
+        # computed entirely with sklearn/numpy - meaning graph_loss carried no
+        # gradient at all. combined_loss = lam_nn*model_loss + lam_graph*graph_loss
+        # still looked like a normal tensor (adding a python/numpy scalar to a
+        # tensor is valid), so combined_loss.backward() ran without error, but
+        # the constant graph_loss term has zero derivative - regularization
+        # never affected a single weight update, on either the synthetic or
+        # MNIST pipelines, regardless of lam_graph's value. Verified directly:
+        # gradients were bit-for-bit identical with and without the graph term.
+        # torch.cdist keeps this differentiable so graph_loss actually
+        # constrains predictions of nearby (per the learned manifold) points.
+        F = all_predictions
         if batch_indices is not None:
             # loss calculates only on graph base points to save weights_matrix dimensionality
             real_indices_in_base = np.intersect1d(batch_indices,
                                                   self.base_indices)  # find batch indices which are in base
+            if len(real_indices_in_base) == 0:
+                # This batch has no overlap with the manifold's landmark
+                # points - nothing to regularize against. Returning 0 (rather
+                # than the previous code's implicit 0/0) avoids a NaN that
+                # would now propagate into the gradient, since graph_loss is
+                # no longer detached.
+                return torch.zeros((), dtype=F.dtype, device=F.device)
             indices_in_batch_indices = np.argwhere(np.isin(batch_indices, real_indices_in_base))[:, 0]
             F = F[indices_in_batch_indices]
-            prediction_dists = pairwise_distances(F, F) ** 2
+            prediction_dists = torch.cdist(F, F, p=2) ** 2
 
             # find valid indices to cut weights_matrix with base dimensionality
             indices_in_base = np.argwhere(np.isin(self.base_indices, real_indices_in_base))[:, 0]
             batch_weights_matrix = self.weights_matrix[indices_in_base][:, indices_in_base]
-            graph_loss = np.sum(prediction_dists * np.exp(-batch_weights_matrix ** 2)) / (
+            batch_weights_matrix_t = torch.as_tensor(batch_weights_matrix, dtype=F.dtype, device=F.device)
+            graph_loss = torch.sum(prediction_dists * torch.exp(-batch_weights_matrix_t ** 2 / sigma_sq)) / (
                         2 * len(real_indices_in_base) ** 2)
         else:
-            prediction_dists = pairwise_distances(F, F) ** 2
-            graph_loss = np.sum(prediction_dists * np.exp(-self.weights_matrix ** 2)) / (2 * F.shape[0] ** 2)
+            prediction_dists = torch.cdist(F, F, p=2) ** 2
+            weights_matrix_t = torch.as_tensor(self.weights_matrix, dtype=F.dtype, device=F.device)
+            graph_loss = torch.sum(prediction_dists * torch.exp(-weights_matrix_t ** 2 / sigma_sq)) / (2 * F.shape[0] ** 2)
+        return graph_loss
+
+    def _compute_graph_loss_global_normalized(self, all_predictions: torch.Tensor, batch_indices=None,
+                                              eps: float = 1e-6, sigma_sq: float = 1.0) -> torch.Tensor:
+        """
+        Same weighted-pairwise-distance graph loss as _compute_graph_loss_global,
+        but z-scores predictions (over the same point set the pairwise distances
+        are computed on) before computing distances.
+
+        Without this, graph_loss can be minimized towards exactly 0 by
+        collapsing ALL predictions to a single constant, regardless of the
+        A_ij weighting: ||f(i)-f(j)||^2 = 0 for every pair (near or far) at
+        once, since the loss only penalizes dissimilarity of nearby pairs and
+        never penalizes similarity - there is nothing pushing distant pairs
+        apart. Normalizing first makes graph_loss invariant to the overall
+        scale/shift of predictions, so uniformly shrinking them towards a
+        constant no longer reduces it - only actually rearranging predictions
+        relative to each other does.
+
+        eps guards std -> 0 early in training (e.g. right after init, before
+        the model has learned to produce varied outputs): with eps in the
+        denominator (rather than a floor on std itself), if the true spread
+        is much smaller than eps, normalization is effectively a no-op and
+        graph_loss stays small (matching the unnormalized version's
+        behavior) instead of amplifying near-zero differences into large,
+        noisy values - it only starts actively normalizing once predictions
+        have enough genuine spread to matter.
+
+        sigma_sq: RBF bandwidth (default 1.0 = original, uncalibrated
+            behavior). Pass self.rbf_sigma_sq to calibrate - see the
+            calibrate_rbf_bandwidth note in train().
+        """
+        F = all_predictions
+        if batch_indices is not None:
+            real_indices_in_base = np.intersect1d(batch_indices, self.base_indices)
+            if len(real_indices_in_base) == 0:
+                return torch.zeros((), dtype=F.dtype, device=F.device)
+            indices_in_batch_indices = np.argwhere(np.isin(batch_indices, real_indices_in_base))[:, 0]
+            F = F[indices_in_batch_indices]
+            F = (F - F.mean()) / (F.std(unbiased=False) + eps)
+            prediction_dists = torch.cdist(F, F, p=2) ** 2
+
+            indices_in_base = np.argwhere(np.isin(self.base_indices, real_indices_in_base))[:, 0]
+            batch_weights_matrix = self.weights_matrix[indices_in_base][:, indices_in_base]
+            batch_weights_matrix_t = torch.as_tensor(batch_weights_matrix, dtype=F.dtype, device=F.device)
+            graph_loss = torch.sum(prediction_dists * torch.exp(-batch_weights_matrix_t ** 2 / sigma_sq)) / (
+                        2 * len(real_indices_in_base) ** 2)
+        else:
+            F = (F - F.mean()) / (F.std(unbiased=False) + eps)
+            prediction_dists = torch.cdist(F, F, p=2) ** 2
+            weights_matrix_t = torch.as_tensor(self.weights_matrix, dtype=F.dtype, device=F.device)
+            graph_loss = torch.sum(prediction_dists * torch.exp(-weights_matrix_t ** 2 / sigma_sq)) / (2 * F.shape[0] ** 2)
         return graph_loss
 
     def train(self, plot_convergence: bool = False, adaptive_lambda=False,
               early_stopping_patience: int = 100, adaptive_lambda_window: int = 100,
-              adaptive_lambda_recompute: bool = False):
+              adaptive_lambda_recompute: bool = False, normalize_graph_loss: bool = False,
+              calibrate_rbf_bandwidth: bool = False):
         """
         Train the model with combined loss (model loss + graph regularization loss).
 
@@ -240,6 +331,24 @@ class GraphRegTrainer:
                 runs once per window instead of every epoch.
             adaptive_lambda_recompute: if True, keep recalculating lambdas every
                 adaptive_lambda_window epochs for the whole training run instead of only once.
+            normalize_graph_loss: if True, use _compute_graph_loss_global_normalized
+                (z-scores predictions before computing pairwise distances, so
+                collapsing predictions towards a constant no longer trivially
+                shrinks graph_loss) instead of the original
+                _compute_graph_loss_global. Defaults to False so existing
+                behavior/callers are unaffected.
+            calibrate_rbf_bandwidth: if True, use self.rbf_sigma_sq (median
+                squared distance over the manifold's landmark-to-landmark
+                distance matrix) as the RBF kernel's bandwidth in
+                A_ij = exp(-W_ij^2 / sigma_sq), instead of the uncalibrated
+                A_ij = exp(-W_ij^2). Found empirically (2026-08) that without
+                this, when the learned distances sit roughly in [0, 1] (as
+                they did on synthetic data), the raw kernel barely
+                discriminates near vs far pairs (A ranged 0.37-1.0, std 0.06
+                - close to a constant weight on every pair) - graph_loss then
+                mostly just pulls all landmark predictions towards a common
+                value rather than encoding real local manifold structure.
+                Defaults to False so existing behavior/callers are unaffected.
         Returns:
             self: trained model instance
         """
@@ -252,6 +361,7 @@ class GraphRegTrainer:
         lam_graph = 1
 
         no_changes_epochs = 100
+        sigma_sq = self.rbf_sigma_sq if calibrate_rbf_bandwidth else 1.0
 
         if adaptive_lambda == 'sobol':
             if adaptive_lambda_window >= self.num_epochs:
@@ -264,6 +374,13 @@ class GraphRegTrainer:
 
             self.model.train()
 
+            # Fixed order (not shuffled) - matches baseline_train_test's
+            # DataLoader(shuffle=False) so both pipelines process data the
+            # same way and any quality difference reflects the regularization
+            # itself, not an unrelated pipeline discrepancy. These must stay
+            # real dataset indices (not batch-local positions), since
+            # _compute_graph_loss_global intersects batch_indices against
+            # self.base_indices (the manifold's landmark points).
             indices = np.arange(len(self.features))
 
             epoch_model_loss = 0.0
@@ -279,7 +396,12 @@ class GraphRegTrainer:
                 batch_y = torch.tensor(self.target[batch_indices], dtype=fl64).to(self.device)
                 output = self.model(batch_x)
                 model_loss = self.criterion(output, batch_y.reshape_as(output))
-                graph_loss = self._compute_graph_loss_global(output, batch_indices=batch_indices)
+                if normalize_graph_loss:
+                    graph_loss = self._compute_graph_loss_global_normalized(output, batch_indices=batch_indices,
+                                                                            sigma_sq=sigma_sq)
+                else:
+                    graph_loss = self._compute_graph_loss_global(output, batch_indices=batch_indices,
+                                                                 sigma_sq=sigma_sq)
 
                 combined_loss = lam_nn * model_loss + lam_graph * graph_loss
 
@@ -321,7 +443,13 @@ class GraphRegTrainer:
                 if early_stopping_patience is not None:
                     if val_model_loss < best_val_loss:
                         best_val_loss = val_model_loss
-                        self.best_model = self.model
+                        # self.model is a live reference that optimizer.step()
+                        # keeps mutating in place - assigning it directly here
+                        # (as opposed to a real snapshot) means self.best_model
+                        # would silently end up identical to the FINAL epoch's
+                        # model by the time training exits, defeating the
+                        # entire point of tracking a best epoch.
+                        self.best_model = copy.deepcopy(self.model)
                         self.best_epoch = epoch + 1
 
                     if len(self.convergence_history['val_loss']) > no_changes_epochs:
@@ -360,9 +488,20 @@ class GraphRegTrainer:
                     self.convergence_history['graph_lambda'].append(float(lam_graph))
 
         self.convergence_history['epoch'] = np.arange(1, len(self.convergence_history['model_loss']) + 1)
-        if adaptive_lambda is None:
-            self.convergence_history['model_lambda'] = np.ones(self.num_epochs)
-            self.convergence_history['graph_lambda'] = np.ones(self.num_epochs)
+        # Must match the actual condition used in the epoch loop above
+        # (`if adaptive_lambda == 'sobol':`) - the loop only ever appends to
+        # model_lambda/graph_lambda under that exact condition, leaving them
+        # empty for ANY other value (False, None, or anything else),
+        # including train()'s own default (adaptive_lambda=False). The old
+        # `if adaptive_lambda is None:` check missed the False case - the
+        # DEFAULT parameter value - so calling train() with adaptive_lambda
+        # left unset (or explicitly False) crashed here on a length mismatch
+        # between the populated *_loss lists (len == epochs run) and the
+        # still-empty model_lambda/graph_lambda lists (len == 0).
+        if adaptive_lambda != 'sobol':
+            n_completed_epochs = len(self.convergence_history['model_loss'])
+            self.convergence_history['model_lambda'] = np.ones(n_completed_epochs)
+            self.convergence_history['graph_lambda'] = np.ones(n_completed_epochs)
         df = pd.DataFrame({
             key: pd.Series(values)
             for key, values in self.convergence_history.items()
