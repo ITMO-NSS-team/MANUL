@@ -261,6 +261,8 @@ class GradientIsomapCF:
             'val_loss': [],
             'val_hr': [],
             'val_ndcg': [],
+            'had_bad_grad': [],
+            'grad_nonfinite_count': [],
         }
 
         self.cf_history = {
@@ -505,6 +507,30 @@ class GradientIsomapCF:
             bce_loss = loss_fn(preds_all, self.labels_all)
 
             bce_loss.backward()
+
+            # NaN/Inf-gradient guard: ported from Adam/GradientIsomap.py's
+            # (independently, already-hardened) outer-loop pattern - this
+            # loop never had it, so it was exposed to exactly the class of
+            # instability that was fixed there (eigh's backward can produce
+            # NaN when top eigenvalues are nearly degenerate). Scans grads
+            # right before the optimizer step and zeroes any non-finite
+            # entries rather than letting them corrupt D_input via
+            # isomap_optim.step() - an occasional bad epoch self-corrects
+            # this way instead of silently poisoning the outer loop.
+            had_bad_grad = False
+            grad_nonfinite_count = 0
+            for group in isomap_optim.param_groups:
+                for p in group['params']:
+                    if p.grad is not None:
+                        nonfinite_mask = ~torch.isfinite(p.grad)
+                        if nonfinite_mask.any():
+                            had_bad_grad = True
+                            grad_nonfinite_count += int(nonfinite_mask.sum().item())
+                        torch.nan_to_num_(p.grad, nan=0.0, posinf=0.0, neginf=0.0)
+            if had_bad_grad:
+                print(f"  [Guard] Outer epoch {epoch}: {grad_nonfinite_count} non-finite "
+                      f"gradient entries zeroed before isomap_optim.step()")
+
             isomap_optim.step()
 
             with torch.no_grad():
@@ -559,6 +585,8 @@ class GradientIsomapCF:
             self.history['val_loss'].append(avg_val_loss)
             self.history['val_hr'].append(hr_val)
             self.history['val_ndcg'].append(ndcg_val)
+            self.history['had_bad_grad'].append(had_bad_grad)
+            self.history['grad_nonfinite_count'].append(grad_nonfinite_count)
 
             print(f"[Outer {epoch + 1}/{self.epochs}] "
                   f"train={avg_train_loss:.4f}, "
