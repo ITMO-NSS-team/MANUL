@@ -107,9 +107,15 @@ def ollivier_ricci_curvature(knn_adj: np.ndarray, alpha: float = 0.5) -> dict:
     apsp = dict(nx.all_pairs_dijkstra_path_length(G, weight="weight"))
     _progress(f"ORC: shortest paths done, computing curvature for {n_edges_total} edges...")
 
+    # At most ~4 progress lines regardless of graph size - at this project's
+    # scale (a few thousand edges) the whole loop finishes in ~1s, so
+    # printing every N edges (a fixed N) produced far more lines than the
+    # actual runtime warranted and triggered Monitor's noise-rate-limit
+    # during the eta_outer sweep (see docs/recsys_paper_diary.md 2026-08-24).
+    progress_every = max(1, n_edges_total // 4)
     t0 = time.time()
     for edge_idx, (i, j) in enumerate(G.edges()):
-        if edge_idx > 0 and edge_idx % 500 == 0:
+        if edge_idx > 0 and edge_idx % progress_every == 0:
             rate = edge_idx / (time.time() - t0)
             eta_s = (n_edges_total - edge_idx) / rate if rate > 0 else float("nan")
             _progress(f"ORC: edge {edge_idx}/{n_edges_total} ({rate:.0f}/s, ETA {eta_s:.0f}s)")
