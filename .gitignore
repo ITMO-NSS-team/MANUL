@@ -2,6 +2,12 @@
 data/MNIST/
 data/*.npy
 
+# ML-10M is 265MB (unlike the small 25MB ML-1M, which is committed directly
+# for convenience) - too large for git history, kept local-only. Fetch from
+# https://files.grouplens.org/datasets/movielens/ml-10m.zip and extract
+# ratings.dat/movies.dat into this folder to reproduce.
+recsys/GradIsomapCF_movielens/data/ml-10m/
+
 outputs/
 
 # Python

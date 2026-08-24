@@ -57,6 +57,8 @@ class NCFTestDatasetSampled(Dataset):
         self.items = []
         self.labels = []
 
+        n_users_truncated = 0
+
         for (u, last_item, target_m) in next_triples:
             u = int(u)
             target_m = int(target_m)
@@ -65,8 +67,22 @@ class NCFTestDatasetSampled(Dataset):
             self.items.append(target_m)
             self.labels.append(1.0)
 
+            # Rejection sampling below assumes at least num_ng candidate
+            # items exist outside the user's positive set - false in
+            # general (e.g. ml-10m's most-active users can have rated
+            # 99%+ of a small item pool), and previously caused the loop
+            # below to spin forever when it wasn't. Cap to what's actually
+            # available so a dense user degrades evaluation quality for
+            # themselves (fewer negatives -> an easier ranking task, noted
+            # via n_users_truncated) rather than hanging the whole run.
+            excluded = self.user_pos_all_set[u] | {target_m}
+            n_available = self.num_items - len(excluded)
+            n_negs_for_user = min(self.num_ng, max(n_available, 0))
+            if n_negs_for_user < self.num_ng:
+                n_users_truncated += 1
+
             negs = 0
-            while negs < self.num_ng:
+            while negs < n_negs_for_user:
                 j = int(self.rng.integers(self.num_items))
                 # исключаем ВСЕ позитивы пользователя (train+val+test)
                 if j in self.user_pos_all_set[u]:
@@ -78,6 +94,13 @@ class NCFTestDatasetSampled(Dataset):
                 self.items.append(j)
                 self.labels.append(0.0)
                 negs += 1
+
+        if n_users_truncated > 0:
+            print(f"[NCFTestDatasetSampled] WARNING: {n_users_truncated} user(s) had fewer than "
+                  f"num_ng={self.num_ng} candidate negatives available (positive set too dense "
+                  f"relative to num_items={self.num_items}) - sampled fewer negatives for them "
+                  f"instead of hanging. Ranking task is easier for these users; consider a larger "
+                  f"item pool if this count is more than a handful.")
 
     def __len__(self):
         return len(self.users)

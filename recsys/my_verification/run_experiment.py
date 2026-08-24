@@ -51,8 +51,12 @@ from prepare_data import (
 from new_datasets import NCFTrainDatasetFutureBlind, NCFTestDatasetSampled
 
 
-def load_movielens_1m_ratings(ml1m_dir):
-    ratings_path = os.path.join(ml1m_dir, "ratings.dat")
+def load_movielens_ratings(movielens_dir):
+    """Loads ratings.dat from any MovieLens release using the ``::``-separated
+    UserID::MovieID::Rating::Timestamp format - shared by ml-1m and ml-10m
+    (verified against both; GroupLens kept this format through ml-10m,
+    later releases switch to CSV, would need a different parser)."""
+    ratings_path = os.path.join(movielens_dir, "ratings.dat")
     print(f"Loading ratings from {ratings_path} ...")
     df = pd.read_csv(
         ratings_path,
@@ -81,12 +85,13 @@ def main(
     run_gincf=True,
     n_run="verify01",
     seed=0,
+    dataset_dir_name="ml-1m",
 ):
     torch.manual_seed(seed)
     np.random.seed(seed)
 
-    ml1m_dir = os.path.join(GINCF_DIR, "data", "ml-1m")
-    ratings_df = load_movielens_1m_ratings(ml1m_dir)
+    movielens_dir = os.path.join(GINCF_DIR, "data", dataset_dir_name)
+    ratings_df = load_movielens_ratings(movielens_dir)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"\nDevice: {device}")
