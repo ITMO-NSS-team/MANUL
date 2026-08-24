@@ -22,12 +22,21 @@ import argparse
 import glob
 import os
 import re
+import sys
+import time
 
 import gudhi
 import networkx as nx
 import numpy as np
 import ot
 from scipy.stats import spearmanr, pearsonr
+
+
+def _progress(msg: str) -> None:
+    """Flushed, timestamped progress line - so a long-running call keeps
+    producing visible output instead of going silent until it returns
+    (which is indistinguishable from a hang when watching the terminal)."""
+    print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
 
 
 def graph_from_knn_adj(knn_adj: np.ndarray) -> nx.Graph:
@@ -93,9 +102,18 @@ def ollivier_ricci_curvature(knn_adj: np.ndarray, alpha: float = 0.5) -> dict:
         return {"mean": float("nan"), "median": float("nan"), "f_neg": float("nan"),
                 "n_edges": 0, "values": np.array([])}
 
+    n_edges_total = G.number_of_edges()
+    _progress(f"ORC: computing all-pairs shortest paths ({G.number_of_nodes()} nodes)...")
     apsp = dict(nx.all_pairs_dijkstra_path_length(G, weight="weight"))
+    _progress(f"ORC: shortest paths done, computing curvature for {n_edges_total} edges...")
 
-    for i, j in G.edges():
+    t0 = time.time()
+    for edge_idx, (i, j) in enumerate(G.edges()):
+        if edge_idx > 0 and edge_idx % 500 == 0:
+            rate = edge_idx / (time.time() - t0)
+            eta_s = (n_edges_total - edge_idx) / rate if rate > 0 else float("nan")
+            _progress(f"ORC: edge {edge_idx}/{n_edges_total} ({rate:.0f}/s, ETA {eta_s:.0f}s)")
+
         d_ij = apsp[i][j]
         if d_ij < 1e-12:
             G[i][j]["ricciCurvature"] = 0.0
@@ -244,12 +262,14 @@ def persistent_homology(D: np.ndarray, max_edge_length: float = None, max_dimens
         iu, ju = np.triu_indices(n, k=1)
         max_edge_length = float(np.percentile(D[iu, ju], 10))
 
+    _progress(f"PH: building 1-skeleton (n={n}, max_edge_length={max_edge_length:.4f})...")
     rips = gudhi.RipsComplex(distance_matrix=D, max_edge_length=max_edge_length)
 
     # Stage 1: 1-skeleton only (nodes + edges) - cheap and bounded by n^2/2.
     simplex_tree = rips.create_simplex_tree(max_dimension=1)
     n_edges = simplex_tree.num_simplices() - simplex_tree.num_vertices()
     avg_degree = (2 * n_edges / n) if n > 0 else 0.0
+    _progress(f"PH: 1-skeleton done ({n_edges} edges, avg degree {avg_degree:.1f})")
 
     # Rough worst-case triangle count for a graph with this average degree
     # (avg_degree choose 2 per node, halved for double-counting) - used only
@@ -263,6 +283,8 @@ def persistent_homology(D: np.ndarray, max_edge_length: float = None, max_dimens
 
     estimated_triangles = n * avg_degree * avg_degree / 6.0
     if max_dimension >= 2 and estimated_triangles > max_simplices:
+        _progress(f"PH: estimated triangles ({estimated_triangles:.0f}) exceeds max_simplices "
+                  f"({max_simplices}) - skipping H1 for safety, H0-only.")
         return {
             "h0_max_persistence": h0_from_current_tree(),
             "h1_max_persistence": float("nan"),
@@ -271,8 +293,12 @@ def persistent_homology(D: np.ndarray, max_edge_length: float = None, max_dimens
         }
 
     if max_dimension >= 2:
+        _progress("PH: expanding to dimension 2 (triangles)...")
         simplex_tree.expansion(max_dimension)
+        _progress(f"PH: expansion done ({simplex_tree.num_simplices()} simplices total)")
         if simplex_tree.num_simplices() > max_simplices:
+            _progress(f"PH: expanded complex ({simplex_tree.num_simplices()} simplices) exceeds "
+                      f"max_simplices ({max_simplices}) - skipping H1 for safety, H0-only.")
             return {
                 "h0_max_persistence": h0_from_current_tree(),
                 "h1_max_persistence": float("nan"),
@@ -280,7 +306,9 @@ def persistent_homology(D: np.ndarray, max_edge_length: float = None, max_dimens
                 "h0_count": -1,
             }
 
+    _progress("PH: computing persistence...")
     simplex_tree.compute_persistence()
+    _progress("PH: persistence computation done")
 
     h0 = simplex_tree.persistence_intervals_in_dimension(0)
     h1 = simplex_tree.persistence_intervals_in_dimension(1) if max_dimension >= 2 else []
@@ -299,19 +327,24 @@ def summarize_epoch(data: dict) -> dict:
     out = {}
 
     if "knn_adj" in data:
+        _progress("stage: Ollivier-Ricci curvature")
         orc = ollivier_ricci_curvature(data["knn_adj"])
         out.update({f"orc_{k}": v for k, v in orc.items() if k != "values"})
+        _progress("stage: graph Laplacian spectral analysis")
         spec = graph_laplacian_spectral(data["knn_adj"])
         out.update({f"spectral_{k}": v for k, v in spec.items()})
 
     if "D_geodesic" in data and "D_latent" in data:
+        _progress("stage: isometric embedding quality")
         iso = isometric_embedding_quality(data["D_geodesic"], data["D_latent"])
         out.update(iso)
 
     if "D_geodesic" in data:
+        _progress("stage: persistent homology (D_geodesic)")
         ph_geo = persistent_homology(data["D_geodesic"])
         out.update({f"geo_{k}": v for k, v in ph_geo.items()})
     if "D_latent" in data:
+        _progress("stage: persistent homology (D_latent)")
         ph_lat = persistent_homology(data["D_latent"])
         out.update({f"lat_{k}": v for k, v in ph_lat.items()})
 
@@ -334,8 +367,9 @@ def analyze_run(logs_folder: str, max_epochs_to_show: int = None) -> list:
         keep = set(shown[:1] + shown[-max_epochs_to_show:]) if len(shown) > max_epochs_to_show else set(shown)
         epoch_files = [p for p in epoch_files if epoch_num(p) in keep]
 
-    for path in epoch_files:
+    for file_idx, path in enumerate(epoch_files):
         k = epoch_num(path)
+        _progress(f"=== epoch {k} ({file_idx + 1}/{len(epoch_files)} files) ===")
         data = np.load(path)
         row = {"epoch": k}
         row.update(summarize_epoch(data))
