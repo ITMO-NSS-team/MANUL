@@ -146,6 +146,10 @@ def main():
     parser.add_argument("--dataset_dir_name", default="ml-1m")
     parser.add_argument("--latent_dim", type=int, default=64)
     parser.add_argument("--mds_epochs", type=int, default=1000)
+    parser.add_argument("--tag", default="",
+                        help="Optional suffix for the saved geometry filename "
+                             "(e.g. 'ml10m'), so runs at different scales don't "
+                             "overwrite each other's poincare_fitted_geometry*.npz.")
     args = parser.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -187,7 +191,8 @@ def main():
     D_dense = np.zeros((n, n), dtype=np.float64)
     D_dense[iu.numpy(), ju.numpy()] = d_final_flat
     D_dense[ju.numpy(), iu.numpy()] = d_final_flat
-    out_path = os.path.join(HERE, "poincare_fitted_geometry.npz")
+    suffix = f"_{args.tag}" if args.tag else ""
+    out_path = os.path.join(HERE, f"poincare_fitted_geometry{suffix}.npz")
     np.savez(out_path, D=D_dense, val_loss=val_loss, hr=hr, ndcg=ndcg)
     print(f"[Save] {out_path}")
 

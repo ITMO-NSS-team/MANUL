@@ -6,6 +6,7 @@ embedding tables) to an .npz, so full_hyperbolicity_table.py can fold this
 arm into the unified hyperbolicity+loss table on the same footing as the
 manifold-based arms (pure_init, GINCF etas, Poincare).
 """
+import argparse
 import os
 import sys
 
@@ -19,12 +20,24 @@ from ablation_geometry_vs_optimization import build_data, train_and_eval_euclide
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--max_users", type=int, default=300)
+    parser.add_argument("--max_movies", type=int, default=800)
+    parser.add_argument("--dataset_dir_name", default="ml-1m")
+    parser.add_argument("--tag", default="",
+                        help="Optional suffix for the saved geometry filename "
+                             "(e.g. 'ml10m'), so runs at different scales don't "
+                             "overwrite each other's euclidean_baseline_geometry*.npz.")
+    args = parser.parse_args()
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"device={device}", flush=True)
 
-    tmp_logs_folder = os.path.join(HERE, "euclidean_baseline_tmp_logs")
-    data = build_data(300, 800, min_seq_len=2, num_ng=2, dataset_dir_name="ml-1m",
-                      device=device, tmp_logs_folder=tmp_logs_folder)
+    suffix = f"_{args.tag}" if args.tag else ""
+    tmp_logs_folder = os.path.join(HERE, f"euclidean_baseline_tmp_logs{suffix}")
+    data = build_data(args.max_users, args.max_movies, min_seq_len=2, num_ng=2,
+                      dataset_dir_name=args.dataset_dir_name, device=device,
+                      tmp_logs_folder=tmp_logs_folder)
     print(f"num_users={data['num_users']} num_movies={data['num_movies']}", flush=True)
 
     hr, ndcg, val_loss, item_emb = train_and_eval_euclidean_baseline(
@@ -35,7 +48,7 @@ def main():
     item_emb_np = item_emb.numpy()
     D = np.linalg.norm(item_emb_np[:, None, :] - item_emb_np[None, :, :], axis=-1)
 
-    out_path = os.path.join(HERE, "euclidean_baseline_geometry.npz")
+    out_path = os.path.join(HERE, f"euclidean_baseline_geometry{suffix}.npz")
     np.savez(out_path, D=D, val_loss=val_loss, hr=hr, ndcg=ndcg)
     print(f"[Save] {out_path}")
 

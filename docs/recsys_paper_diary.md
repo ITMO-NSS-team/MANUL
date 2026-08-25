@@ -8,6 +8,39 @@ Read that first for the why; this file tracks the where-are-we-now.
 ## CURRENT STATUS / NEXT STEP
 *(this block is overwritten each session — always current, read this first)*
 
+**2026-08-26 update: ML-10M full hyperbolicity+loss table done, closing the
+"Still open" item from the previous block.** Parameterized
+`poincare_baseline.py` and `save_euclidean_baseline_geometry.py` with a
+`--tag` option (backward-compatible, empty tag preserves the original
+ML-1M filenames) so a second scale's fitted geometries don't clobber the
+first's. Ran both at ML-10M scale (300u/1800i) - reproduced the exact same
+downstream numbers as the untagged earlier run (determinism confirmed
+again). New `full_hyperbolicity_table_ml10m.py` (mirrors
+`full_hyperbolicity_table.py`, reuses its `diagnostics_for_D()`) computed
+all 11 rows. Also re-ran the 3 remaining eta configs' ablation with full
+output captured to log files (the first pass only had `tail -6` output,
+missing epoch0's exact val_loss for etas 0.03/0.05 - re-ran rather than
+guess).
+
+**Key finding, sharper than at ML-1M:** the Poincare-Pretrained geometry is
+again the most hyperbolic by every measure ($\delta_{rel}=0.2631$, ORC
+mean$=-0.2288$, f_neg$=0.985$) but now has both the highest validation loss
+AND the worst HR@10/NDCG@10 of every row in the table - worse than every
+GINCF configuration, not just the Euclidean baseline. At $n=1800$ persistent
+homology's $H_1$ is skipped everywhere (safety threshold exceeded, all
+rows show H1=-1) - noted as such in the paper table rather than silently
+omitted or faked.
+
+Added to main.tex's `subsec:ml10m`: the Poincare row folded into
+`tab:ml10m_results`, plus a new `tab:ml10m_diagnostics` table (mirrors
+`tab:full_diagnostics`) and one interpretive paragraph. Verified brace
+balance (0 issues) and no bug-narrative language. Not yet committed as of
+this being written - do that next, along with the parameterized-script
+diffs (`poincare_baseline.py`, `save_euclidean_baseline_geometry.py`) and
+the new `full_hyperbolicity_table_ml10m.py`.
+
+---
+
 **2026-08-25 evening update: ML-10M sweep complete + corrected + a genuinely
 new finding.** The ML-10M eta_outer sweep (300 users, 1800 items - "a
 different MovieLens scale" per user's earlier instruction) finished all 4
