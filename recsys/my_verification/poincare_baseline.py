@@ -179,6 +179,18 @@ def main():
           f"H1 count={hyp_diag['h1_count']}")
     print(f"Downstream: HR@10={hr:.4f}  NDCG@10={ndcg:.4f}")
 
+    # Persist the fitted dense distance matrix + downstream metrics so
+    # full_hyperbolicity_table.py can fold this arm into the unified table
+    # without needing to refit (fitting is stochastic-ish across torch/CUDA
+    # versions even with a fixed seed, so re-using the exact matrix that
+    # produced the reported downstream numbers is more honest than refitting).
+    D_dense = np.zeros((n, n), dtype=np.float64)
+    D_dense[iu.numpy(), ju.numpy()] = d_final_flat
+    D_dense[ju.numpy(), iu.numpy()] = d_final_flat
+    out_path = os.path.join(HERE, "poincare_fitted_geometry.npz")
+    np.savez(out_path, D=D_dense, val_loss=val_loss, hr=hr, ndcg=ndcg)
+    print(f"[Save] {out_path}")
+
 
 if __name__ == "__main__":
     main()

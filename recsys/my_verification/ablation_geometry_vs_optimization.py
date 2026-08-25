@@ -118,7 +118,8 @@ def build_data(max_users, max_movies, min_seq_len, num_ng, dataset_dir_name, dev
 
 
 def train_and_eval_ncf_on_fixed_Z(item_Z, data, device, latent_dim, factor_num=16, num_layers=3,
-                                  lr=1e-3, epochs=30, patience=3, seed=0):
+                                  lr=1e-3, epochs=30, patience=3, seed=0, verbose=False,
+                                  return_history=False):
     """Faithfully mirrors GradientIsomapCF.train()'s "final NCF" block
     (GradientIsomapCF_log.py), with the checkpoint bug fixed (deepcopy)."""
     torch.manual_seed(seed)
@@ -134,9 +135,11 @@ def train_and_eval_ncf_on_fixed_Z(item_Z, data, device, latent_dim, factor_num=1
     best_val_loss = float("inf")
     best_state = None
     no_improve = 0
+    history = {"train_loss": [], "val_loss": []}
 
     for ep in range(epochs):
         ncf.train()
+        total_train_loss, n_train_batches = 0.0, 0
         for batch_users, batch_items, batch_labels in data["inter_loader"]:
             batch_users, batch_items, batch_labels = (
                 batch_users.to(device), batch_items.to(device), batch_labels.to(device))
@@ -145,6 +148,9 @@ def train_and_eval_ncf_on_fixed_Z(item_Z, data, device, latent_dim, factor_num=1
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
+            total_train_loss += loss.item()
+            n_train_batches += 1
+        avg_train_loss = total_train_loss / max(1, n_train_batches)
 
         ncf.eval()
         total_val_loss, n_val_batches = 0.0, 0
@@ -156,6 +162,10 @@ def train_and_eval_ncf_on_fixed_Z(item_Z, data, device, latent_dim, factor_num=1
                 total_val_loss += loss_fn(preds_val, val_labels).item()
                 n_val_batches += 1
         avg_val_loss = total_val_loss / max(1, n_val_batches)
+        history["train_loss"].append(avg_train_loss)
+        history["val_loss"].append(avg_val_loss)
+        if verbose:
+            print(f"  ep {ep+1}/{epochs} train={avg_train_loss:.4f} val={avg_val_loss:.4f}", flush=True)
 
         if avg_val_loss < best_val_loss:
             best_val_loss = avg_val_loss
@@ -164,17 +174,21 @@ def train_and_eval_ncf_on_fixed_Z(item_Z, data, device, latent_dim, factor_num=1
         else:
             no_improve += 1
         if no_improve >= patience:
+            if verbose:
+                print(f"  early stop at ep {ep+1}", flush=True)
             break
 
     if best_state is not None:
         ncf.load_state_dict(best_state)
 
     hr, ndcg = evaluate_topk_isomap(ncf, _IdentityIsomap(item_Z), data["test_loader"], top_k=10, device=device)
+    if return_history:
+        return hr, ndcg, best_val_loss, history
     return hr, ndcg, best_val_loss
 
 
 def train_and_eval_euclidean_baseline(data, device, factor_num=16, num_layers=3, lr=1e-3,
-                                      epochs=30, patience=3, seed=0):
+                                      epochs=30, patience=3, seed=0, return_item_embeddings=False):
     """Plain NeuMF (learnable embedding tables, geometry-free) trained
     through the exact same inter_loader/val_loader/test_loader as the
     manifold-based arms (train_and_eval_ncf_on_fixed_Z, poincare_baseline.py)
@@ -229,6 +243,12 @@ def train_and_eval_euclidean_baseline(data, device, factor_num=16, num_layers=3,
         ncf.load_state_dict(best_state)
 
     hr, ndcg = evaluate_topk_pure(ncf, data["test_loader"], top_k=10, device=device)
+    if return_item_embeddings:
+        with torch.no_grad():
+            item_emb = torch.cat(
+                [ncf.embed_item_GMF.weight, ncf.embed_item_MLP.weight], dim=-1
+            ).detach().cpu()
+        return hr, ndcg, best_val_loss, item_emb
     return hr, ndcg, best_val_loss
 
 
