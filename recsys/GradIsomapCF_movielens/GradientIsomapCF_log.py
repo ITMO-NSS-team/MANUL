@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import TensorDataset, DataLoader
 
+import copy
 import os
 import sys
 import time
@@ -676,7 +677,19 @@ class GradientIsomapCF:
 
                 if avg_val_loss < best_val_loss_final:
                     best_val_loss_final = avg_val_loss
-                    best_state_final = final_ncf.state_dict()
+                    # .state_dict() returns references to the live model's own
+                    # tensors, not a snapshot - optimizer.step() keeps mutating
+                    # them in place every subsequent epoch. Without deepcopy,
+                    # final_ncf.load_state_dict(best_state_final) below just
+                    # reloads the model's CURRENT (last-epoch) state into
+                    # itself, silently discarding whichever epoch actually had
+                    # the best val loss - the exact bug already fixed in
+                    # GraphRegTrainer/baseline_train_test (see git history),
+                    # missed here because this "final NCF" retrain step has
+                    # its own hand-rolled early-stopping instead of using the
+                    # (correctly-implemented, see EarlyStopping.step() above)
+                    # EarlyStopping class already used for the inner loop.
+                    best_state_final = copy.deepcopy(final_ncf.state_dict())
                     no_improve_final = 0
                 else:
                     no_improve_final += 1
