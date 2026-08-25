@@ -8,6 +8,63 @@ Read that first for the why; this file tracks the where-are-we-now.
 ## CURRENT STATUS / NEXT STEP
 *(this block is overwritten each session — always current, read this first)*
 
+**2026-08-25 evening update: ML-10M sweep complete + corrected + a genuinely
+new finding.** The ML-10M eta_outer sweep (300 users, 1800 items - "a
+different MovieLens scale" per user's earlier instruction) finished all 4
+configs cleanly (zero guard triggers, zero crashes, ~8h total). Its
+in-process HR@10/NDCG@10 numbers still had the checkpoint bug (the running
+process had the old code loaded in memory even though the source was
+already fixed) - recomputed all 4 configs plus a matching Euclidean
+baseline via `ablation_geometry_vs_optimization.py --dataset_dir_name
+ml-10m --max_movies 1800` (same corrected-checkpoint methodology already
+used for ML-1M). Corrected results:
+
+| Model | HR@10 | NDCG@10 |
+|---|---|---|
+| Euclidean NeuMF (baseline) | **0.4415** | **0.2985** |
+| Pure Euclidean-init Isomap Z (0 outer steps) | 0.2542 | 0.1394 |
+| GINCF eta=0.01, epoch0 | 0.2341 | 0.1296 |
+| GINCF eta=0.01, converged | 0.2910 | 0.1658 |
+| GINCF eta=0.03, epoch0 | 0.2676 | 0.1429 |
+| GINCF eta=0.03, converged | 0.2475 | 0.1261 |
+| GINCF eta=0.05, epoch0 | 0.2910 | 0.1771 |
+| GINCF eta=0.05, converged | 0.2408 | 0.1265 |
+| GINCF eta=0.10, epoch0 | 0.2375 | 0.1362 |
+| GINCF eta=0.10, converged | 0.2107 | 0.1047 |
+
+Two things carry over from ML-1M and one is new:
+1. **Carries over:** Euclidean NeuMF still wins by a wide margin at this
+   larger scale too - the "no geometry-aware model beats a plain learnable-
+   table baseline" finding is not an ML-1M-specific artifact.
+2. **Carries over:** the eta-ablation direction (higher eta = worse at
+   convergence) still holds: 0.01 (0.2910) > 0.03 (0.2475) > 0.05 (0.2408)
+   > 0.10 (0.2107) for HR@10.
+3. **NEW, differs from ML-1M:** at ML-1M every eta's converged result was
+   worse than pure_init. Here, eta=0.01's converged result (0.2910/0.1658)
+   clearly BEATS pure_init (0.2542/0.1394) - the first case across both
+   scales where the outer-loop optimisation genuinely helps over doing
+   nothing. It still falls well short of the Euclidean baseline, but this
+   is a real, scale-dependent signal, not noise (pure_init itself is
+   identical across all 4 eta reruns, 0.2542/0.1394 - a good determinism
+   sanity check, since it's recomputed independently each time from the
+   same D_input_init.npy + seed).
+
+Added this as a new subsection in main.tex (`subsec:ml10m`, in blue) -
+second-scale validation, fulfilling "Используй другой масштаб MovieLens"
+from the user's earlier instruction. Diary + code not yet committed as of
+this block being written - do that next.
+
+**Still open:**
+- Second, distinct-domain dataset (Amazon/Yelp) - never confirmed with the
+  user, still a real blocker per the earlier "Two real blockers" note below.
+- The full hyperbolicity-diagnostics table (`full_hyperbolicity_table.py`
+  pattern) has NOT yet been run for the ML-10M scale - only the ML-1M
+  version is in the paper's `tab:full_diagnostics`. Worth doing if the
+  ML-10M finding above becomes a permanent part of the paper's narrative,
+  but not done yet.
+
+---
+
 **2026-08-25 update (responding to user's 4-part feedback on the previous
 paper edit):** user asked for (a) bug-narrative language removed from
 main.tex - only clean results+conclusions belong there, technical detail
