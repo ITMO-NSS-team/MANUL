@@ -8,6 +8,89 @@ Read that first for the why; this file tracks the where-are-we-now.
 ## CURRENT STATUS / NEXT STEP
 *(this block is overwritten each session — always current, read this first)*
 
+**2026-08-26, night: Amazon Beauty fully resweept with the HR-fix - the
+winning eta CHANGED, confirming the user's concern that fixing only
+evaluation (not the actual bilevel search) wasn't enough.** User asked to
+propagate the select_by="hr" fix to all 4 eta configs and literally
+rerun the geometry-search sweep (not just re-evaluate saved Z snapshots),
+specifically to see what happens to hyperbolicity once the search itself
+uses the corrected inner-loop criterion throughout.
+
+Ran `run_amazon_beauty_sweep_hrfix.py` (new driver, `select_by="hr"`,
+`inner_patience=8`, `final_patience=8`, `cf_epochs=60`,
+`final_cf_epochs=60` - up from patience=3-5/cap=30), n_run_prefix
+`amazon_beauty_hrfix_eta_sweep_*` (kept separate from the original
+`amazon_beauty_eta_sweep_*` results). All 4 configs finished cleanly,
+zero guard triggers, ~45-55min total (slightly slower than the original
+~48min sweep due to the larger epoch/patience budget, but not
+dramatically - the inner loop mostly still exits well before the new
+60-epoch cap).
+
+**Corrected results (300u/800i, HR@10/NDCG@10/val_loss):**
+
+| Model | Old (patience=3) | New (patience=8, full resweep) |
+|---|---|---|
+| pure_init | 0.0400/0.0162/0.3617 | 0.1233/0.0551/0.3679 |
+| GINCF eta=0.01, converged | 0.1133/0.0500 | 0.1233/0.0535/0.3603 |
+| GINCF eta=0.03, converged | 0.0500/0.0199 | 0.1500/0.0775/0.3833 |
+| **GINCF eta=0.05, converged** | 0.0667/0.0264 | **0.1800/0.0836/0.3440** |
+| GINCF eta=0.10, converged | 0.0467/0.0198 | 0.1567/0.0782/0.3931 |
+| Poincare-Pretrained | 0.0600/0.0270 | 0.1000/0.0367/0.5637 |
+| Euclidean NeuMF (baseline) | 0.0567/0.0253 | 0.0600/0.0288/0.6077 |
+
+**The winning eta changed from 0.01 to 0.05.** This is the key finding
+that validates the user's instinct: my earlier "quick pilot" (re-evaluating
+the OLD sweep's already-saved eta=0.01 Z snapshot with the new criterion)
+found eta=0.01 still winning (0.1767) - but that Z was found by a bilevel
+search that used the OLD, flawed inner-loop criterion throughout its 30
+outer steps. Once the ENTIRE search is redone with the fixed criterion,
+the actual optimum shifts to eta=0.05 (0.1800), and the "higher eta is
+worse" monotonic pattern (robust across every other config/dataset in
+this paper) disappears entirely for Amazon Beauty. Fixing only the final
+evaluation stage was NOT equivalent to fixing the actual optimization -
+exactly what the user flagged before I ran this.
+
+**The core finding survives, and strengthens further:** GradientIsomapNCF
+(now eta=0.05) still beats the Euclidean baseline outright (0.1800 vs
+0.0600 - a 3x margin, up from ~2x). Poincare still doesn't win (0.1000).
+Validation loss still tracks ranking quality throughout (winning
+eta=0.05 has the lowest val_loss of the whole table, 0.3440; Euclidean
+has the highest, 0.6077). Hyperbolicity still doesn't explain the
+winner - Euclidean's ORC (-0.1895, even more negative than before) and
+H1 count (1552, up from 1318) are still the most extreme in the table,
+Poincare is still the most tree-like by delta_rel (0.1694, unchanged
+since its fit doesn't depend on the sweep), yet neither wins downstream.
+
+**Also fixed along the way:** `train_and_eval_euclidean_baseline` could
+previously return either item embeddings OR training history but not
+both in the same call - needed both to persist a consistent geometry +
+convergence record for this rerun (commit `bb04d3c`). Regenerated
+`poincare_fitted_geometry_amazon_beauty.npz` and
+`euclidean_baseline_geometry_amazon_beauty.npz` with the corrected
+downstream metadata (D matrices unchanged - both fits are deterministic
+and reproduced their prior numbers exactly, confirming no drift).
+
+**main.tex's `subsec:amazon` fully rewritten** with the new numbers
+(both `tab:amazon_results` and `tab:amazon_diagnostics`), plus one new
+paragraph explaining the HR@10-based model-selection choice (methodology,
+not a bug narrative - matches the user's "clean results only" standard).
+Verified brace balance (0 issues), no bug/checkpoint narrative language.
+Comparison plot (`old_vs_hrfix_sweep_amazon_beauty.png`) delivered to
+`process_docs` alongside the rest of this investigation's plots.
+
+**Still open / not yet decided:**
+- ML-1M and ML-10M still use the OLD loss-based criterion throughout the
+  paper - not yet decided whether/when to redo those (each is a much
+  larger time commitment: ML-1M ~3.5h, ML-10M ~8h, vs. Amazon Beauty's
+  ~50min). User has not yet asked for this explicitly.
+- The outer-loop trajectory noise (flagged two updates ago) - not
+  re-examined with the new criterion; could revisit if it becomes
+  relevant.
+- Gromov delta section (4.1, "Experiment 49-52" numbering) and empty
+  Conclusion - still deferred, unchanged from before.
+
+---
+
 **2026-08-26, evening: model-selection criterion investigation - a real
 methodological fix, and it turned out to STRENGTHEN the Amazon Beauty
 finding rather than undermine it.** User noticed the "final NCF" loss
