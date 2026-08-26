@@ -8,6 +8,65 @@ Read that first for the why; this file tracks the where-are-we-now.
 ## CURRENT STATUS / NEXT STEP
 *(this block is overwritten each session — always current, read this first)*
 
+**2026-08-26 update: second dataset chosen and integrated - Amazon Beauty.**
+User confirmed Amazon over Yelp (structurally closer to the existing
+rating+timestamp pipeline; Yelp's more interesting angle - the
+user-friendship graph - would need pipeline changes to actually use, not
+just a different data source), and picked the "Beauty" category. The
+modern (2023) McAuley-Lab dataset renamed the old "Beauty" benchmark to
+**Beauty_and_Personal_Care** (729.6K users / 207.6K items / 6.6M ratings
+raw, before our subsampling) - "All_Beauty" is a different, much smaller
+subcategory (253 users after 5-core filtering) and would not have worked.
+Source: https://amazon-reviews-2023.github.io/ (5-core pure-ID CSV,
+`user_id,parent_asin,rating,timestamp`), downloaded from
+`mcauleylab.ucsd.edu` (112MB gzipped, well under the 20GB ceiling - first
+download attempt was truncated by a dropped connection, caught via a
+size check and retried with `-C -` resume until it matched the expected
+Content-Length).
+
+Pipeline changes (commit `fab9ffd`): added `load_amazon_ratings()` to
+`run_experiment.py`, producing the same `userId/movieId/rating/timestamp`
+column contract `load_movielens_ratings()` already produces (so
+`prepare_sequences()`/`subsample_users_items()` work unmodified on either
+source - string IDs sort/map fine, no int-ID assumption anywhere in that
+path). Threaded a new `dataset_type` ("movielens"/"amazon") parameter
+through `run_experiment.main()`, `run_eta_outer_sweep.py`, and
+`ablation_geometry_vs_optimization.py`'s `build_data()` (needed later for
+the corrected-checkpoint recompute + hyperbolicity table, same treatment
+ML-10M got). Smoke-tested end-to-end (50 users/200 items, 1 outer epoch) -
+clean run, no errors beyond the already-known Windows console
+`UnicodeEncodeError` (fixed the same way as before, `PYTHONIOENCODING=utf-8`
+- not a code issue).
+
+**Real sweep launched** (`run_amazon_beauty_sweep.py`, Monitor task
+`bzjxeueqh`, filtered this time to only surface config boundaries/warnings/
+errors - the ML-10M sweep's unfiltered per-epoch stream was excessive):
+300 users, 800 items - same scale as the paper's original ML-1M
+configuration, chosen deliberately for the most direct "same pipeline,
+different domain" comparison. 4 configs (eta in {0.01, 0.03, 0.05, 0.10}),
+~3-4h estimated by analogy to ML-1M's own ~3.5h at this scale. Results land
+in `logs_movielens_isomap_cf/amazon_beauty_eta_sweep_<eta>/` +
+`amazon_beauty_eta_outer_sweep_summary.json`.
+
+**Next steps once the sweep finishes** (same sequence already used twice
+for ML-1M then ML-10M - this is now a repeatable playbook, not a new
+design each time):
+1. Recompute final HR@10/NDCG@10 via `ablation_geometry_vs_optimization.py
+   --dataset_dir_name amazon_beauty --dataset_type amazon --max_movies 800`
+   for the checkpoint-bug fix (the running sweep process has the old
+   checkpoint code in memory, same as ML-10M's first pass did).
+2. Fit a Poincare baseline and an Euclidean baseline at this scale/dataset
+   (`poincare_baseline.py` / `save_euclidean_baseline_geometry.py`, both
+   already `--tag`-parameterized - use `--tag amazon_beauty`).
+3. Run `full_hyperbolicity_table_ml10m.py`'s pattern a third time
+   (probably worth generalizing into one script with a `--tag`/config
+   argument at this point, rather than a third near-duplicate file).
+4. Add a `subsec:amazon` section to main.tex, in blue, same structure as
+   `subsec:ml10m` - this closes the paper's "Датасетов: n=1" gap from
+   n=1 (MovieLens only) to n=3 scales across 2 domains.
+
+---
+
 **2026-08-26 update: ML-10M full hyperbolicity+loss table done, closing the
 "Still open" item from the previous block.** Parameterized
 `poincare_baseline.py` and `save_euclidean_baseline_geometry.py` with a
