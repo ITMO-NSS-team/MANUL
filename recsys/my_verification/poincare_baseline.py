@@ -144,6 +144,8 @@ def main():
     parser.add_argument("--max_users", type=int, default=300)
     parser.add_argument("--max_movies", type=int, default=800)
     parser.add_argument("--dataset_dir_name", default="ml-1m")
+    parser.add_argument("--dataset_type", default="movielens", choices=["movielens", "amazon"])
+    parser.add_argument("--amazon_category", default="Beauty_and_Personal_Care")
     parser.add_argument("--latent_dim", type=int, default=64)
     parser.add_argument("--mds_epochs", type=int, default=1000)
     parser.add_argument("--tag", default="",
@@ -158,7 +160,8 @@ def main():
     tmp_logs_folder = os.path.join(HERE, "poincare_tmp_logs")
     data = build_data(args.max_users, args.max_movies, min_seq_len=2, num_ng=2,
                       dataset_dir_name=args.dataset_dir_name, device=device,
-                      tmp_logs_folder=tmp_logs_folder)
+                      tmp_logs_folder=tmp_logs_folder,
+                      dataset_type=args.dataset_type, amazon_category=args.amazon_category)
     print(f"num_users={data['num_users']} num_movies={data['num_movies']}", flush=True)
 
     # --- (1) Fit Poincare embeddings to the same target D_input^(0) uses ---
