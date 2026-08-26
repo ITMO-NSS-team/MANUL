@@ -50,10 +50,23 @@ class EarlyStopping:
         self.best_state_window = None
         self.best_epoch_window = -1
 
+        # HR@10-based tracking, parallel to the loss-based tracking above.
+        # Val loss here is computed on a 1-positive+99-negative sampled batch
+        # per user (~1% positive rate) while train loss is computed on a
+        # 1-positive+num_ng-negative batch (much higher positive rate) - the
+        # two are not on a comparable scale, so val loss alone is a noisy
+        # model-selection signal (see docs/recsys_paper_diary.md, 2026-08-26).
+        # HR@10 on the same sampled val batches is what most NCF-style
+        # papers actually select on.
+        self.best_val_hr = -np.inf
+        self.best_state_window_hr = None
+        self.best_epoch_window_hr = -1
+
         self._no_improve = 0
         self._overfit_streak = 0
         self._val_history = []
         self._train_history = []
+        self._val_hr_history = []
         self._window_states = []
         self._epoch = 0
 
@@ -61,7 +74,7 @@ class EarlyStopping:
         window = history[-self.smooth_window:]
         return float(np.mean(window))
 
-    def step(self, train_loss: float, val_loss: float, model: nn.Module) -> bool:
+    def step(self, train_loss: float, val_loss: float, model: nn.Module, val_hr: float = None) -> bool:
         self._val_history.append(val_loss)
         self._train_history.append(train_loss)
         epoch = self._epoch
@@ -85,6 +98,13 @@ class EarlyStopping:
             self._no_improve = 0
         else:
             self._no_improve += 1
+
+        if val_hr is not None:
+            self._val_hr_history.append(val_hr)
+            if val_hr > self.best_val_hr:
+                self.best_val_hr = val_hr
+                self.best_epoch_window_hr = epoch
+                self.best_state_window_hr = state_copy
 
         enough = len(self._val_history) >= self.smooth_window
         smooth_val = self._smooth(self._val_history)
@@ -120,6 +140,14 @@ class EarlyStopping:
             print(
                 f"  [EarlyStopping] Лучшая в окне (window={self.window}): "
                 f"ep {self.best_epoch_window + 1}, val={self.best_val_in_window:.4f}"
+            )
+
+    def restore_best_hr(self, model: nn.Module):
+        if self.best_state_window_hr is not None:
+            model.load_state_dict(self.best_state_window_hr)
+            print(
+                f"  [EarlyStopping] Лучшая по val HR@10: "
+                f"ep {self.best_epoch_window_hr + 1}, hr={self.best_val_hr:.4f}"
             )
 
     @property
@@ -218,7 +246,10 @@ class GradientIsomapCF:
                  logs_folder: str = None,
                  device: str = None,
                  stop_criteria_value: float = 0.001,
-                 num_ng: int = 3):
+                 num_ng: int = 3,
+                 select_by: str = "loss",
+                 final_patience: int = 3,
+                 inner_patience: int = 5):
 
         self.features = train_feature
         self.train_events = np.array(train_events, dtype=np.int64)
@@ -244,6 +275,16 @@ class GradientIsomapCF:
         self.model_type = model_type
         self.stop_criteria_value = stop_criteria_value
         self.num_ng = num_ng
+        # select_by="hr": pick the best checkpoint (inner-loop proxy NCF and
+        # final-NCF retrain) by val HR@10 instead of val BCE loss. Val loss is
+        # computed on a 1-positive+99-negative sampled batch (~1% positive
+        # rate) while train loss uses a 1-positive+num_ng-negative batch (much
+        # higher positive rate) - the two are not on a comparable scale, so a
+        # loss-based "best epoch"/early-stop decision is a noisy signal here.
+        # See docs/recsys_paper_diary.md, 2026-08-26.
+        self.select_by = select_by
+        self.final_patience = final_patience
+        self.inner_patience = inner_patience
 
         if device is None:
             device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -269,6 +310,7 @@ class GradientIsomapCF:
         self.cf_history = {
             'train_loss': [],
             'val_loss': [],
+            'val_hr': [],
         }
 
         self.isomap_model = None
@@ -425,7 +467,7 @@ class GradientIsomapCF:
             ncf_optim = optim.AdamW(ncf_model.parameters(), lr=self.lr_ncf)
 
             early_stop = EarlyStopping(
-                patience=5,
+                patience=self.inner_patience,
                 window=6,
                 smooth_window=2,
                 min_delta=1e-4,
@@ -435,6 +477,7 @@ class GradientIsomapCF:
             )
             cf_train_losses = []
             cf_val_losses = []
+            cf_val_hrs = []
 
             ncf_model.train()
             for cf_ep in range(self.cf_epochs):
@@ -463,6 +506,7 @@ class GradientIsomapCF:
                     ncf_model.eval()
                     total_val_loss = 0.0
                     n_val_batches = 0
+                    hits = []
 
                     with torch.no_grad():
                         for val_users, val_items, val_labels in val_loader:
@@ -475,14 +519,22 @@ class GradientIsomapCF:
 
                             total_val_loss += loss_val.item()
                             n_val_batches += 1
+                            # Each batch = one user's 1 positive (index 0) +
+                            # 99 sampled negatives (val_loader batch_size=100,
+                            # NCFTestDatasetSampled ordering).
+                            _, topk_idx = torch.topk(preds_val, 10)
+                            hits.append(1.0 if 0 in topk_idx.tolist() else 0.0)
 
                     avg_cf_val_loss = total_val_loss / max(1, n_val_batches)
+                    avg_cf_val_hr = float(np.mean(hits)) if hits else 0.0
                     cf_val_losses.append(avg_cf_val_loss)
+                    cf_val_hrs.append(avg_cf_val_hr)
 
                     print(f"  [Inner NCF] ep {cf_ep + 1}/{self.cf_epochs} | "
-                          f"train={avg_cf_train_loss:.4f}, val={avg_cf_val_loss:.4f}")
+                          f"train={avg_cf_train_loss:.4f}, val={avg_cf_val_loss:.4f}, "
+                          f"val_hr@10={avg_cf_val_hr:.4f}")
 
-                    if early_stop.step(avg_cf_train_loss, avg_cf_val_loss, ncf_model):
+                    if early_stop.step(avg_cf_train_loss, avg_cf_val_loss, ncf_model, val_hr=avg_cf_val_hr):
                         break
 
                     ncf_model.train()
@@ -491,10 +543,14 @@ class GradientIsomapCF:
                     print(f"  [Inner NCF] ep {cf_ep + 1}/{self.cf_epochs} | "
                           f"train={avg_cf_train_loss:.4f}")
 
-            early_stop.restore_best_window(ncf_model)
+            if self.select_by == "hr":
+                early_stop.restore_best_hr(ncf_model)
+            else:
+                early_stop.restore_best_window(ncf_model)
 
             self.cf_history['train_loss'].append(cf_train_losses)
             self.cf_history['val_loss'].append(cf_val_losses)
+            self.cf_history['val_hr'].append(cf_val_hrs)
 
             ncf_model.eval()
             for p in ncf_model.parameters():
@@ -626,8 +682,9 @@ class GradientIsomapCF:
 
         final_optim = optim.AdamW(final_ncf.parameters(), lr=self.lr_ncf)
 
-        patience_final = 3
+        patience_final = self.final_patience
         best_val_loss_final = np.inf
+        best_val_hr_final = -np.inf
         best_state_final = None
         no_improve_final = 0
 
@@ -657,6 +714,7 @@ class GradientIsomapCF:
                 final_ncf.eval()
                 total_val_loss = 0.0
                 n_val_batches = 0
+                hits = []
 
                 with torch.no_grad():
                     for val_users, val_items, val_labels in val_loader:
@@ -669,21 +727,38 @@ class GradientIsomapCF:
 
                         total_val_loss += loss_val.item()
                         n_val_batches += 1
+                        # Each batch = one user's 1 positive (index 0) + 99
+                        # sampled negatives (val_loader batch_size=100,
+                        # NCFTestDatasetSampled ordering).
+                        _, topk_idx = torch.topk(preds_val, 10)
+                        hits.append(1.0 if 0 in topk_idx.tolist() else 0.0)
 
                 avg_val_loss = total_val_loss / max(1, n_val_batches)
+                avg_val_hr_final = float(np.mean(hits)) if hits else 0.0
 
                 print(f"[Final NCF] ep {ep + 1}/{self.final_cf_epochs} | "
-                      f"train={avg_train_loss:.4f}, val={avg_val_loss:.4f}")
+                      f"train={avg_train_loss:.4f}, val={avg_val_loss:.4f}, "
+                      f"val_hr@10={avg_val_hr_final:.4f}")
 
-                if avg_val_loss < best_val_loss_final:
+                # select_by="hr" (default recommended, see class docstring
+                # note above EarlyStopping): pick the checkpoint with the best
+                # val HR@10 instead of val BCE loss - val loss is computed on
+                # a 1-positive+99-negative sampled batch (~1% positive rate),
+                # not comparable in scale to the train loss above, so it is a
+                # noisy "best epoch" signal on its own. See
+                # docs/recsys_paper_diary.md, 2026-08-26.
+                improved = (avg_val_hr_final > best_val_hr_final) if self.select_by == "hr" \
+                    else (avg_val_loss < best_val_loss_final)
+                if improved:
                     best_val_loss_final = avg_val_loss
+                    best_val_hr_final = avg_val_hr_final
                     # .state_dict() returns references to the live model's own
                     # tensors, not a snapshot - optimizer.step() keeps mutating
                     # them in place every subsequent epoch. Without deepcopy,
                     # final_ncf.load_state_dict(best_state_final) below just
                     # reloads the model's CURRENT (last-epoch) state into
                     # itself, silently discarding whichever epoch actually had
-                    # the best val loss - the exact bug already fixed in
+                    # the best checkpoint - the exact bug already fixed in
                     # GraphRegTrainer/baseline_train_test (see git history),
                     # missed here because this "final NCF" retrain step has
                     # its own hand-rolled early-stopping instead of using the

@@ -67,7 +67,7 @@ def main():
         Z_pure = pure_init_model().to(torch.float32).detach().cpu().numpy()
     D_latent_pure = np.linalg.norm(Z_pure[:, None, :] - Z_pure[None, :, :], axis=-1)
     vl, hr, ndcg = downstream["pure_init"]
-    rows.append(diagnostics_for_D(D_latent_pure, "pure_init (0 outer steps)", vl, hr, ndcg))
+    rows.append(diagnostics_for_D(D_latent_pure, "pure_init (euclidean, 0 outer steps)", vl, hr, ndcg))
 
     # --- GradientIsomapNCF epoch0 / epoch(last) per eta ---
     for eta in etas:

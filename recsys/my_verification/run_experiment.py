@@ -108,6 +108,9 @@ def main(
     dataset_dir_name="ml-1m",
     dataset_type="movielens",
     amazon_category="Beauty_and_Personal_Care",
+    select_by="loss",
+    final_patience=3,
+    inner_patience=5,
 ):
     torch.manual_seed(seed)
     np.random.seed(seed)
@@ -313,6 +316,9 @@ def main(
             device=str(device),
             stop_criteria_value=0.001,
             num_ng=num_ng,
+            select_by=select_by,
+            final_patience=final_patience,
+            inner_patience=inner_patience,
         )
 
         isomap_model, ncf_manifold_model = gi_cf.train(val_loader=val_loader, top_k=top_k, device=device)

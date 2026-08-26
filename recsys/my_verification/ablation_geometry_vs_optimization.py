@@ -125,9 +125,21 @@ def build_data(max_users, max_movies, min_seq_len, num_ng, dataset_dir_name, dev
 
 def train_and_eval_ncf_on_fixed_Z(item_Z, data, device, latent_dim, factor_num=16, num_layers=3,
                                   lr=1e-3, epochs=30, patience=3, seed=0, verbose=False,
-                                  return_history=False):
+                                  return_history=False, select_by="loss"):
     """Faithfully mirrors GradientIsomapCF.train()'s "final NCF" block
-    (GradientIsomapCF_log.py), with the checkpoint bug fixed (deepcopy)."""
+    (GradientIsomapCF_log.py), with the checkpoint bug fixed (deepcopy).
+
+    select_by: "loss" (default, matches all previously reported results) or
+    "hr" - picks the best-checkpoint/early-stopping criterion. "loss" compares
+    BCE loss computed on data["val_loader"] (1 positive + 99 sampled negatives
+    per user) against BCE loss computed on data["inter_loader"] (1 positive +
+    2 negatives per batch) during training - these have very different class
+    balance (~1% vs ~33% positive rate), so their absolute loss values are not
+    on a comparable scale, which can make val loss look artificially low/noisy
+    relative to train loss. "hr" instead uses val HR@10 (computed on the same
+    val_loader, standard sampled-ranking protocol) as the selection criterion,
+    matching how He et al.'s NCF and most follow-up work actually do model
+    selection/early stopping on this exact evaluation setup."""
     torch.manual_seed(seed)
     item_Z = item_Z.to(device)
 
@@ -139,9 +151,10 @@ def train_and_eval_ncf_on_fixed_Z(item_Z, data, device, latent_dim, factor_num=1
     loss_fn = nn.BCEWithLogitsLoss()
 
     best_val_loss = float("inf")
+    best_val_hr = -float("inf")
     best_state = None
     no_improve = 0
-    history = {"train_loss": [], "val_loss": []}
+    history = {"train_loss": [], "val_loss": [], "val_hr": []}
 
     for ep in range(epochs):
         ncf.train()
@@ -160,6 +173,7 @@ def train_and_eval_ncf_on_fixed_Z(item_Z, data, device, latent_dim, factor_num=1
 
         ncf.eval()
         total_val_loss, n_val_batches = 0.0, 0
+        hits = []
         with torch.no_grad():
             for val_users, val_items, val_labels in data["val_loader"]:
                 val_users, val_items, val_labels = (
@@ -167,14 +181,24 @@ def train_and_eval_ncf_on_fixed_Z(item_Z, data, device, latent_dim, factor_num=1
                 preds_val = ncf(val_users, val_items, item_Z)
                 total_val_loss += loss_fn(preds_val, val_labels).item()
                 n_val_batches += 1
+                # Each batch = exactly one user's 1 positive + 99 negatives
+                # (val_loader batch_size=100, NCFTestDatasetSampled ordering) -
+                # ground truth is always index 0.
+                _, topk_idx = torch.topk(preds_val, 10)
+                hits.append(1.0 if 0 in topk_idx.tolist() else 0.0)
         avg_val_loss = total_val_loss / max(1, n_val_batches)
+        avg_val_hr = float(np.mean(hits)) if hits else 0.0
         history["train_loss"].append(avg_train_loss)
         history["val_loss"].append(avg_val_loss)
+        history["val_hr"].append(avg_val_hr)
         if verbose:
-            print(f"  ep {ep+1}/{epochs} train={avg_train_loss:.4f} val={avg_val_loss:.4f}", flush=True)
+            print(f"  ep {ep+1}/{epochs} train={avg_train_loss:.4f} val={avg_val_loss:.4f} "
+                  f"val_hr@10={avg_val_hr:.4f}", flush=True)
 
-        if avg_val_loss < best_val_loss:
+        improved = (avg_val_hr > best_val_hr) if select_by == "hr" else (avg_val_loss < best_val_loss)
+        if improved:
             best_val_loss = avg_val_loss
+            best_val_hr = avg_val_hr
             best_state = copy.deepcopy(ncf.state_dict())  # the actual fix
             no_improve = 0
         else:
@@ -194,13 +218,18 @@ def train_and_eval_ncf_on_fixed_Z(item_Z, data, device, latent_dim, factor_num=1
 
 
 def train_and_eval_euclidean_baseline(data, device, factor_num=16, num_layers=3, lr=1e-3,
-                                      epochs=30, patience=3, seed=0, return_item_embeddings=False):
+                                      epochs=30, patience=3, seed=0, return_item_embeddings=False,
+                                      verbose=False, return_history=False, select_by="loss"):
     """Plain NeuMF (learnable embedding tables, geometry-free) trained
     through the exact same inter_loader/val_loader/test_loader as the
     manifold-based arms (train_and_eval_ncf_on_fixed_Z, poincare_baseline.py)
     - same negative-sampling scheme, same batch composition, same
     optimizer/epochs/early-stopping - so the only thing that differs across
-    all three comparison arms is the item representation itself."""
+    all three comparison arms is the item representation itself.
+
+    select_by: see train_and_eval_ncf_on_fixed_Z's docstring - "loss" (default)
+    or "hr" (val HR@10-based model selection, avoids the train/val
+    negative-ratio scale mismatch)."""
     torch.manual_seed(seed)
 
     ncf = NCF(
@@ -211,11 +240,14 @@ def train_and_eval_euclidean_baseline(data, device, factor_num=16, num_layers=3,
     loss_fn = nn.BCEWithLogitsLoss()
 
     best_val_loss = float("inf")
+    best_val_hr = -float("inf")
     best_state = None
     no_improve = 0
+    history = {"train_loss": [], "val_loss": [], "val_hr": []}
 
     for ep in range(epochs):
         ncf.train()
+        total_train_loss, n_train_batches = 0.0, 0
         for batch_users, batch_items, batch_labels in data["inter_loader"]:
             batch_users, batch_items, batch_labels = (
                 batch_users.to(device), batch_items.to(device), batch_labels.to(device))
@@ -224,9 +256,13 @@ def train_and_eval_euclidean_baseline(data, device, factor_num=16, num_layers=3,
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
+            total_train_loss += loss.item()
+            n_train_batches += 1
+        avg_train_loss = total_train_loss / max(1, n_train_batches)
 
         ncf.eval()
         total_val_loss, n_val_batches = 0.0, 0
+        hits = []
         with torch.no_grad():
             for val_users, val_items, val_labels in data["val_loader"]:
                 val_users, val_items, val_labels = (
@@ -234,15 +270,28 @@ def train_and_eval_euclidean_baseline(data, device, factor_num=16, num_layers=3,
                 preds_val = ncf(val_users, val_items)
                 total_val_loss += loss_fn(preds_val, val_labels).item()
                 n_val_batches += 1
+                _, topk_idx = torch.topk(preds_val, 10)
+                hits.append(1.0 if 0 in topk_idx.tolist() else 0.0)
         avg_val_loss = total_val_loss / max(1, n_val_batches)
+        avg_val_hr = float(np.mean(hits)) if hits else 0.0
+        history["train_loss"].append(avg_train_loss)
+        history["val_loss"].append(avg_val_loss)
+        history["val_hr"].append(avg_val_hr)
+        if verbose:
+            print(f"  ep {ep+1}/{epochs} train={avg_train_loss:.4f} val={avg_val_loss:.4f} "
+                  f"val_hr@10={avg_val_hr:.4f}", flush=True)
 
-        if avg_val_loss < best_val_loss:
+        improved = (avg_val_hr > best_val_hr) if select_by == "hr" else (avg_val_loss < best_val_loss)
+        if improved:
             best_val_loss = avg_val_loss
+            best_val_hr = avg_val_hr
             best_state = copy.deepcopy(ncf.state_dict())
             no_improve = 0
         else:
             no_improve += 1
         if no_improve >= patience:
+            if verbose:
+                print(f"  early stop at ep {ep+1}", flush=True)
             break
 
     if best_state is not None:
@@ -255,6 +304,8 @@ def train_and_eval_euclidean_baseline(data, device, factor_num=16, num_layers=3,
                 [ncf.embed_item_GMF.weight, ncf.embed_item_MLP.weight], dim=-1
             ).detach().cpu()
         return hr, ndcg, best_val_loss, item_emb
+    if return_history:
+        return hr, ndcg, best_val_loss, history
     return hr, ndcg, best_val_loss
 
 
@@ -312,7 +363,7 @@ def main():
     Z_epochN = torch.tensor(np.load(last_epoch_file)["Z"], dtype=torch.float32)
 
     results = {}
-    for name, Z in [("pure_init (0 outer steps)", Z_pure_init),
+    for name, Z in [("pure_init (euclidean, 0 outer steps)", Z_pure_init),
                     ("epoch0 (1 outer step)", Z_epoch0),
                     (f"epoch{last_epoch_n} (converged)", Z_epochN)]:
         print(f"\n--- training final NCF on {name} ---", flush=True)

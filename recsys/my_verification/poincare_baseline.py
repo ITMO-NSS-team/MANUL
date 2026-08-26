@@ -36,6 +36,7 @@ Design:
     GradientIsomapNCF's own measured values.
 """
 import argparse
+import json
 import os
 import sys
 import time
@@ -152,6 +153,10 @@ def main():
                         help="Optional suffix for the saved geometry filename "
                              "(e.g. 'ml10m'), so runs at different scales don't "
                              "overwrite each other's poincare_fitted_geometry*.npz.")
+    parser.add_argument("--select_by", default="loss", choices=["loss", "hr"])
+    parser.add_argument("--patience", type=int, default=3)
+    parser.add_argument("--epochs", type=int, default=30)
+    parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -176,7 +181,15 @@ def main():
     # --- (3) Downstream: same NeuMFOnManifold head, same training harness,
     #     frozen Poincare (tangent-mapped) embeddings as the only input ---
     print("\n--- training final NCF on Poincare-pretrained embeddings ---", flush=True)
-    hr, ndcg, val_loss = train_and_eval_ncf_on_fixed_Z(z_tangent, data, device, args.latent_dim)
+    history = None
+    if args.verbose:
+        hr, ndcg, val_loss, history = train_and_eval_ncf_on_fixed_Z(
+            z_tangent, data, device, args.latent_dim, patience=args.patience,
+            epochs=args.epochs, select_by=args.select_by, verbose=True, return_history=True)
+    else:
+        hr, ndcg, val_loss = train_and_eval_ncf_on_fixed_Z(
+            z_tangent, data, device, args.latent_dim, patience=args.patience,
+            epochs=args.epochs, select_by=args.select_by)
     print(f"Poincare-pretrained NCF: test HR@10={hr:.4f} NDCG@10={ndcg:.4f} "
           f"best_val_loss={val_loss:.4f}", flush=True)
 
@@ -196,8 +209,15 @@ def main():
     D_dense[ju.numpy(), iu.numpy()] = d_final_flat
     suffix = f"_{args.tag}" if args.tag else ""
     out_path = os.path.join(HERE, f"poincare_fitted_geometry{suffix}.npz")
-    np.savez(out_path, D=D_dense, val_loss=val_loss, hr=hr, ndcg=ndcg)
+    np.savez(out_path, D=D_dense, val_loss=val_loss, hr=hr, ndcg=ndcg,
+             z_tangent=z_tangent.cpu().numpy())
     print(f"[Save] {out_path}")
+
+    if history is not None:
+        hist_path = os.path.join(HERE, f"poincare_convergence_history{suffix}.json")
+        with open(hist_path, "w") as f:
+            json.dump(history, f, indent=2)
+        print(f"[Save] {hist_path}")
 
 
 if __name__ == "__main__":
