@@ -8,6 +8,85 @@ Read that first for the why; this file tracks the where-are-we-now.
 ## CURRENT STATUS / NEXT STEP
 *(this block is overwritten each session — always current, read this first)*
 
+**2026-08-26, later: Amazon Beauty sweep complete + corrected + written up
+- the paper's headline new finding this session.** The real sweep
+(Monitor `bzjxeueqh`, filtered) finished all 4 configs in ~48 minutes
+total (much faster than either MovieLens scale - Amazon interactions are
+sparser per user, so the negative-sampling/training loop does less work
+per batch). Zero guard triggers, zero crashes.
+
+Recomputed with the checkpoint-bug fix (same playbook as ML-10M) - full
+output captured to log files this time from the start, no truncated
+`tail` mistake repeated. Also fit Poincare + Euclidean baselines
+(`--tag amazon_beauty`) and built the unified table via the new
+**generalized** `full_hyperbolicity_table_generic.py` (replaces the
+per-dataset-copy-paste pattern flagged as tech debt in the previous
+update - takes an eta-folder prefix + a downstream-metrics JSON side file
+instead of being hardcoded per dataset). Also fixed a real gap found
+along the way: `ablation_geometry_vs_optimization.py`'s **argparse CLI**
+(`main()`) was missing the `--dataset_type`/`--amazon_category` flags -
+only the underlying `build_data()` function had them from the earlier
+generalization commit, so the first recompute attempt failed with
+"unrecognized arguments" until this was caught and fixed (commit
+`bea3d61`).
+
+**Corrected results (HR@10/NDCG@10), 300 users/800 items:**
+
+| Model | HR@10 | NDCG@10 | val_loss |
+|---|---|---|---|
+| Pure Euclidean-init Isomap $Z$ | 0.0400 | 0.0162 | 0.3617 |
+| GINCF $\eta$=0.01, epoch0 | 0.0533 | 0.0232 | 0.3601 |
+| **GINCF $\eta$=0.01, converged** | **0.1133** | **0.0500** | **0.3483** |
+| GINCF $\eta$=0.03, converged | 0.0500 | 0.0199 | 0.3620 |
+| GINCF $\eta$=0.05, converged | 0.0667 | 0.0264 | 0.3654 |
+| GINCF $\eta$=0.10, converged | 0.0467 | 0.0198 | 0.3673 |
+| Poincare-Pretrained | 0.0600 | 0.0270 | 0.3703 |
+| Euclidean NeuMF (baseline) | 0.0567 | 0.0253 | 0.3748 |
+
+**This is the first case across all three scale/domain combinations tested
+in this paper where GradientIsomapNCF outright beats the Euclidean
+baseline** - not just narrows the gap (ML-10M) or loses cleanly (ML-1M).
+$\eta=0.01$ converged wins on both HR@10/NDCG@10 AND has the lowest
+val_loss of the whole table - genuinely converged, not noise. The
+Euclidean baseline, which won decisively at both MovieLens scales, has
+the *highest* val_loss here.
+
+**Crucially, this win is NOT explained by hyperbolicity** - pure_init
+already has a more negative ORC mean than the winning eta=0.01 geometry,
+and Poincare (still the most tree-like row by delta_rel=0.1694) doesn't
+win either. The Euclidean baseline actually has the most negative ORC AND
+the most H1 cycles (1318) of any row here, despite the worst loss -
+hyperbolicity and downstream quality are essentially decoupled at this
+scale/domain. Working hypothesis written into the paper: Amazon's sparser
+interactions leave fewer effective training positives at this pool size
+than MovieLens does, so a free embedding table's extra capacity becomes a
+liability (overfits) rather than an asset, and the manifold constraint
+acts as an implicit regulariser - same capacity-mismatch lens as
+Section subsec:loss, just flipped by data density instead of by scale.
+
+Added `subsec:amazon` to main.tex (after `subsec:ml10m`, before
+Conclusion) - results table, full diagnostics table, two interpretive
+paragraphs, all in blue. Added `hou2024bridging` (arXiv:2403.03952, the
+Amazon Reviews'23 dataset paper) to main.bib. Verified brace balance in
+both main.tex and main.bib (0 issues), no bug-narrative language.
+Committed: `bea3d61` (code), diary not yet committed as of writing this -
+do that next.
+
+**This closes the "n=1 dataset" gap from the Abstract**: the paper now
+has 3 scale/domain configurations (ML-1M, ML-10M-at-1800-items, Amazon
+Beauty) across 2 distinct domains (movies, e-commerce reviews), with a
+real, defensible cross-cutting finding (capacity vs. data density
+determines whether geometry search or free embeddings win - not
+hyperbolicity per se) rather than three disconnected results tables.
+
+**Still open** (from before, largely unchanged): Gromov delta section
+(4.1, "Experiment 49-52" numbering ambiguous, needs the user to clarify
+before I touch original non-blue text), and the empty Conclusion (now has
+even more material to synthesize - the capacity/density story above is
+probably the single most citable insight to lead with).
+
+---
+
 **2026-08-26 update: second dataset chosen and integrated - Amazon Beauty.**
 User confirmed Amazon over Yelp (structurally closer to the existing
 rating+timestamp pipeline; Yelp's more interesting angle - the
