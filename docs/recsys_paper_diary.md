@@ -8,6 +8,122 @@ Read that first for the why; this file tracks the where-are-we-now.
 ## CURRENT STATUS / NEXT STEP
 *(this block is overwritten each session — always current, read this first)*
 
+**2026-08-26, evening: model-selection criterion investigation - a real
+methodological fix, and it turned out to STRENGTHEN the Amazon Beauty
+finding rather than undermine it.** User noticed the "final NCF" loss
+convergence plots looked wrong (val loss below train loss from epoch 1,
+noisy early-stopping trigger) and pushed back hard on my first two
+explanations before we found the real cause.
+
+**Root cause, confirmed in code:** train batches use `num_ng=2` (1
+positive : 2 negatives, ~33% positive rate); val/test batches use
+`num_ng=99` (1:99, ~1% positive rate, the standard sampled-ranking
+protocol). BCE loss averaged over these two batch compositions is not on
+a comparable scale - a batch dominated by 99 easy negatives has
+structurally lower average loss almost regardless of ranking quality.
+Both the "final NCF" stage's hand-rolled early stopping (`patience_final
+= 3`, loss-based) and the actual bilevel sweep's `EarlyStopping` class
+used this scale-mismatched val loss for "best checkpoint" selection.
+Literature check confirmed the standard fix: He et al.'s NCF and most
+follow-ups select on val HR@10/NDCG@10 (computed on the same sampled
+batches) instead of raw val loss.
+
+**User's sharper catch (initially I got this wrong):** I first claimed
+fixing this would be "cheap" (just re-evaluate already-saved Z snapshots)
+- she correctly pointed out that if the *inner* per-outer-step NCF proxy
+was also under-trained by the same flawed criterion, the gradient signal
+used to update `D_input` at every one of the 30 outer steps would be
+unreliable too, meaning the whole bilevel search trajectory - not just
+the final evaluation - could be compromised. Checked this directly:
+- The **final-NCF stage** (produces every reported test_hr/test_ndcg,
+  all 3 datasets) uses the simple hand-rolled criterion - confirmed
+  broken, this is the part that needed fixing.
+- The **inner per-outer-step loop** uses the more sophisticated
+  `EarlyStopping` class (window-based, restores best-of-last-6-epochs,
+  not global best) - checked actual `cf_history.json` lengths from the
+  real Amazon Beauty sweep: mostly ran 22-30 of the 30-epoch cap (not the
+  2-9 epochs seen in the final-stage bug), so the inner proxy was
+  reasonably well-trained, not severely undertrained. This means the
+  outer bilevel search trajectory (the saved Z snapshots) is probably
+  more trustworthy than initially feared - a full resweep of the
+  expensive multi-hour outer loops is likely NOT required, though the
+  inner loop's criterion was fixed too for consistency/future runs.
+
+**Fix implemented** (commit `8eda4d6`): added `select_by="loss"/"hr"` to
+`GradientIsomapCF` (new `final_patience`/`inner_patience` params, both
+loops now also track val HR@10), threaded through `run_experiment.py` and
+`poincare_baseline.py`. Relabeled "pure_init" to "pure_init (euclidean)"
+in diagnostic table row labels (disambiguation, since a Poincare
+convergence curve now exists alongside it).
+
+**Quick verification on Amazon Beauty** (`select_by="hr"`, patience=8,
+epoch cap=60, up from patience=3/cap=30) - all 4 final-NCF arms
+recomputed with real per-epoch history saved:
+
+| Model | HR@10 (old, patience=3) | HR@10 (new, patience=8, HR-select) | NDCG@10 (new) |
+|---|---|---|---|
+| Pure init (euclidean) | 0.0400 | 0.1233 | 0.0551 |
+| **GINCF eta=0.01, converged** | 0.1133 | **0.1767** | **0.0810** |
+| Poincare-Pretrained | 0.0600 | 0.1000 | 0.0367 |
+| Euclidean NeuMF (baseline) | 0.0567 | 0.0600 | 0.0288 |
+
+**The gap did not close - it widened.** GINCF was already the best arm
+under the old (flawed) criterion; under fair, well-tuned selection it
+pulls further ahead of every alternative, including the Euclidean
+baseline (which barely moves: 0.0567->0.0600, converges/plateaus within
+~9 epochs regardless of patience budget - genuinely fast-converging on
+this sparse dataset, not cut off early). Convergence curves (saved to
+`process_docs`, see below) show GINCF's val HR@10 still rising smoothly
+out to epoch ~26-34, while Poincare and the Euclidean baseline plateau
+by epoch ~9 - real evidence of headroom the old criterion was missing,
+not noise.
+
+**Plots delivered to** `C:\Users\Julia\Documents\NSS_lab\документы\2027
+WWW Recsys\process_docs\` (SendUserFile doesn't open for the user - see
+[[feedback_show_via_process_docs_folder]] memory):
+- `convergence_final_ncf_amazon_beauty.png` - original 3-arm loss curves
+  that triggered the investigation.
+- `outer_loop_trajectory_amazon_beauty.png` - all 4 eta outer-loop
+  trajectories (still noisy across all 30 outer steps - a separate,
+  smaller open question, see below).
+- `convergence_loss_vs_hr_selection_amazon_beauty.png` /
+  `final_results_loss_vs_hr_selection_amazon_beauty.png` - first
+  pure_init-only diagnostic (patience=3, before widening patience too).
+- `convergence_all_4_arms_fixed_amazon_beauty.png` /
+  `before_after_fix_amazon_beauty.png` - final 4-arm verification
+  (patience=8, cap=60) referenced above.
+
+**Added to main.tex** (Section 3.2, new "Model Comparison Summary"
+subsubsection + `tab:model_comparison`, in blue): item-representation
+source and parameter count per arm - Euclidean baseline has ~12x more
+item-specific free parameters (64,000 vs 5,200 shared) at n=800, growing
+linearly with item count while the geometry-based arms' capacity stays
+fixed. Makes the capacity-mismatch hypothesis already in
+`subsec:loss`/`subsec:amazon` quantitative rather than qualitative.
+Verified brace balance (0 issues), fixed a hardcoded "Eq.~2" reference to
+use a proper `\label`/`\ref` instead (no compiler available to verify
+numbering by hand).
+
+**Still open:**
+- The outer-loop trajectory plot is still noisy across all 30 steps even
+  after this investigation - not yet fully explained (could be genuine
+  geometry-search noise, could be residual noise from re-initializing a
+  fresh NCF proxy every outer step regardless of selection criterion).
+  Not urgent per the finding above (inner loop trains close to budget),
+  but flagged as a real open question if revisited.
+- Amazon Beauty's `select_by="hr"` verification used only 1 of the 4 eta
+  configs (0.01, the winner) plus pure_init/Poincare/Euclidean - the
+  other 3 etas (0.03/0.05/0.10) and the ML-1M/ML-10M numbers throughout
+  the paper still reflect the OLD loss-based criterion. Not yet decided
+  whether/how to propagate this fix to those (diary + user should discuss
+  scope before doing a full repaint of every table).
+- `verify_hr_fix_amazon_beauty.json`, `poincare_convergence_history*.json`
+  not yet committed as of this being written (code is committed, these
+  result artifacts are not) - low priority, matches existing pattern of
+  leaving raw run outputs untracked.
+
+---
+
 **2026-08-26, later: Amazon Beauty sweep complete + corrected + written up
 - the paper's headline new finding this session.** The real sweep
 (Monitor `bzjxeueqh`, filtered) finished all 4 configs in ~48 minutes
