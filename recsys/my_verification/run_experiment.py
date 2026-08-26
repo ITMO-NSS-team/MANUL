@@ -70,6 +70,26 @@ def load_movielens_ratings(movielens_dir):
     return df
 
 
+def load_amazon_ratings(amazon_dir, category):
+    """Loads a decompressed Amazon Reviews'23 5-core pure-ID CSV
+    (userId/parent_asin/rating/timestamp, see
+    https://amazon-reviews-2023.github.io/data_processing/5core.html) and
+    renames columns to the same userId/movieId/rating/timestamp contract
+    load_movielens_ratings() produces, so prepare_sequences()/
+    subsample_users_items() work unmodified on either dataset. Timestamps
+    here are already integer milliseconds (unlike MovieLens's seconds) -
+    prepare_sequences only uses them for relative ordering (sort_values),
+    so the unit difference doesn't matter downstream."""
+    ratings_path = os.path.join(amazon_dir, f"{category}.csv")
+    print(f"Loading ratings from {ratings_path} ...")
+    df = pd.read_csv(ratings_path)
+    df = df.rename(columns={"user_id": "userId", "parent_asin": "movieId"})
+    df = df[["userId", "movieId", "rating", "timestamp"]]
+    print("Unique_users:", df["userId"].nunique(), "Unique_items:", df["movieId"].nunique())
+    print(f"Loaded {len(df)} ratings")
+    return df
+
+
 def main(
     max_users=300,
     max_movies=800,
@@ -86,12 +106,19 @@ def main(
     n_run="verify01",
     seed=0,
     dataset_dir_name="ml-1m",
+    dataset_type="movielens",
+    amazon_category="Beauty_and_Personal_Care",
 ):
     torch.manual_seed(seed)
     np.random.seed(seed)
 
-    movielens_dir = os.path.join(GINCF_DIR, "data", dataset_dir_name)
-    ratings_df = load_movielens_ratings(movielens_dir)
+    dataset_dir = os.path.join(GINCF_DIR, "data", dataset_dir_name)
+    if dataset_type == "movielens":
+        ratings_df = load_movielens_ratings(dataset_dir)
+    elif dataset_type == "amazon":
+        ratings_df = load_amazon_ratings(dataset_dir, amazon_category)
+    else:
+        raise ValueError(f"Unknown dataset_type: {dataset_type!r}")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"\nDevice: {device}")

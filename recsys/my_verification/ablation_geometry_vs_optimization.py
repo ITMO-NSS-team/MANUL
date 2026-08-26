@@ -45,11 +45,12 @@ from prepare_data import (
     build_movie_user_matrix,
 )
 from new_datasets import NCFTestDatasetSampled
-from run_experiment import load_movielens_ratings
+from run_experiment import load_movielens_ratings, load_amazon_ratings
 from GradientIsomapCF_log import GradientIsomapCF
 
 
-def build_data(max_users, max_movies, min_seq_len, num_ng, dataset_dir_name, device, tmp_logs_folder):
+def build_data(max_users, max_movies, min_seq_len, num_ng, dataset_dir_name, device, tmp_logs_folder,
+               dataset_type="movielens", amazon_category="Beauty_and_Personal_Care"):
     """Mirrors run_experiment.main()'s data pipeline exactly, including
     reusing GradientIsomapCF's own internal negative-sampling for training
     interactions (NOT new_datasets.NCFTrainDatasetFutureBlind - an earlier
@@ -62,8 +63,13 @@ def build_data(max_users, max_movies, min_seq_len, num_ng, dataset_dir_name, dev
     .users_all/.items_all/.labels_all is the only way to guarantee this
     ablation trains on exactly the same data the real pipeline's "final NCF"
     step does)."""
-    movielens_dir = os.path.join(GINCF_DIR, "data", dataset_dir_name)
-    ratings_df = load_movielens_ratings(movielens_dir)
+    dataset_dir = os.path.join(GINCF_DIR, "data", dataset_dir_name)
+    if dataset_type == "movielens":
+        ratings_df = load_movielens_ratings(dataset_dir)
+    elif dataset_type == "amazon":
+        ratings_df = load_amazon_ratings(dataset_dir, amazon_category)
+    else:
+        raise ValueError(f"Unknown dataset_type: {dataset_type!r}")
     df_mapped, user2seq = prepare_sequences(ratings_df)
     df_sub, user2seq_sub, num_users, num_movies = subsample_users_items(
         df_mapped, max_users=max_users, max_movies=max_movies, min_seq_len=min_seq_len)

@@ -35,7 +35,8 @@ ETA_OUTER_VALUES = [0.01, 0.03, 0.05, 0.10]
 
 
 def run_one(eta_outer: float, n_run_prefix: str = "eta_sweep", max_users: int = 300,
-           max_movies: int = 800, dataset_dir_name: str = "ml-1m"):
+           max_movies: int = 800, dataset_dir_name: str = "ml-1m",
+           dataset_type: str = "movielens", amazon_category: str = "Beauty_and_Personal_Care"):
     n_run = f"{n_run_prefix}_{eta_outer}"
     print(f"\n{'=' * 70}")
     print(f"=== eta_outer = {eta_outer}  (n_run={n_run}, dataset={dataset_dir_name}, "
@@ -50,6 +51,7 @@ def run_one(eta_outer: float, n_run_prefix: str = "eta_sweep", max_users: int = 
         lr_isomap=eta_outer,
         run_gincf=True, n_run=n_run, seed=0,
         dataset_dir_name=dataset_dir_name,
+        dataset_type=dataset_type, amazon_category=amazon_category,
     )
     elapsed = time.time() - t0
     print(f"[eta_outer={eta_outer}] finished in {elapsed:.1f}s", flush=True)
@@ -73,11 +75,13 @@ def run_one(eta_outer: float, n_run_prefix: str = "eta_sweep", max_users: int = 
 
 
 def main(n_run_prefix="eta_sweep", max_users=300, max_movies=800, dataset_dir_name="ml-1m",
+        dataset_type="movielens", amazon_category="Beauty_and_Personal_Care",
         summary_filename="eta_outer_sweep_summary.json"):
     summary = []
     for eta in ETA_OUTER_VALUES:
         summary.append(run_one(eta, n_run_prefix=n_run_prefix, max_users=max_users,
-                               max_movies=max_movies, dataset_dir_name=dataset_dir_name))
+                               max_movies=max_movies, dataset_dir_name=dataset_dir_name,
+                               dataset_type=dataset_type, amazon_category=amazon_category))
         # Save incrementally after each config, so a later config's failure
         # doesn't lose earlier results.
         with open(os.path.join(HERE, summary_filename), "w") as f:
