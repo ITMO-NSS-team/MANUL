@@ -298,11 +298,15 @@ def train_and_eval_euclidean_baseline(data, device, factor_num=16, num_layers=3,
         ncf.load_state_dict(best_state)
 
     hr, ndcg = evaluate_topk_pure(ncf, data["test_loader"], top_k=10, device=device)
+    item_emb = None
     if return_item_embeddings:
         with torch.no_grad():
             item_emb = torch.cat(
                 [ncf.embed_item_GMF.weight, ncf.embed_item_MLP.weight], dim=-1
             ).detach().cpu()
+    if return_item_embeddings and return_history:
+        return hr, ndcg, best_val_loss, item_emb, history
+    if return_item_embeddings:
         return hr, ndcg, best_val_loss, item_emb
     if return_history:
         return hr, ndcg, best_val_loss, history
@@ -332,6 +336,9 @@ def main():
     parser.add_argument("--dataset_type", default="movielens", choices=["movielens", "amazon"])
     parser.add_argument("--amazon_category", default="Beauty_and_Personal_Care")
     parser.add_argument("--latent_dim", type=int, default=64)
+    parser.add_argument("--select_by", default="loss", choices=["loss", "hr"])
+    parser.add_argument("--patience", type=int, default=3)
+    parser.add_argument("--epochs", type=int, default=30)
     args = parser.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -367,7 +374,9 @@ def main():
                     ("epoch0 (1 outer step)", Z_epoch0),
                     (f"epoch{last_epoch_n} (converged)", Z_epochN)]:
         print(f"\n--- training final NCF on {name} ---", flush=True)
-        hr, ndcg, val_loss = train_and_eval_ncf_on_fixed_Z(Z, data, device, args.latent_dim)
+        hr, ndcg, val_loss = train_and_eval_ncf_on_fixed_Z(
+            Z, data, device, args.latent_dim, select_by=args.select_by,
+            patience=args.patience, epochs=args.epochs)
         results[name] = (hr, ndcg, val_loss)
         print(f"{name}: test HR@10={hr:.4f} NDCG@10={ndcg:.4f} best_val_loss={val_loss:.4f}", flush=True)
 
