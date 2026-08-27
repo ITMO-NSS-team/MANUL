@@ -8,6 +8,79 @@ Read that first for the why; this file tracks the where-are-we-now.
 ## CURRENT STATUS / NEXT STEP
 *(this block is overwritten each session — always current, read this first)*
 
+**2026-08-27: ML-1M + ML-10M HR-fix resweeps running (long background
+job); added a Limitations subsection to main.tex while waiting.**
+
+User confirmed (2026-08-26 night) she wants the HR-based model-selection
+fix propagated to ML-1M and ML-10M too, not just Amazon Beauty. Launched
+`run_ml1m_sweep_hrfix.py` then `run_ml10m_sweep_hrfix.py` sequentially in
+one background Monitor (commit `557a5a1`) - same settings as the Amazon
+Beauty fix (`select_by="hr"`, `inner_patience=8`, `final_patience=8`,
+`cf_epochs=60`, `final_cf_epochs=60`), distinct n_run_prefixes
+(`eta_sweep_hrfix_*`, `ml10m_eta_sweep_hrfix_*`) so the originals stay
+available for comparison.
+
+**ML-1M HR-fix sweep: COMPLETE.** All 4 configs finished cleanly (zero
+guard triggers), ~1h40m-2h25m per config (slower than the original
+~50min-1h given the wider budget). In-process summary (NOT yet the
+controlled seed=0 re-eval used for every other "corrected" table in this
+paper - see caveat below):
+
+| eta | HR@10 | NDCG@10 |
+|---|---|---|
+| 0.01 | 0.3700 | 0.2349 |
+| 0.03 | 0.3433 | 0.2288 |
+| 0.05 | 0.3167 | 0.1708 |
+| 0.10 | 0.2933 | 0.1851 |
+
+Direction (higher eta worse) is UNCHANGED from the original ML-1M
+finding - unlike Amazon Beauty, this pattern survived the fix. But the
+magnitude jumped enormously: old corrected eta=0.01 was 0.2567/0.1519,
+clearly behind the Euclidean baseline's 0.3633/0.2354; new in-process
+eta=0.01 is 0.3700/0.2349 - now essentially tied with the old Euclidean
+number. This is a big, promising signal but NOT yet confirmed - the
+final-NCF stage inside the live sweep does not reset its RNG seed the
+way `ablation_geometry_vs_optimization.py`'s post-hoc re-eval does, so
+these in-process numbers are not directly comparable/reproducible the
+way every other "corrected" result in this paper is. **Next step once
+ML-10M finishes: run the same post-hoc seed=0 re-eval (`ablation_geometry_vs_optimization.py --select_by hr --patience 8 --epochs 60`)
+against the saved `eta_sweep_hrfix_*` Z snapshots, plus fresh
+Poincare/Euclidean baselines under matching settings, exactly as already
+done for Amazon Beauty - only then update `tab:corrected_results`/
+`tab:full_diagnostics` in main.tex.**
+
+**ML-10M HR-fix sweep: in progress.** eta=0.01/0.03/0.05 done (~3h35m-3h44m
+each, zero guard triggers), eta=0.10 running as of this update. Given the
+per-config pace, expect total sweep time roughly 14-16h - deliberately
+NOT running the ML-1M post-hoc re-eval concurrently with this (would
+contend for the same GPU); doing both re-evals together once ML-10M's
+sweep itself finishes.
+
+**Added to main.tex while waiting** (new `subsec` "Limitations: Memory,
+Scalability, and Cold Start", before Conclusion, in blue): three points,
+prompted by the user's own questions about production applicability -
+(1) the shared-projection architecture reduces the CF head's own
+trainable-parameter/optimiser-state footprint vs.\ a free embedding
+table, but does NOT reduce the stored per-item representation size ($Z$
+is still $O(n \times d)$); (2) the real scalability bottleneck is the
+geometry-\emph{search} stage itself ($D_{\text{input}} \in
+\mathbb{R}^{n\times n}$, Floyd--Warshall) - quadratic memory, cubic
+compute, infeasible at production catalogue sizes without algorithmic
+changes (landmark/sparse-graph Isomap) not implemented here; (3)
+cold-start is asymmetric - item representations come from rating-profile
+features (a genuine, untested potential advantage for new items), but
+user representations are ordinary randomly-initialised learnable
+embeddings in every tested configuration, so new-user cold start is
+exactly as unsolved as in vanilla NeuMF. Verified brace balance (0
+issues), no bug-narrative language.
+
+**Still open:** the post-hoc re-eval for both ML-1M and ML-10M (see
+above), then update `tab:corrected_results`/`tab:ml10m_results` and
+their diagnostics tables with final numbers. Gromov delta section (4.1)
+and empty Conclusion still deferred.
+
+---
+
 **2026-08-26, night: Amazon Beauty fully resweept with the HR-fix - the
 winning eta CHANGED, confirming the user's concern that fixing only
 evaluation (not the actual bilevel search) wasn't enough.** User asked to
