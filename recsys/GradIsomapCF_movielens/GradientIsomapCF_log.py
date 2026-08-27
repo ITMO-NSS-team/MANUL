@@ -33,6 +33,7 @@ class EarlyStopping:
             convergence_delta: float = 0.005,
             overfit_gap: float = 0.05,
             overfit_patience: int = 5,
+            select_by: str = "loss",
     ):
         self.patience = patience
         self.window = window
@@ -41,6 +42,17 @@ class EarlyStopping:
         self.convergence_delta = convergence_delta
         self.overfit_gap = overfit_gap
         self.overfit_patience = overfit_patience
+        # select_by="hr": should_stop() is driven by plain HR@10 patience
+        # (stop once val_hr hasn't improved for `patience` epochs) instead of
+        # the loss-based convergence/overfit-gap logic below. The loss-based
+        # conditions are structurally unreliable here (see note above) - val
+        # loss sits far below train loss throughout training because of the
+        # train/val negative-sampling ratio mismatch, so cond_converged and
+        # cond_overfit rarely fire either way, and training silently runs to
+        # whatever epoch cap is set instead of actually stopping. See
+        # docs/recsys_paper_diary.md, 2026-08-27.
+        self.select_by = select_by
+        self._no_improve_hr = 0
 
         self.best_val_loss = np.inf
         self.best_state_global = None
@@ -101,10 +113,19 @@ class EarlyStopping:
 
         if val_hr is not None:
             self._val_hr_history.append(val_hr)
-            if val_hr > self.best_val_hr:
+            if val_hr > self.best_val_hr + self.min_delta:
                 self.best_val_hr = val_hr
                 self.best_epoch_window_hr = epoch
                 self.best_state_window_hr = state_copy
+                self._no_improve_hr = 0
+            else:
+                self._no_improve_hr += 1
+
+        if self.select_by == "hr":
+            # Plain HR@10 patience: stop once val_hr hasn't improved for
+            # `patience` epochs. Bypasses the loss-based convergence/overfit
+            # logic below entirely (see __init__ docstring note).
+            return val_hr is not None and self._no_improve_hr >= self.patience
 
         enough = len(self._val_history) >= self.smooth_window
         smooth_val = self._smooth(self._val_history)
@@ -448,6 +469,8 @@ class GradientIsomapCF:
         isomap_optim = optim.AdamW(isomap_model.parameters(), lr=self.lr_isomap)
 
         best_val_loss = np.inf
+        best_val_hr_outer = -np.inf
+        best_isomap_state = None
 
         for epoch in range(self.epochs):
             epoch_start = time.time()
@@ -474,6 +497,7 @@ class GradientIsomapCF:
                 convergence_delta=0.001,
                 overfit_gap=0.003,
                 overfit_patience=1,
+                select_by=self.select_by,
             )
             cf_train_losses = []
             cf_val_losses = []
@@ -653,8 +677,26 @@ class GradientIsomapCF:
                   f"time={elapsed:.1f}s")
 
             stop_loss = avg_val_loss if avg_val_loss is not None else avg_train_loss
+
+            # Track the best outer-epoch snapshot of the geometry itself, not
+            # just the loss value - without this, item_Z_final below always
+            # used whichever D_input the LAST outer step happened to land on,
+            # regardless of whether an earlier step scored better. The outer
+            # trajectory is noisy (a fresh, randomly-initialised ncf_model is
+            # trained at every step - see docs/recsys_paper_diary.md,
+            # 2026-08-27), so "last" and "best" are frequently different
+            # points, and the difference in reported quality can be large.
+            if self.select_by == "hr":
+                outer_improved = hr_val is not None and hr_val > best_val_hr_outer
+            else:
+                outer_improved = stop_loss < best_val_loss
+            if outer_improved:
+                if self.select_by == "hr":
+                    best_val_hr_outer = hr_val
+                best_isomap_state = copy.deepcopy(isomap_model.state_dict())
             if stop_loss < best_val_loss:
                 best_val_loss = stop_loss
+
             if stop_loss <= self.stop_criteria_value:
                 print(f"Stop criteria: loss={stop_loss:.4f} <= {self.stop_criteria_value}")
                 break
@@ -666,6 +708,15 @@ class GradientIsomapCF:
         print(f"\nOuter loop finished in "
               f"{time.strftime('%H:%M:%S', time.gmtime(total_time))}")
         print(f"Best outer val/train loss = {best_val_loss:.4f}")
+
+        if best_isomap_state is not None:
+            isomap_model.load_state_dict(best_isomap_state)
+            if self.select_by == "hr":
+                print(f"[Outer] Restored best-by-HR@10 geometry (val_hr={best_val_hr_outer:.4f}), "
+                      f"not the last outer step's.")
+            else:
+                print(f"[Outer] Restored best-by-loss geometry (val_loss={best_val_loss:.4f}), "
+                      f"not the last outer step's.")
 
         isomap_model.eval()
         with torch.no_grad():

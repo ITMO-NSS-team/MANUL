@@ -93,6 +93,20 @@ def build_data(max_users, max_movies, min_seq_len, num_ng, dataset_dir_name, dev
         next_triples=test_next, num_items=num_movies,
         user_pos_all_set=user_hist_test_set, num_ng=99, seed=456)
 
+    # One representative (user, positive-item) triple per user from the
+    # training set, ranked against the same 1-vs-99 sampled-ranking protocol
+    # as val/test - lets us plot train HR@10 alongside val HR@10 on the same
+    # scale, to see whether a train/val gap (overfitting) or a shared low
+    # ceiling (underfitting, needs more epochs) explains a given curve. Not
+    # used for training itself, diagnostic only.
+    train_last_per_user = {}
+    for (u, m, r) in train_events:
+        train_last_per_user[int(u)] = int(m)
+    train_ranking_triples = [(u, 0, m) for u, m in train_last_per_user.items()]
+    train_ranking_dataset = NCFTestDatasetSampled(
+        next_triples=train_ranking_triples, num_items=num_movies,
+        user_pos_all_set=user_pos_train_set, num_ng=99, seed=789)
+
     movie_user_mat = build_movie_user_matrix(train_events, num_movies, num_users, use_ratings=True)
     features_t = torch.tensor(movie_user_mat, dtype=torch.float32, device=device)
 
@@ -119,6 +133,7 @@ def build_data(max_users, max_movies, min_seq_len, num_ng, dataset_dir_name, dev
         "inter_loader": gi_cf.inter_loader,
         "val_loader": DataLoader(val_dataset, batch_size=100, shuffle=False),
         "test_loader": DataLoader(test_dataset, batch_size=100, shuffle=False),
+        "train_ranking_loader": DataLoader(train_ranking_dataset, batch_size=100, shuffle=False),
         "D_input_init": D_input_init,
     }
 
@@ -154,7 +169,8 @@ def train_and_eval_ncf_on_fixed_Z(item_Z, data, device, latent_dim, factor_num=1
     best_val_hr = -float("inf")
     best_state = None
     no_improve = 0
-    history = {"train_loss": [], "val_loss": [], "val_hr": []}
+    train_ranking_loader = data.get("train_ranking_loader")
+    history = {"train_loss": [], "val_loss": [], "val_hr": [], "train_hr": []}
 
     for ep in range(epochs):
         ncf.train()
@@ -191,9 +207,23 @@ def train_and_eval_ncf_on_fixed_Z(item_Z, data, device, latent_dim, factor_num=1
         history["train_loss"].append(avg_train_loss)
         history["val_loss"].append(avg_val_loss)
         history["val_hr"].append(avg_val_hr)
+
+        avg_train_hr = None
+        if train_ranking_loader is not None:
+            train_hits = []
+            with torch.no_grad():
+                for tr_users, tr_items, tr_labels in train_ranking_loader:
+                    tr_users, tr_items = tr_users.to(device), tr_items.to(device)
+                    preds_tr = ncf(tr_users, tr_items, item_Z)
+                    _, topk_idx = torch.topk(preds_tr, 10)
+                    train_hits.append(1.0 if 0 in topk_idx.tolist() else 0.0)
+            avg_train_hr = float(np.mean(train_hits)) if train_hits else 0.0
+            history["train_hr"].append(avg_train_hr)
+
         if verbose:
+            train_hr_str = f" train_hr@10={avg_train_hr:.4f}" if avg_train_hr is not None else ""
             print(f"  ep {ep+1}/{epochs} train={avg_train_loss:.4f} val={avg_val_loss:.4f} "
-                  f"val_hr@10={avg_val_hr:.4f}", flush=True)
+                  f"val_hr@10={avg_val_hr:.4f}{train_hr_str}", flush=True)
 
         improved = (avg_val_hr > best_val_hr) if select_by == "hr" else (avg_val_loss < best_val_loss)
         if improved:
