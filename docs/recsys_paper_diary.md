@@ -8,6 +8,77 @@ Read that first for the why; this file tracks the where-are-we-now.
 ## CURRENT STATUS / NEXT STEP
 *(this block is overwritten each session — always current, read this first)*
 
+**2026-08-27: HR-fix propagated to all three datasets - controlled re-eval
+done, main.tex fully updated with final numbers.** Both long sweeps
+(ML-1M ~7h, ML-10M ~15h) finished cleanly (zero guard triggers
+throughout). Ran the same controlled seed=0 post-hoc re-eval used for
+Amazon Beauty against both: `ablation_geometry_vs_optimization.py
+--select_by hr --patience 8 --epochs 60` per eta config, plus fresh
+Poincare/Euclidean baselines under identical settings
+(`save_euclidean_baseline_geometry.py` needed the same CLI params added,
+commit `3a0d03b`).
+
+**Final corrected numbers, all three datasets, all under the same
+HR@10-based selection criterion:**
+
+| Dataset | Best GINCF | Pure init | Poincare | Euclidean (winner) |
+|---|---|---|---|---|
+| ML-1M | eta=0.03: 0.3933/0.2583 | 0.3400/0.2218 | 0.2767/0.1691 | **0.4867/0.3469** |
+| ML-10M | eta=0.01: 0.3344/0.2058 | 0.3144/0.2032 | 0.1906/0.1186 | **0.4950/0.3586** |
+| Amazon Beauty | eta=0.05: **0.1800/0.0836** | 0.1233/0.0551 | 0.1000/0.0367 | 0.0600/0.0288 |
+
+**Important correction to my in-process report from earlier today:** I
+initially got excited that ML-1M's in-process eta=0.01 number (0.3700)
+nearly matched the OLD Euclidean baseline number (0.3633), suggesting
+GINCF might be closing the gap. This was premature - the Euclidean
+baseline ALSO jumped dramatically once recomputed under the same fixed
+criterion (0.3633 -> 0.4867 for ML-1M, 0.4415 -> 0.4950 for ML-10M). The
+old criterion was shortchanging every arm, not just GINCF, so the
+*relative* gap between GINCF and Euclidean is essentially unchanged on
+both MovieLens datasets - Euclidean still wins decisively. Determinism
+re-confirmed throughout: pure_init identical across all 4 eta reruns per
+dataset, Poincare/Euclidean reproduce their earlier-session numbers
+exactly when rerun with matching settings.
+
+**What changed vs. what didn't, per dataset:**
+- **ML-1M:** the eta-ablation is no longer monotonic - eta=0.03 (not
+  eta=0.01) is now the best GINCF config, and it's the only one that
+  beats pure_init (previously none did). Direction of "which eta is
+  worst" also isn't simply eta=0.10 anymore.
+- **ML-10M:** eta=0.01 still wins among GINCF configs (unchanged), but
+  the ordering of the others changed - eta=0.10 now beats eta=0.03 and
+  eta=0.05, breaking the old monotonic "higher eta worse" pattern.
+- **Amazon Beauty:** already reported previous update - eta=0.05 (not
+  eta=0.01) wins, monotonicity fully gone.
+- **Universal across all three:** Euclidean vs GINCF's *qualitative*
+  outcome is unchanged (Euclidean wins on both MovieLens scales, GINCF
+  wins on Amazon Beauty) - only the exact eta rankings and absolute
+  numbers shifted. The core paper narrative survives fully intact and
+  the evidence for it is now more rigorous.
+
+**main.tex fully updated** (`tab:corrected_results`, `tab:full_diagnostics`,
+`tab:ml10m_results`, `tab:ml10m_diagnostics` all replaced with final
+numbers; interpretive paragraphs rewritten to match - e.g. the old "eta=0.01
+is the exception, hyperbolicity doesn't increase for it" claim no longer
+holds with the new data, replaced with an accurate description of the new
+delta_rel/ORC pattern). Moved the HR@10-selection methodology explanation
+to one central place (Section 3.2.5, "Evaluation Protocol and Metrics")
+instead of repeating it per-dataset; `subsec:amazon`'s local copy trimmed
+to a one-line back-reference. Verified brace balance (0 issues) and
+grepped for stale old numbers elsewhere in the paper (none found) after
+every edit.
+
+**Still open:**
+- Gromov delta section (4.1, "Experiment 49-52" numbering) and empty
+  Conclusion - still deferred, unchanged from before, now probably the
+  main remaining task before the paper is feature-complete.
+- The outer-loop trajectory noise question (flagged a few updates ago,
+  Amazon Beauty specific) - never revisited under the new criterion.
+- No LaTeX compiler on this machine - user should compile main.tex to
+  confirm it renders correctly before treating any of this as final.
+
+---
+
 **2026-08-27: ML-1M + ML-10M HR-fix resweeps running (long background
 job); added a Limitations subsection to main.tex while waiting.**
 
