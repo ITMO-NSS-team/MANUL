@@ -30,6 +30,9 @@ def main():
                         help="Optional suffix for the saved geometry filename "
                              "(e.g. 'ml10m'), so runs at different scales don't "
                              "overwrite each other's euclidean_baseline_geometry*.npz.")
+    parser.add_argument("--select_by", default="loss", choices=["loss", "hr"])
+    parser.add_argument("--patience", type=int, default=3)
+    parser.add_argument("--epochs", type=int, default=30)
     args = parser.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -44,7 +47,8 @@ def main():
     print(f"num_users={data['num_users']} num_movies={data['num_movies']}", flush=True)
 
     hr, ndcg, val_loss, item_emb = train_and_eval_euclidean_baseline(
-        data, device, return_item_embeddings=True)
+        data, device, return_item_embeddings=True, select_by=args.select_by,
+        patience=args.patience, epochs=args.epochs)
     print(f"Euclidean NeuMF baseline: test HR@10={hr:.4f} NDCG@10={ndcg:.4f} "
           f"best_val_loss={val_loss:.4f}", flush=True)
 
