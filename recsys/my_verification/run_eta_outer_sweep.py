@@ -38,7 +38,7 @@ def run_one(eta_outer: float, n_run_prefix: str = "eta_sweep", max_users: int = 
            max_movies: int = 800, dataset_dir_name: str = "ml-1m",
            dataset_type: str = "movielens", amazon_category: str = "Beauty_and_Personal_Care",
            select_by: str = "loss", cf_epochs: int = 30, final_cf_epochs: int = 30,
-           inner_patience: int = 5, final_patience: int = 3):
+           inner_patience: int = 5, final_patience: int = 3, outer_epochs: int = 30):
     n_run = f"{n_run_prefix}_{eta_outer}"
     print(f"\n{'=' * 70}")
     print(f"=== eta_outer = {eta_outer}  (n_run={n_run}, dataset={dataset_dir_name}, "
@@ -49,7 +49,7 @@ def run_one(eta_outer: float, n_run_prefix: str = "eta_sweep", max_users: int = 
     results = run_experiment.main(
         max_users=max_users, max_movies=max_movies, min_seq_len=2, num_ng=2, top_k=10,
         epochs_pure=0, run_ncf=False,   # baseline already established separately
-        gradisomap_epochs=30, cf_epochs=cf_epochs, final_cf_epochs=final_cf_epochs,
+        gradisomap_epochs=outer_epochs, cf_epochs=cf_epochs, final_cf_epochs=final_cf_epochs,
         lr_isomap=eta_outer,
         run_gincf=True, n_run=n_run, seed=0,
         dataset_dir_name=dataset_dir_name,
@@ -80,15 +80,17 @@ def run_one(eta_outer: float, n_run_prefix: str = "eta_sweep", max_users: int = 
 def main(n_run_prefix="eta_sweep", max_users=300, max_movies=800, dataset_dir_name="ml-1m",
         dataset_type="movielens", amazon_category="Beauty_and_Personal_Care",
         select_by="loss", cf_epochs=30, final_cf_epochs=30,
-        inner_patience=5, final_patience=3,
+        inner_patience=5, final_patience=3, outer_epochs=30,
+        eta_values=None,
         summary_filename="eta_outer_sweep_summary.json"):
     summary = []
-    for eta in ETA_OUTER_VALUES:
+    for eta in (eta_values if eta_values is not None else ETA_OUTER_VALUES):
         summary.append(run_one(eta, n_run_prefix=n_run_prefix, max_users=max_users,
                                max_movies=max_movies, dataset_dir_name=dataset_dir_name,
                                dataset_type=dataset_type, amazon_category=amazon_category,
                                select_by=select_by, cf_epochs=cf_epochs, final_cf_epochs=final_cf_epochs,
-                               inner_patience=inner_patience, final_patience=final_patience))
+                               inner_patience=inner_patience, final_patience=final_patience,
+                               outer_epochs=outer_epochs))
         # Save incrementally after each config, so a later config's failure
         # doesn't lose earlier results.
         with open(os.path.join(HERE, summary_filename), "w") as f:

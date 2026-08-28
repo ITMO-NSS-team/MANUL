@@ -8,6 +8,89 @@ Read that first for the why; this file tracks the where-are-we-now.
 ## CURRENT STATUS / NEXT STEP
 *(this block is overwritten each session — always current, read this first)*
 
+**2026-08-29: two more generations of the convergence fix on Amazon
+Beauty (realfix, then patience=30/"p30"), Euclidean baseline finally
+recomputed under a matching criterion, and an outer_epochs=200 confirmation
+test in progress.** Context: after the 2026-08-27 hrfix numbers below, the
+user pushed further - found two more real bugs (inner loop's `should_stop`
+was still loss-based even under `select_by="hr"`; outer loop never
+restored the best-scoring `isomap_model`, always used the last of 30 outer
+steps). Both fixed (commit `391c525`). Then tested raising inner+final
+patience from 8 to 30 (cap 60→200) - single-eta test showed a genuine
+rise-plateau-overfit cycle for the first time. Full 4-eta "p30" sweep
+completed cleanly (zero guard triggers).
+
+**Amazon Beauty, final test HR@10 across all four generations:**
+
+| eta | original | hrfix (2026-08-27) | realfix | p30 |
+|---|---|---|---|---|
+| 0.01 | 0.087 | 0.123 | 0.157 | 0.167 |
+| 0.03 | 0.117 | 0.150 | 0.177 | 0.147 |
+| 0.05 | 0.080 | 0.180 | 0.140 | **0.193** |
+| 0.10 | 0.117 | 0.157 | 0.180 | 0.170 |
+
+Not uniform: eta=0.01/0.05 keep improving generation over generation,
+eta=0.03/0.10 regress slightly from realfix to p30 - most likely outer-loop
+noise (fresh random NCF-proxy init every outer step), not a real patience
+regression, but not isolated/confirmed.
+
+**Euclidean baseline was stale (0.06) for the wrong reason.** The
+`save_euclidean_baseline_geometry.py` CLI already had `--select_by
+--patience --epochs` (fixed earlier, commit `3a0d03b`, contrary to a
+mid-session note that it was still missing them - false alarm, verified by
+reading the file). Rerun explicitly under patience=30/epochs=200/select_by=hr
+(`euclidean_baseline_geometry_amazon_beauty_p30fix.npz`) gives **HR@10=0.1767,
+NDCG@10=0.0778** - much higher than the 2026-08-27 table's 0.0600 (which
+used patience=8/epochs=60, matching that generation's GINCF settings, so it
+was internally consistent for hrfix, just not for later generations). The
+jump makes sense: Euclidean NeuMF has ~12x more free parameters per item
+(80 vs ~6.5 shared-projection, see the item-representation table) and
+plausibly needs the longer budget more than the manifold arms do.
+
+**p30-generation GINCF vs the freshly-corrected Euclidean baseline
+(0.1767):** eta=0.05 (0.193) still wins; eta=0.01/0.10 (0.167/0.170) now
+lose narrowly; eta=0.03 (0.147) loses more clearly. So on 3 of 4 eta the
+corrected comparison says Euclidean wins or ties - this is the fair,
+apples-to-apples version of what the user suspected all along ("оптимизированная
+геометрия проигрывает евклидовой").
+
+**Outer-loop restored-best-checkpoint fix is doing real work, confirmed
+again on p30:** last-outer-step val_hr vs restored-best val_hr per eta:
+0.01: 0.080 vs 0.217; 0.03: 0.153 vs 0.200; 0.05: 0.097 vs 0.173; 0.10:
+0.083 vs 0.157 - using the last step instead of the best would have roughly
+halved every result.
+
+**In progress:** `run_amazon_beauty_outer200_test.py` (new `outer_epochs`
+param added to `run_eta_outer_sweep.run_one`/`main`) - single eta (0.03),
+outer loop run for 200 steps instead of 30 (inner loop unchanged:
+select_by=hr, patience=30, cap=200), to check whether the outer trajectory
+shows a real trend over a much longer horizon or stays noisy, and whether
+the inner NCF proxy converges well at every one of those 200 steps
+regardless of which manifold it's fitting. Estimated ~3-4h wall clock.
+First launch attempt crashed instantly on a `UnicodeEncodeError` (a `→`
+character in a print statement, Windows console cp1251 codepage) -
+relaunched with `PYTHONIOENCODING=utf-8`, confirmed past the crash point.
+Not yet analyzed - full inner+outer convergence graph summary still to be
+built once it finishes, plots to go in `process_docs` as usual.
+
+**All plots for this update** (`inner_loop_stopping_histogram_amazon_p30.png`,
+`outer_loop_trajectories_all4_amazon_p30.png`, `four_generations_comparison_amazon.png`)
+already delivered to `process_docs`.
+
+**Still open / not yet decided:**
+- Whether/how to isolate inner-loop-patience effect from final-NCF-patience
+  effect (both were raised from 8→30 together).
+- Whether the p30 generation's non-uniform eta=0.03/0.10 regression is real
+  outer-loop noise or something to dig into further.
+- ML-1M/ML-10M still sit at the hrfix (2026-08-27) generation - not yet
+  resweeped with realfix or p30. Decision deferred until the outer_epochs=200
+  confirmation test settles what "correct" methodology to standardize on.
+- Item-representation/parameter-count table still not added to main.tex's
+  experimental-setup section (explicitly requested, still outstanding).
+- Gromov delta section (4.1) and empty Conclusion - still deferred.
+
+---
+
 **2026-08-27: HR-fix propagated to all three datasets - controlled re-eval
 done, main.tex fully updated with final numbers.** Both long sweeps
 (ML-1M ~7h, ML-10M ~15h) finished cleanly (zero guard triggers
