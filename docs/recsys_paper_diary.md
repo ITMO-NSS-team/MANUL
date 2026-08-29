@@ -8,6 +8,55 @@ Read that first for the why; this file tracks the where-are-we-now.
 ## CURRENT STATUS / NEXT STEP
 *(this block is overwritten each session — always current, read this first)*
 
+**2026-08-29, later: investigating whether the outer loop's lr (`lr_isomap`
+= eta_outer, AdamW on IsomapNN's weights) is simply too large to preserve
+directionality - user's hypothesis after seeing the outer_epochs=200 test
+below stay noisy.** Reasoning: each outer AdamW step perturbs `D_input`'s
+underlying weights; if the step is large/undirected relative to the
+manifold's structure, consecutive outer steps produce near-unrelated
+manifolds, which would look exactly like the noise we've been seeing
+regardless of how long the loop runs.
+
+**Quick test, 30 outer steps each, same inner settings (select_by=hr,
+patience=30, cap=200), two etas two orders of magnitude below the
+smallest tried before (0.01):**
+
+| eta_outer | std(val_hr) over 30 steps | mean \|step-to-step Δ\| | final test HR@10 |
+|---|---|---|---|
+| 0.01 (existing p30) | 0.0415 | 0.0441 | 0.167 |
+| 0.001 (new) | 0.0238 | 0.0289 | 0.197 |
+| 0.0001 (new) | 0.0225 | 0.0326 | **0.210** |
+
+**Partial confirmation.** Trajectory std roughly halves going from 0.01 to
+0.001 (supports the hypothesis - smaller step, smaller perturbation,
+smaller noise amplitude) but does NOT keep monotonically dropping from
+0.001 to 0.0001, and neither smaller eta shows a genuinely smooth/monotonic
+trajectory - the "restored best" step still lands unpredictably (28/30 for
+eta=0.001, 3/30 for eta=0.0001). So: lower lr reduces noise MAGNITUDE, but
+doesn't turn the search into a directed one over just 30 steps. Useful side
+effect: both smaller etas beat eta=0.01 outright, and eta=0.0001
+(HR@10=0.210) already beats the freshly-corrected Euclidean baseline
+(0.1767) - the best GINCF result on this dataset so far, any generation.
+Plot: `outer_loop_smaller_lr_comparison.png` in process_docs.
+
+**In progress:** eta_outer=0.0001 at outer_epochs=200 (same setup as the
+eta=0.03/outer_epochs=200 test above), to see whether the lower noise floor
+reveals a real smooth trend over a much longer horizon, consistent with the
+user's "this will slow convergence but may preserve directionality"
+prediction. `run_amazon_beauty_outer200_test_eta0001.py`
+(n_run=`amazon_beauty_outer200_test_eta0001_0.0001`). ETA ~3-3.5h based on
+the eta=0.03 run's 11757s. Not yet analyzed.
+
+**Still open / not yet decided (carried over):**
+- Whether/how to isolate inner-loop-patience effect from final-NCF-patience
+  effect.
+- ML-1M/ML-10M still sit at the hrfix (2026-08-27) generation - decision on
+  resweeping deferred until the outer-lr investigation settles.
+- Item-representation/parameter-count table still not added to main.tex.
+- Gromov delta section (4.1) and empty Conclusion - still deferred.
+
+---
+
 **2026-08-29: two more generations of the convergence fix on Amazon
 Beauty (realfix, then patience=30/"p30"), Euclidean baseline finally
 recomputed under a matching criterion, and an outer_epochs=200 confirmation
