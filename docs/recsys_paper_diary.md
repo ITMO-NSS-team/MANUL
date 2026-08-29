@@ -8,6 +8,55 @@ Read that first for the why; this file tracks the where-are-we-now.
 ## CURRENT STATUS / NEXT STEP
 *(this block is overwritten each session — always current, read this first)*
 
+**2026-08-29, even later: found and fixed real cross-run non-determinism,
+launched outer_epochs=500/eta=0.00001 as the next confirmation test.**
+Investigating the eta=0.0001 outer=200 run's result (0.1767, LOWER than the
+same eta's outer=30 result of 0.2100), compared step-by-step val_hr/val_loss
+between the two independent runs of that config: identical for outer steps
+1-2 (same val_loss to 8 decimal places), then diverge completely from step 3
+onward. Root cause: `GradientIsomapCF_log.py`'s `inter_loader` used
+`DataLoader(..., shuffle=True)` with no explicit `generator`, so its shuffle
+order came from the ambient global RNG stream rather than a value fixed to
+the run's seed - combined with GPU floating-point non-determinism (cuDNN
+kernels are not bit-exact by default), this let two `seed=0` runs diverge
+after enough training steps that a tiny numeric difference changes which
+epoch the inner loop's HR-based early stopping fires on, which then shifts
+everything downstream.
+
+**Fixed (commit `0964024`):** `inter_loader` now uses an explicit
+`torch.Generator` seeded from `self.ng_seed` (was implicitly global-RNG-
+dependent); `run_experiment.main()` now sets `cudnn.deterministic=True`,
+`cudnn.benchmark=False`, `use_deterministic_algorithms(True,
+warn_only=True)`. Honest caveat, not oversold: this is best-effort GPU
+determinism, not a bit-exact guarantee - some CUDA kernels still lack a
+deterministic implementation and `warn_only=True` lets those through with
+just a warning rather than crashing the run.
+
+**User's read on the eta=0.0001/outer=200 result:** rejected warm-starting
+the inner NCF proxy between outer steps as a fix (correctly - the manifold
+changes every outer step, so carried-over weights would fight the new
+input distribution rather than help). Instead asked for: even smaller
+outer lr, outer_epochs above 200, and the determinism fix above (already
+applied). Launched `run_amazon_beauty_outer500_eta1e5_test.py`:
+eta_outer=0.00001 (10x below 0.0001), outer_epochs=500, same inner settings
+(select_by=hr, patience=30, cap=200). In progress - first outer step
+confirmed healthy (train=0.3244, differs from the pre-fix runs' train=0.4694
+at step 1, confirming the shuffle-order fix actually changed execution).
+Estimated ~8.5h at 61.2s/step. Not yet analyzed.
+
+**Still open / not yet decided (carried over):**
+- Whether outer_epochs=500/eta=1e-5 finally reveals a real trend, or the
+  outer search is fundamentally noise-dominated regardless of step size
+  (current best guess after the eta=0.0001 test: mostly noise, since std
+  dropped ~2x from eta=0.01→0.0001 but r^2 of any linear trend stayed
+  ~0.03 at both outer=200 tests so far).
+- ML-1M/ML-10M still sit at the hrfix (2026-08-27) generation - decision on
+  resweeping deferred until the outer-loop investigation concludes.
+- Item-representation/parameter-count table still not added to main.tex.
+- Gromov delta section (4.1) and empty Conclusion - still deferred.
+
+---
+
 **2026-08-29, later: investigating whether the outer loop's lr (`lr_isomap`
 = eta_outer, AdamW on IsomapNN's weights) is simply too large to preserve
 directionality - user's hypothesis after seeing the outer_epochs=200 test
