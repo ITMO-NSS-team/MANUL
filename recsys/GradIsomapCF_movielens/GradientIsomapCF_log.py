@@ -411,7 +411,10 @@ class GradientIsomapCF:
         labels = torch.tensor(self.interactions[:, 2], dtype=torch.float32)
 
         dataset = TensorDataset(users, items, labels)
-        self.inter_loader = DataLoader(dataset, batch_size=self.batch_size, shuffle=True)
+        shuffle_generator = torch.Generator()
+        shuffle_generator.manual_seed(self.ng_seed if self.ng_seed is not None else 0)
+        self.inter_loader = DataLoader(dataset, batch_size=self.batch_size, shuffle=True,
+                                       generator=shuffle_generator)
 
         self.users_all = users.to(self.device)
         self.items_all = items.to(self.device)
