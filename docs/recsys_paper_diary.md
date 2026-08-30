@@ -8,6 +8,64 @@ Read that first for the why; this file tracks the where-are-we-now.
 ## CURRENT STATUS / NEXT STEP
 *(this block is overwritten each session — always current, read this first)*
 
+**2026-08-30: the outer=500/eta=1e-5 confirmation test finished (best
+result so far, HR@10=0.2233), which reframed the whole outer-loop-noise
+investigation - the manifold itself DOES move with a strong, real trend;
+val_hr just doesn't track it.** User's sharp question: "an optimizer can't
+be indifferent to direction - it's optimizing something." Checked the
+per-outer-epoch `geometry_diagnostics.csv` (already logged, no new
+training needed) rather than only the downstream val_hr/val_loss:
+
+| metric | eta=0.00001, 500 steps | eta=0.03, 200 steps |
+|---|---|---|
+| Kruskal stress | r²=0.78, falling (0.307→0.304) | r²=0.83, **rising** (0.286→0.478) |
+| Spearman ρ (D_latent vs D_geodesic) | r²=0.65, rising | r²=0.50, **falling** (0.80→0.77) |
+| ORC mean | r²=0.89 | r²=0.02, big raw swing (−0.31→−0.99) |
+| H1 count (latent) | r²=0.48, rising | r²=0.48, rising sharply |
+
+Geometry moves with r² up to 0.89 (vs val_hr's r²≤0.04 at every eta tested
+so far) - the outer optimizer is genuinely, statistically strongly directed
+on its own loss surface. Direction/magnitude differs by eta: tiny eta
+slowly IMPROVES manifold self-consistency (lower stress, higher rho), large
+eta pushes it away from that fast. Plot: `geometry_trend_vs_hr_noise.png`.
+
+**Checked whether ANY geometry metric correlates step-by-step with
+val_hr/val_loss (Spearman, all 11 diagnostics x 3 runs x 2 targets = 66
+tests):** essentially nothing - every |r|<0.20, only 2/66 hit p<0.01 (both
+r≈0.20), consistent with pure multiple-testing noise (~0.66 false positives
+expected at that threshold). So the geometric drift and the downstream
+ranking-quality noise are, in this data, statistically independent - the
+disconnect isn't "the optimizer wanders aimlessly," it's "the geometric
+loss surface and downstream HR@10 don't track each other moment-to-moment,"
+most likely because HR@10 is measured through a freshly-reinitialized inner
+NCF proxy every single outer step.
+
+**In progress:** `run_amazon_beauty_outer1000_eta1e5_test.py` - same
+eta=0.00001 config, doubled to 1000 outer steps, testing whether val_hr's
+trend is real-but-weak (needs a longer horizon to resolve from noise, same
+as the geometry trend needed ~500 steps to become clearly significant) or
+genuinely flat. Very expensive: ~18h estimated (32800s/500-step-run rate).
+Not yet analyzed.
+
+**All new plots** (`geometry_trend_vs_hr_noise.png`,
+`inner_loop_stopping_histogram_amazon_eta1e5_outer500.png`,
+`outer_loop_trajectory_500steps_amazon_eta1e5.png`,
+`noise_vs_eta_outer_summary.png`) delivered to process_docs.
+
+**Still open / not yet decided (carried over):**
+- Whether outer_epochs=1000 resolves a real (if weak) val_hr trend, or
+  confirms it's fundamentally decoupled from the geometric optimization.
+- Whether to add a correlation/geometry-vs-downstream analysis section to
+  the paper - this reframing (geometry converges, downstream doesn't track
+  it) may be a more defensible and interesting narrative than "outer loop
+  doesn't converge."
+- ML-1M/ML-10M still sit at the hrfix (2026-08-27) generation - decision on
+  resweeping deferred until the outer-loop investigation concludes.
+- Item-representation/parameter-count table still not added to main.tex.
+- Gromov delta section (4.1) and empty Conclusion - still deferred.
+
+---
+
 **2026-08-29, even later: found and fixed real cross-run non-determinism,
 launched outer_epochs=500/eta=0.00001 as the next confirmation test.**
 Investigating the eta=0.0001 outer=200 run's result (0.1767, LOWER than the
