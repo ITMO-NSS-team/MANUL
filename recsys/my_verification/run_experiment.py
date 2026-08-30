@@ -111,6 +111,7 @@ def main(
     select_by="loss",
     final_patience=3,
     inner_patience=5,
+    warm_start_inner=False,
 ):
     torch.manual_seed(seed)
     np.random.seed(seed)
@@ -322,6 +323,7 @@ def main(
             select_by=select_by,
             final_patience=final_patience,
             inner_patience=inner_patience,
+            warm_start_inner=warm_start_inner,
         )
 
         isomap_model, ncf_manifold_model = gi_cf.train(val_loader=val_loader, top_k=top_k, device=device)

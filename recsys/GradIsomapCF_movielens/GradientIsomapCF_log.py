@@ -270,7 +270,8 @@ class GradientIsomapCF:
                  num_ng: int = 3,
                  select_by: str = "loss",
                  final_patience: int = 3,
-                 inner_patience: int = 5):
+                 inner_patience: int = 5,
+                 warm_start_inner: bool = False):
 
         self.features = train_feature
         self.train_events = np.array(train_events, dtype=np.int64)
@@ -306,6 +307,19 @@ class GradientIsomapCF:
         self.select_by = select_by
         self.final_patience = final_patience
         self.inner_patience = inner_patience
+        # warm_start_inner=True: instead of creating a brand-new, randomly-
+        # initialized NeuMFOnManifold at every outer step, continue training
+        # the previous outer step's converged weights against the new Z.
+        # Default False preserves the original fresh-reinit-every-step
+        # behavior exactly. See docs/recsys_paper_diary.md, 2026-08-30 -
+        # a controlled experiment (fixed Z, 5 random seeds) found seed-only
+        # variance in test HR@10 (std=0.038) comparable to the ENTIRE
+        # outer-loop step-to-step noise observed at every eta/horizon tested,
+        # suggesting fresh reinit resamples a new random local optimum
+        # ("basin") every step rather than tracking one continuously as Z
+        # evolves - warm-starting is a direct test of that hypothesis.
+        self.warm_start_inner = warm_start_inner
+        self._warm_ncf_model = None
 
         if device is None:
             device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -482,14 +496,24 @@ class GradientIsomapCF:
             with torch.no_grad():
                 item_Z_epoch = isomap_model().to(torch.float32).detach()
 
-            ncf_model = NeuMFOnManifold(
-                user_num=self.num_users,
-                latent_dim=self.latent_len,
-                factor_num=self.factor_num,
-                num_layers=self.num_layers,
-                dropout=self.dropout,
-                model_type=self.model_type
-            ).to(self.device)
+            if self.warm_start_inner and self._warm_ncf_model is not None:
+                ncf_model = self._warm_ncf_model
+                for p in ncf_model.parameters():
+                    p.requires_grad_(True)
+                ncf_model.train()
+            else:
+                ncf_model = NeuMFOnManifold(
+                    user_num=self.num_users,
+                    latent_dim=self.latent_len,
+                    factor_num=self.factor_num,
+                    num_layers=self.num_layers,
+                    dropout=self.dropout,
+                    model_type=self.model_type
+                ).to(self.device)
+            # Fresh optimizer every step even under warm_start_inner - only
+            # the NCF weights carry over, not AdamW's momentum/variance
+            # state, so this isolates the effect of "same basin" from "same
+            # optimizer trajectory".
             ncf_optim = optim.AdamW(ncf_model.parameters(), lr=self.lr_ncf)
 
             early_stop = EarlyStopping(
@@ -582,6 +606,9 @@ class GradientIsomapCF:
             ncf_model.eval()
             for p in ncf_model.parameters():
                 p.requires_grad_(False)
+
+            if self.warm_start_inner:
+                self._warm_ncf_model = ncf_model
 
             isomap_model.train()
             isomap_optim.zero_grad()
