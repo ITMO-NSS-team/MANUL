@@ -8,6 +8,83 @@ Read that first for the why; this file tracks the where-are-we-now.
 ## CURRENT STATUS / NEXT STEP
 *(this block is overwritten each session — always current, read this first)*
 
+**2026-08-30, latest: root-caused the outer-loop noise (not lr, not step
+count - NCF training seed variance / basin-hopping), implemented a
+togglable `warm_start_inner` fix, A/B test in progress.** User pushed on
+"the optimizer must be following SOME loss - go look at the actual code
+again." Traced the real mechanics in `GradientIsomapCF_log.py`: the outer
+gradient step backprops `bce_loss` (full train set, frozen best-inner-NCF)
+through `isomap_model` - this `bce_loss` IS what's logged as the outer
+loop's "train" value (`history['train_loss']`), which I had never actually
+examined on its own (only val_hr/val_loss, downstream evaluation metrics
+computed after the step). Plotted it directly
+(`outer_actual_train_loss_convergence.png`): it does NOT show clean
+convergence either, and for eta=0.03/0.1 it actually INCREASES over the
+horizon. Decisive tell: mean|step-to-step change| in this train_loss is
+~0.09-0.11 regardless of eta (0.00001 to 0.1, a 10,000x range) - if the
+noise came from Z's movement size, tiny eta should show far smaller
+swings. It doesn't, ruling out step size as the cause.
+
+**Root cause, confirmed by a clean controlled experiment:** `ncf_model =
+NeuMFOnManifold(...)` is created fresh, randomly initialized, at EVERY
+outer step (`GradientIsomapCF_log.py` outer loop) - not continued from the
+previous step. Held Z completely fixed (one real snapshot) and trained NCF
+from scratch with 5 different seeds only: test HR@10 ranged 0.097-0.197
+(std=0.038) - a 2x spread from seed alone, on an IDENTICAL manifold. This
+matches the ENTIRE outer-loop step-to-step noise magnitude observed at
+every eta/horizon tested (std 0.019-0.042). At this dataset scale (300
+users/800 items), NCF training is highly multimodal; fresh reinit
+resamples a random local optimum every single outer step, which very
+likely dominates over any real signal from Z's actual movement. Also
+checked step-by-step Spearman correlation between all 11 geometry
+diagnostics and val_hr/val_loss across 3 runs (66 tests): nothing, all
+|r|<0.20 - geometry itself moves with a strong, real trend (r² up to 0.94
+for eta=0.1's spectral gap) that's statistically decoupled from downstream
+ranking quality. Plots: `geometry_trend_vs_hr_noise.png`,
+`geometry_drift_eta01_dramatic.png`, `fixed_Z_seed_variance_vs_outer_noise.png`.
+
+**User's verdict and decision, recorded to memory
+(`project_gincf_outer_loop_noise_warmstart` in the auto-memory system,
+not just this diary):** warm-starting the inner NCF across outer steps is
+now well-motivated - NOT for inner-loop convergence speed (already fine),
+but to stop resampling a random basin every step, restoring the continuity
+a valid outer/hypergradient signal needs. Known tradeoff stated explicitly:
+this may sacrifice some of the "lucky best step" upside the current
+repeated-random-restart-like behavior provides (e.g. the best result found
+so far, val_hr=0.2367 at step 120/500 for eta=0.00001, may be exactly this
+kind of luck). Separately, the user drew a broader methodological
+conclusion: given seed variance alone is comparable to any effect size
+under investigation, single-seed results at this dataset scale are not
+reliable - future reported numbers on this pipeline should average over
+multiple seeds, not rely on one run.
+
+**Implemented (commit `4292c69`):** `warm_start_inner: bool = False` on
+`GradientIsomapCF` (default preserves existing behavior exactly - only
+the NCF *weights* carry over between outer steps when enabled, the AdamW
+optimizer state is still reset each step, to isolate "same basin" from
+"same optimizer trajectory"). Threaded through `run_experiment.py` and
+`run_eta_outer_sweep.py`.
+
+**In progress:** `run_amazon_beauty_warmstart_ab_test.py` - control (fresh
+reinit, current default) vs `warm_start_inner=True`, identical otherwise
+(eta=0.03, outer_epochs=60, select_by=hr, patience=30, cap=200), run
+back-to-back for a fair comparison. ~2h total estimated. Not yet analyzed
+- compare std(val_hr) and mean step-to-step train_loss swing between arms
+once both finish.
+
+**Still open / not yet decided:**
+- Whether warm-starting actually reduces the noise as hypothesized, and by
+  how much - first direct empirical test, result pending.
+- Whether/how to add multi-seed repetition as standard practice for
+  reported numbers on this pipeline (raised by the user, not yet
+  implemented anywhere).
+- ML-1M/ML-10M still sit at the hrfix (2026-08-27) generation - decision on
+  resweeping deferred until the outer-loop investigation concludes.
+- Item-representation/parameter-count table still not added to main.tex.
+- Gromov delta section (4.1) and empty Conclusion - still deferred.
+
+---
+
 **2026-08-30, later: corrected a misread instruction - "больший шаг" meant a
 LARGER outer lr (eta=0.1, to shake the manifold harder), not more outer
 steps.** Had already launched `run_amazon_beauty_outer1000_eta1e5_test.py`
