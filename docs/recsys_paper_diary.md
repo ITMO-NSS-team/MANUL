@@ -8,6 +8,48 @@ Read that first for the why; this file tracks the where-are-we-now.
 ## CURRENT STATUS / NEXT STEP
 *(this block is overwritten each session — always current, read this first)*
 
+**2026-08-30, even later: the single-run warm-start A/B test was
+inconclusive (didn't reduce val_hr noise), correctly flagged by the user
+as itself vulnerable to the same seed-variance confound - now running a
+5-seeds-per-arm repeat, in parallel.**
+
+Single-run result (seed=0 only): control std(val_hr)=0.0328, warm_start
+std(val_hr)=0.0339 - essentially identical, no reduction; control's own
+val_hr trend (r²=0.114) was even stronger than warm-start's (r²=0.009).
+Only a partial signal: mean|step-to-step train_loss change| dropped ~22%
+(0.093→0.072) under warm-start, but that didn't show up in val_hr at all.
+Final test HR@10: control 0.1700, warm-start 0.1367 (warm-start worse).
+
+User's catch: a single run per arm can't be trusted given the just-proven
+seed variance (std=0.038 from seed alone on a fixed Z) - this A/B
+comparison needed its own repeats to mean anything, exactly the same
+methodological point she raised generally after the fixed-Z experiment
+(see [[project_gincf_outer_loop_noise_warmstart]] in the memory system).
+
+**Now running 5 repeats per arm** (seed=0 already have from the single-run
+test; launched seeds 1-4 for both control and warm_start_inner=True as 8
+separate OS processes in parallel - commit `bcd3601` added `seed` as a
+pass-through param to `run_eta_outer_sweep.py`, was hardcoded to 0 before).
+GPU has ample headroom for this model scale (300u/800i): 8 concurrent
+processes use ~3.2GB/16.3GB VRAM, 58% utilization, comfortable margin.
+Estimated ~1.5-2h wall clock for all 8 (vs ~9-11h sequential). Not yet
+analyzed - once done, compare mean/std of val_hr-noise and final HR@10
+across the 5 seeds per arm (proper statistical comparison, not point
+estimates).
+
+**Still open / not yet decided:**
+- Whether warm-starting reduces noise once judged over 5 real repeats per
+  arm, not 1 - result pending.
+- Whether/how to formalize multi-seed repetition as standard practice more
+  broadly on this pipeline (the user's point applies beyond this one A/B
+  test).
+- ML-1M/ML-10M still sit at the hrfix (2026-08-27) generation - decision on
+  resweeping deferred until the outer-loop investigation concludes.
+- Item-representation/parameter-count table still not added to main.tex.
+- Gromov delta section (4.1) and empty Conclusion - still deferred.
+
+---
+
 **2026-08-30, latest: root-caused the outer-loop noise (not lr, not step
 count - NCF training seed variance / basin-hopping), implemented a
 togglable `warm_start_inner` fix, A/B test in progress.** User pushed on
