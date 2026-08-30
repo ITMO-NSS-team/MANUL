@@ -8,6 +8,66 @@ Read that first for the why; this file tracks the where-are-we-now.
 ## CURRENT STATUS / NEXT STEP
 *(this block is overwritten each session — always current, read this first)*
 
+**2026-08-30, final for the day: warm-start investigation CLOSED OUT -
+properly powered 5-seed-per-arm test found no statistically significant
+effect.** Ran control (fresh reinit) vs `warm_start_inner=True` at 5 seeds
+each (0-4; seed=0 reused from the earlier single-run test, seeds 1-4 run as
+8 parallel OS processes - GPU had ample headroom for this model scale,
+~3.2GB/16.3GB VRAM, 58% util, completed in well under the ~9-11h a
+sequential run would have taken):
+
+| metric | control (n=5) | warm_start (n=5) | t-test p |
+|---|---|---|---|
+| test HR@10 | 0.170 ± 0.018 | 0.150 ± 0.021 | 0.19 (ns) |
+| within-run val_hr std | 0.0352 ± 0.0025 | 0.0333 ± 0.0032 | 0.37 (ns) |
+| mean\|Δstep\| train_loss | 0.0921 | 0.0689 | not tested, but consistent across all 5 seeds |
+
+Neither the downstream noise metric nor the final result showed a
+significant difference - if anything control looked slightly (non-
+significantly) better on HR@10. Only the outer TRAIN loss's own step-to-
+step volatility was consistently lower under warm-start (~25%), but this
+never propagated to val_hr or the final metric. **Decision (agreed with
+the user, recorded to memory
+`project_gincf_outer_loop_noise_warmstart`):** close out warm-starting as
+"tested properly, no measurable benefit" - do not adopt it. The underlying
+diagnosis (seed variance/basin-hopping explains most of the outer-loop
+noise, confirmed via the fixed-Z 5-seed experiment) remains a real and
+well-evidenced finding for the paper; warm-starting the inner NCF just
+isn't an effective practical fix for it. Plot:
+`warmstart_5seed_final_comparison.png` in process_docs.
+
+**This closes a ~2-day investigative arc** (outer-lr sweep -> DataLoader/
+cudnn determinism fix -> geometry-vs-downstream correlation analysis ->
+fixed-Z seed-variance experiment -> warm-start A/B, single-run then
+5-seed) into why the outer bilevel loop's trajectory looks noisy. Net
+takeaways to carry into the paper: (1) the manifold's own geometric
+diagnostics DO move with a strong, real, statistically significant trend
+under gradient descent (r² up to 0.94) - the optimizer is not aimless;
+(2) downstream ranking quality (val_hr) is statistically decoupled from
+that geometric trend at this dataset scale, most likely because NCF
+training is highly multimodal here (seed-only std=0.038 in test HR@10 on
+a completely fixed manifold) and the inner critic is freshly resampled
+every outer step; (3) warm-starting does not fix this in practice; (4) any
+single-seed result at this dataset scale (300u/800i) should be treated
+with real skepticism - multi-seed repetition is now demonstrated necessary,
+not just theoretically prudent.
+
+**Still open / not yet decided:**
+- Whether/how to write this whole investigation up for the paper (as a
+  methodology/limitations point - "downstream ranking quality is decoupled
+  from the geometric optimization objective at small dataset scale" is a
+  substantive, honest finding, not just a null result to hide).
+- Whether to formalize multi-seed repetition (e.g. 5 seeds, report mean±std)
+  as standard practice for ALL reported numbers on this pipeline going
+  forward - raised by the user, not yet decided/implemented broadly.
+- ML-1M/ML-10M still sit at the hrfix (2026-08-27) generation - decision on
+  resweeping deferred, now also entangled with the multi-seed-repetition
+  question above.
+- Item-representation/parameter-count table still not added to main.tex.
+- Gromov delta section (4.1) and empty Conclusion - still deferred.
+
+---
+
 **2026-08-30, even later: the single-run warm-start A/B test was
 inconclusive (didn't reduce val_hr noise), correctly flagged by the user
 as itself vulnerable to the same seed-variance confound - now running a
