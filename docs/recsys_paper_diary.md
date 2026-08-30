@@ -8,6 +8,23 @@ Read that first for the why; this file tracks the where-are-we-now.
 ## CURRENT STATUS / NEXT STEP
 *(this block is overwritten each session — always current, read this first)*
 
+**2026-08-30, later: corrected a misread instruction - "больший шаг" meant a
+LARGER outer lr (eta=0.1, to shake the manifold harder), not more outer
+steps.** Had already launched `run_amazon_beauty_outer1000_eta1e5_test.py`
+(eta=0.00001, 1000 steps) on the wrong reading; stopped it immediately once
+corrected (task had not logged its first outer step yet, so ~0 wasted
+compute). Relaunched as `run_amazon_beauty_outer200_eta01_test.py`:
+eta_outer=0.1 (the largest tried in any of the longer-horizon confirmation
+tests so far - 0.1 was in the original 4-point sweep but only ever at 30
+outer steps), outer_epochs=200 for direct comparability with the eta=0.03
+and eta=0.0001 confirmation tests. Rationale: even eta=0.03's fairly large
+geometry swings (ORC −0.31→−0.99) showed zero step-by-step correlation with
+val_hr; testing whether an even stronger perturbation changes that picture,
+either by surfacing a real correlation or more decisively confirming the
+geometry/downstream decoupling found so far. In progress, not yet analyzed.
+
+---
+
 **2026-08-30: the outer=500/eta=1e-5 confirmation test finished (best
 result so far, HR@10=0.2233), which reframed the whole outer-loop-noise
 investigation - the manifold itself DOES move with a strong, real trend;
