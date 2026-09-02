@@ -5,6 +5,7 @@ from torch.utils.data import TensorDataset, DataLoader
 
 import os
 import sys
+
 import time
 import json
 from datetime import datetime
@@ -16,7 +17,7 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(os.path.dirname(current_dir))
 sys.path.append(project_root)
 
-from MANUL.Adam.Isomap import IsomapNN
+from Adam.Isomap import IsomapNN
 from NeuMFOnManifold import NeuMFOnManifold
 from evaluation import evaluate_topk_isomap
 
@@ -597,7 +598,7 @@ class GradientIsomapCF:
 
         final_optim = optim.AdamW(final_ncf.parameters(), lr=self.lr_ncf)
 
-        patience_final = 3
+        patience_final = 5
         best_val_loss_final = np.inf
         best_state_final = None
         no_improve_final = 0

@@ -65,7 +65,7 @@ class NCFTestDataset(Dataset):
             negs = 0
             while negs < self.num_ng:
                 j = int(self.rng.integers(self.num_items))
-                if j in self.user_pos_set[u]:
+                if j in self.user_pos_set[u] or j == target_m:
                     continue
 
                 self.users.append(u)

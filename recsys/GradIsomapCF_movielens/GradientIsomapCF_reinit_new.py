@@ -89,6 +89,15 @@ class GradientIsomapCF:
             'val_loss': []
         }
 
+        self.dist_history = {
+            'epoch': [],
+            'fro_norm': [],  # ||D||_F
+            'delta_prev': [],  # относительное изменение к предыдущей матрице
+            'delta_init': []  # относительное изменение к начальной матрице
+        }
+        self._D_init = None
+        self._D_prev = None
+
         self.interactions = self._build_implicit_interactions()
         self._build_dataloader_and_full_tensors()
 
@@ -194,6 +203,7 @@ class GradientIsomapCF:
             ).to(self.device)
             ncf_optim = optim.AdamW(ncf_model.parameters(), lr=self.lr_ncf)
 
+            """
             ncf_model.train()
             cf_train_losses = []
             cf_val_losses = []
@@ -256,7 +266,7 @@ class GradientIsomapCF:
             best_inner_val_loss = float('inf')
             no_improve_inner = 0
 
-            diff_threshold = 0.01  # насколько близко должны быть train и val лоссы
+            diff_threshold = 0.005  # насколько близко должны быть train и val лоссы
             patience_inner = 5  # сколько inner-эпох подряд вал-лосс не должен улучшаться
 
             for cf_ep in range(self.cf_epochs):
@@ -325,7 +335,6 @@ class GradientIsomapCF:
 
             self.cf_history['train_loss'].append(cf_train_losses)
             self.cf_history['val_loss'].append(cf_val_losses)
-            """
 
             ncf_model.eval()
             for p in ncf_model.parameters():
@@ -342,6 +351,33 @@ class GradientIsomapCF:
 
             loss_iso_train.backward()
             isomap_optim.step()
+
+            with torch.no_grad():
+                D = isomap_model.distances_matrix.detach().cpu()
+
+                fro = torch.norm(D).item()
+
+                if self._D_init is None:
+                    # на первой outer-эпохе задаём "нулевую точку"
+                    self._D_init = D.clone()
+                    delta_prev = 0.0
+                    delta_init = 0.0
+                else:
+                    diff_prev = torch.norm(D - self._D_prev)
+                    diff_init = torch.norm(D - self._D_init)
+                    delta_prev = (diff_prev / torch.norm(self._D_prev)).item()
+                    delta_init = (diff_init / torch.norm(self._D_init)).item()
+
+                self._D_prev = D.clone()
+
+                self.dist_history['epoch'].append(epoch)
+                self.dist_history['fro_norm'].append(fro)
+                self.dist_history['delta_prev'].append(delta_prev)
+                self.dist_history['delta_init'].append(delta_init)
+
+                print(f"[Isomap ΔD] outer={epoch+1}: "
+                      f"||D||_F={fro:.4f}, "
+                      f"Δprev={delta_prev:.4e}, Δinit={delta_init:.4e}")
 
             avg_train_loss = float(loss_iso_train.item())
             elapsed = time.time() - epoch_start

@@ -238,6 +238,29 @@ def plot_cf_inner_losses(cf_history,
     print(f"График inner-лоссов NeuMF сохранён в {out_path}")
 
 
+def plot_pure_ncf_metrics(history, save_dir, run_name="pure_ncf_run621"):
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
+
+    ax1.plot(history['epoch'], history['hr_val'], label='HR@10', color='blue', marker='o')
+    ax1.set_xlabel('Epoch')
+    ax1.set_ylabel('HR@10')
+    ax1.set_title('Hit Ratio (HR)')
+    ax1.grid(True)
+    ax1.legend()
+
+    ax2.plot(history['epoch'], history['ndcg_val'], label='NDCG@10', color='green', marker='s')
+    ax2.set_xlabel('Epoch')
+    ax2.set_ylabel('NDCG@10')
+    ax2.set_title('NDCG')
+    ax2.grid(True)
+    ax2.legend()
+
+    plt.tight_layout()
+    os.makedirs(save_dir, exist_ok=True)
+    plt.savefig(os.path.join(save_dir, f'{run_name}_metrics.png'), dpi=150)
+    plt.close()
+
+
 def plot_gi_losses(history, cf_history, images_dir, run_name="run"):
 
     os.makedirs(images_dir, exist_ok=True)
