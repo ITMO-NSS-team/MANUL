@@ -8,6 +8,74 @@ Read that first for the why; this file tracks the where-are-we-now.
 ## CURRENT STATUS / NEXT STEP
 *(this block is overwritten each session — always current, read this first)*
 
+**2026-08-30, git history cleanup + new direction: too many degrees of
+freedom in the NCF critic, regularization (dropout) looks like a real
+fix.** Side track: user pushed the branch, asked to strip
+`Co-Authored-By: Claude` trailers from 47 unpushed commits (done via
+`git filter-branch --msg-filter`, verified tree/diff identical, author
+already correctly `chrislisbon` throughout - 9 separate commits by a real
+collaborator "Diana" left untouched) and then to also strip 124.3MB of
+large old-run artifacts (`run48/images/D_epochs/*.npy`, `ratings.dat`,
+heatmap/collage PNGs) from the same 68→69 unpushed commits via
+`git filter-branch --index-filter` + `git rm --cached`. **Caught and fixed
+my own mistake here:** filter-branch's final sync actually deletes matched
+files from the working directory too (not just untracks them, contrary to
+what I'd told her) - `ratings.dat` (the real, needed MovieLens-1M dataset)
+was gone from disk; restored it immediately from the filter-branch backup
+ref (`refs/original/...`, still present). The other 63 old-run artifacts
+were left un-restored (not needed, recoverable from the same backup ref if
+ever wanted). Added `.gitignore` entries for both so they don't get
+re-committed. Push is now ~10.5MB (was ~135MB).
+
+**Back to the actual research question:** user's framing - "NCF converges
+to a local optimum on ANY topology, meaning the algorithm has too many
+degrees of freedom relative to the data - how do we treat that?" Checked
+the already-collected fixed-Z 5-seed data more closely instead of
+guessing: `best_val_loss` (continuous, not HR@10's coarse top-10 binning)
+varies 0.331-0.438 across seeds on an IDENTICAL manifold - ~29% relative
+spread, confirming genuinely different-quality local optima, not just
+measurement noise on equivalent solutions. Separately noticed
+`val_hr_training` (best HR@10 seen during training) only varies 13% while
+final `test_hr` varies 68% - early stopping is itself overfitting to the
+300-user val set's own sampling noise, a second, distinct noise source.
+
+**User explicitly ruled out ensembling/checkpoint-averaging as fixes** -
+her reasoning: the goal here is verifying the METHOD works, not producing
+clean-looking metrics by construction-averaging away the very noise being
+investigated. Agreed plan: (1) cheap - try regularization (dropout was
+hardcoded to 0.0 everywhere, weight_decay left at AdamW's unexamined
+default 0.01) on the fixed-Z diagnostic first; (2) expensive - more data
+(larger user/item subsample) if (1) isn't sufficient.
+
+**Step (1) result - clean, strong win.** Same fixed-Z 5-seed test,
+`dropout=0.2` (weight_decay left at 0.01): val_loss relative spread
+0.288 -> **0.037** (8x tighter), test_hr std 0.038 -> **0.020** (near
+half), and mean test_hr even rose slightly (0.150 -> 0.172). Also tested
+`weight_decay=0.10` alone (spread 0.114, worse than dropout) and
+`dropout=0.2 + weight_decay=0.10` together (spread 0.091, worse than
+dropout alone) - dropout is doing essentially all the work, more
+regularization is not simply better. `dropout` was hardcoded to `0.0` at
+both `run_experiment.py` call sites (never exposed) - now a proper
+parameter, threaded through `run_eta_outer_sweep.py` too (commit
+`20ae812`).
+
+**In progress:** validating this in the REAL outer bilevel loop, not just
+the isolated fixed-Z diagnostic - `run_amazon_beauty_dropout_test_seed.py`,
+eta=0.03/outer_epochs=60/dropout=0.2, 5 seeds run in parallel. Directly
+comparable to the warm-start A/B test's control arm (identical config,
+dropout=0.0): baseline test_hr=0.170±0.018, within-run val_hr
+std=0.0352±0.0025. Not yet analyzed.
+
+**Still open / not yet decided:**
+- Whether dropout=0.2's fixed-Z benefit holds up once the manifold is also
+  being optimized (outer loop result pending).
+- Step (2), more data, still queued behind step (1)'s validation.
+- ML-1M/ML-10M still sit at the hrfix (2026-08-27) generation.
+- Item-representation/parameter-count table still not added to main.tex.
+- Gromov delta section (4.1) and empty Conclusion - still deferred.
+
+---
+
 **2026-08-30, final for the day: warm-start investigation CLOSED OUT -
 properly powered 5-seed-per-arm test found no statistically significant
 effect.** Ran control (fresh reinit) vs `warm_start_inner=True` at 5 seeds
