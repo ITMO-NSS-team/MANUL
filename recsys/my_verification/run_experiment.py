@@ -112,6 +112,7 @@ def main(
     final_patience=3,
     inner_patience=5,
     warm_start_inner=False,
+    dropout=0.0,
 ):
     torch.manual_seed(seed)
     np.random.seed(seed)
@@ -314,7 +315,7 @@ def main(
             lr_ncf=1e-3,
             factor_num=16,
             num_layers=3,
-            dropout=0.0,
+            dropout=dropout,
             model_type="NeuMF-end",
             logs_folder=logs_folder,
             device=str(device),
