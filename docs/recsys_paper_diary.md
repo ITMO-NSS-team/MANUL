@@ -8,6 +8,82 @@ Read that first for the why; this file tracks the where-are-we-now.
 ## CURRENT STATUS / NEXT STEP
 *(this block is overwritten each session — always current, read this first)*
 
+**2026-09-09, later: root-caused WHY "any topology works" - no channel for
+pairwise-distance information exists anywhere in NCF's training objective
+- and built a fix (frozen item projection) to test tomorrow.**
+
+After the scaled (6000u/2500i) run also showed no outer-loop convergence
+trend, user reframed the question: "NCF converges to a decent optimum on
+literally any topology - that's a strange conclusion, there shouldn't be
+this many degrees of freedom." Investigated via code inspection (not
+speculation):
+
+- Exhaustively grepped every `loss_fn(`/`bce_loss`/`loss_cf` call across
+  `GradientIsomapCF_log.py` and `ablation_geometry_vs_optimization.py`:
+  every one is a plain BCE loss on individual (user, item) interaction
+  labels. No regularization term, no distance-preserving penalty, no
+  graph-Laplacian smoothness anywhere - confirmed exhaustively, not by
+  sampling.
+- The ONLY channel for Z's geometric information to reach NCF is the raw
+  per-item lookup `z_i = item_Z[item]` in `NeuMFOnManifold.forward()`,
+  which immediately passes through freely-retrained linear layers
+  (`item_GMF_linear`, `item_MLP_linear` - xavier-init, retrained from
+  scratch every time a new NeuMFOnManifold is created) before reaching
+  user-side free embeddings and a fully-trainable MLP tower. Nothing in
+  the objective requires the network to preserve or exploit Z's actual
+  metric structure - it's free to fit any per-item assignment that helps
+  the BCE loss, using Z's raw values only as an arbitrary (if
+  information-carrying) per-item code.
+- Traced why `latent_dim=64`: confirmed by the user it was DELIBERATELY
+  set equal to `mlp_user_dim = factor_num*(2**(num_layers-1)) = 16*4 = 64`
+  for a fair "our embedding vs. baseline's embedding" comparison - not an
+  oversight, so the earlier "wasted dimensions" theory doesn't apply.
+  Checked whether the existing intrinsic-dimension-estimation tooling
+  (`utils/intrinsic_dim_estimators.py`, Levina-Bickel MLE) was ever
+  applied to the recsys data - it wasn't (only synthetic geometries/MNIST),
+  but this is now a moot point given the dimension choice was intentional.
+
+**User ruled out random-frozen projection** ("может плохо сжимать") -
+implemented instead: `freeze_item_projection=True` on `NeuMFOnManifold`
+(commit `5b6346f`) - MLP branch uses `z_i` unchanged (identity map, exact
+since latent_dim==mlp_user_dim by design, no information lost), GMF branch
+uses a FIXED PCA projection of the actual item_Z data (not random) down to
+factor_num dims via SVD. Only user-side embeddings and the downstream MLP
+tower/predict layer stay trainable. Sanity-checked on CPU (no GPU load,
+resources busy with other work) - identity/frozen weights correct,
+gradients flow only to trainable params.
+
+**Test prepared (`recsys/my_verification/test_frozen_projection_geometry.py`,
+commit `3eaa649`):** real Z vs shuffled-rows Z (same vectors, wrong item
+assignment) vs fresh-random Z, 5/5/3 seeds, freeze_item_projection=True +
+dropout=0.2. If real clearly beats shuffled/random now, that confirms
+freezing the projection forces genuine dependence on geometry (the escape
+hatch is closed). If real still doesn't win, the escape hatch is
+downstream (MLP tower / GMF's free user-side multiplication) and would
+need a further architectural fix there too.
+
+**Scheduled, not yet run:** one-shot cron job (id `6be345d5`, fires
+~12:03 local on 2026-09-10) will check `nvidia-smi` is actually free, then
+launch the test and report back - GPU is busy with other work until then
+per the user. Session-only cron (not persisted to disk) - if the session
+ends before then, needs manual re-launch.
+
+**Still open / not yet decided:**
+- The decisive result: does freezing the item projection make the model
+  actually sensitive to whether Z's geometric assignment is correct?
+  Result pending tomorrow.
+- If frozen-projection doesn't fix it either, next suspect is the
+  downstream MLP tower / GMF free user-multiplication - would need a
+  further, more invasive architectural constraint.
+- Step 2 (more data, 6000u/2500i single run) result still stands
+  (HR@10=0.2827) but multi-seed variance at that scale is still unmeasured.
+- ML-1M/ML-10M still sit at the pre-dropout, pre-frozen-projection
+  generation - far behind the current investigation.
+- Item-representation/parameter-count table still not added to main.tex.
+- Gromov delta section (4.1) and empty Conclusion - still deferred.
+
+---
+
 **2026-09-09: dropout=0.2 validated in the real outer loop (step 1
 complete), now running step 2 (more data) at an empirically-probed
 6000u/2500i scale, ~7.7h estimated.**
