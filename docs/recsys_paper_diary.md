@@ -8,6 +8,73 @@ Read that first for the why; this file tracks the where-are-we-now.
 ## CURRENT STATUS / NEXT STEP
 *(this block is overwritten each session — always current, read this first)*
 
+**2026-09-09: dropout=0.2 validated in the real outer loop (step 1
+complete), now running step 2 (more data) at an empirically-probed
+6000u/2500i scale, ~7.7h estimated.**
+
+**Step 1 validation result (real outer loop, not just fixed-Z):**
+eta=0.03/outer_epochs=60, 5 seeds each. dropout=0.0 (control, from the
+warm-start A/B test): test_hr=0.170±0.018. dropout=0.2: test_hr=0.181±0.009
+- cross-seed std more than halved (matches/exceeds the fixed-Z diagnostic's
+prediction), mean also higher. Within-run outer-trajectory noise (val_hr
+std across the 60 steps of a single run) was NOT reduced by dropout
+(0.035 vs 0.038, ns) - dropout fixes cross-seed reproducibility of the
+final result, not the outer loop's own step-to-step noise. Plot:
+`dropout_outerloop_validation.png` in process_docs. dropout=0.2 adopted as
+the new default going forward (`dropout` param, previously hardcoded to
+0.0 in `run_experiment.py`, now threaded through both call sites and
+`run_eta_outer_sweep.py`, commit `20ae812`).
+
+**Step 2: does relaxing data sparsity further reduce the residual
+variance (std=0.009, still not zero)?** User's framing: ensembling/
+checkpoint-averaging were explicitly ruled out as fixes (masks the noise
+being investigated rather than fixing the method) - "estimate what fits
+in memory and computes in 6-8h, launch on that" for a bigger-data test.
+
+**Empirically probed scale/timing/stability (not guessed) before
+committing the full budget:**
+
+| users | items | s/step | had_bad_grad |
+|---|---|---|---|
+| 300 | 800 | ~120 (baseline, under GPU contention) | - |
+| 1000 | 1200 | ~137 | - |
+| 3000 | 2500 | ~330 | False (clean) |
+| 5000 | 4000 | ~459 | **True - EVERY step**, 35843 non-finite grad entries zeroed each time |
+| 6000 | 2500 | ~455 | False (clean) |
+
+5000u/4000i's gradient-guard triggering on both probed steps (identical
+count both times) indicates a structural eigenvalue-degeneracy issue at
+that item count (the known `eigh` backward instability, see
+`docs/gradient_isomap_mnist_regression_report.md`/earlier diary entries),
+not a rare blip - decided NOT to build the 6-8h budget on an unstable
+config, since a noisy/degraded result there would be uninterpretable
+(genuine multimodality vs. gradient corruption). 6000u/2500i gives
+comparable computational cost (~455s/step) WITHOUT the instability, since
+items (not users) drive the eigenvalue-degeneracy risk - and users are
+the more directly relevant axis for testing NCF's own underdetermination
+anyway.
+
+**Launched:** `run_amazon_beauty_scaled_dropout_test.py` - 6000u/2500i
+(20x/3.1x the original 300u/800i), outer_epochs=60 (same as all prior A/B
+tests here, for direct comparability), dropout=0.2, eta=0.03, select_by=hr,
+patience=30, cap=200. Estimated ~7.7h (60×455s + ~450s overhead). First
+step confirmed healthy. Not yet analyzed.
+
+**Still open / not yet decided:**
+- Whether more data (step 2) further tightens the residual cross-seed
+  variance, or whether dropout alone already captured most of the
+  achievable improvement - result pending.
+- Whether to also multi-seed-repeat the scaled config once this single run
+  finishes (expensive at this scale - would need to weigh against just
+  accepting single-run evidence here given the cost).
+- ML-1M/ML-10M still sit at the hrfix (2026-08-27) generation, and now
+  also the dropout=0.0 pre-fix generation - decision on resweeping with
+  dropout=0.2 deferred.
+- Item-representation/parameter-count table still not added to main.tex.
+- Gromov delta section (4.1) and empty Conclusion - still deferred.
+
+---
+
 **2026-08-30, git history cleanup + new direction: too many degrees of
 freedom in the NCF critic, regularization (dropout) looks like a real
 fix.** Side track: user pushed the branch, asked to strip
