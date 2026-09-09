@@ -141,7 +141,8 @@ def build_data(max_users, max_movies, min_seq_len, num_ng, dataset_dir_name, dev
 def train_and_eval_ncf_on_fixed_Z(item_Z, data, device, latent_dim, factor_num=16, num_layers=3,
                                   lr=1e-3, epochs=30, patience=3, seed=0, verbose=False,
                                   return_history=False, select_by="loss",
-                                  dropout=0.0, weight_decay=0.01):
+                                  dropout=0.0, weight_decay=0.01,
+                                  freeze_item_projection=False):
     """Faithfully mirrors GradientIsomapCF.train()'s "final NCF" block
     (GradientIsomapCF_log.py), with the checkpoint bug fixed (deepcopy).
 
@@ -162,8 +163,11 @@ def train_and_eval_ncf_on_fixed_Z(item_Z, data, device, latent_dim, factor_num=1
     ncf = NeuMFOnManifold(
         user_num=data["num_users"], latent_dim=latent_dim, factor_num=factor_num,
         num_layers=num_layers, dropout=dropout, model_type="NeuMF-end",
+        freeze_item_projection=freeze_item_projection,
+        item_projection_init_data=item_Z if freeze_item_projection else None,
     ).to(device)
-    optimizer = optim.AdamW(ncf.parameters(), lr=lr, weight_decay=weight_decay)
+    trainable_params = [p for p in ncf.parameters() if p.requires_grad]
+    optimizer = optim.AdamW(trainable_params, lr=lr, weight_decay=weight_decay)
     loss_fn = nn.BCEWithLogitsLoss()
 
     best_val_loss = float("inf")

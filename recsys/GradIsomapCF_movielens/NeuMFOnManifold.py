@@ -9,13 +9,16 @@ class NeuMFOnManifold(nn.Module):
                  factor_num: int = 16,
                  num_layers: int = 3,
                  dropout: float = 0.0,
-                 model_type: str = 'NeuMF-end'):
+                 model_type: str = 'NeuMF-end',
+                 freeze_item_projection: bool = False,
+                 item_projection_init_data: "torch.Tensor | None" = None):
         super().__init__()
         assert model_type in ['MLP', 'GMF', 'NeuMF-end']
         self.model_type = model_type
         self.factor_num = factor_num
         self.num_layers = num_layers
         self.dropout = dropout
+        self.freeze_item_projection = freeze_item_projection
 
         self.embed_user_GMF = nn.Embedding(user_num, factor_num)
         mlp_user_dim = factor_num * (2 ** (num_layers - 1))
@@ -38,15 +41,57 @@ class NeuMFOnManifold(nn.Module):
             predict_size = factor_num * 2
         self.predict_layer = nn.Linear(predict_size, 1)
 
-        self._init_weights()
+        self._init_weights(latent_dim, mlp_user_dim, item_projection_init_data)
 
-    def _init_weights(self):
+    def _init_weights(self, latent_dim, mlp_user_dim, item_projection_init_data):
         nn.init.normal_(self.embed_user_GMF.weight, std=0.01)
         nn.init.normal_(self.embed_user_MLP.weight, std=0.01)
-        nn.init.xavier_uniform_(self.item_GMF_linear.weight)
-        nn.init.zeros_(self.item_GMF_linear.bias)
-        nn.init.xavier_uniform_(self.item_MLP_linear.weight)
-        nn.init.zeros_(self.item_MLP_linear.bias)
+
+        if self.freeze_item_projection:
+            # No learned re-interpretation of the manifold coordinates: the
+            # MLP branch takes z_i unchanged (identity - latent_dim is
+            # deliberately set equal to mlp_user_dim for exactly this, so no
+            # information is discarded), and the GMF branch takes a FIXED
+            # (not random - a random frozen compression can be arbitrarily
+            # poorly conditioned) PCA projection of the actual item_Z data
+            # down to factor_num dims. Only the user-side embeddings and the
+            # downstream MLP tower/predict layer remain trainable. See
+            # docs/recsys_paper_diary.md, 2026-09-09.
+            assert latent_dim == mlp_user_dim, (
+                f"freeze_item_projection assumes latent_dim ({latent_dim}) == "
+                f"mlp_user_dim ({mlp_user_dim}) so the MLP branch can use an "
+                f"identity (information-preserving) map."
+            )
+            with torch.no_grad():
+                self.item_MLP_linear.weight.copy_(torch.eye(mlp_user_dim))
+                self.item_MLP_linear.bias.zero_()
+
+            if item_projection_init_data is None:
+                raise ValueError(
+                    "freeze_item_projection=True requires item_projection_init_data "
+                    "(the item_Z matrix) to fit a fixed, well-conditioned GMF "
+                    "projection - a random frozen projection can compress poorly."
+                )
+            with torch.no_grad():
+                z = item_projection_init_data.detach().to(torch.float32)
+                z_centered = z - z.mean(dim=0, keepdim=True)
+                # Top-`factor_num` principal directions via SVD - a fixed,
+                # data-informed (not random) dimensionality reduction.
+                _, _, Vt = torch.linalg.svd(z_centered, full_matrices=False)
+                projection = Vt[:self.factor_num]  # (factor_num, latent_dim)
+                self.item_GMF_linear.weight.copy_(projection)
+                self.item_GMF_linear.bias.zero_()
+
+            self.item_MLP_linear.weight.requires_grad_(False)
+            self.item_MLP_linear.bias.requires_grad_(False)
+            self.item_GMF_linear.weight.requires_grad_(False)
+            self.item_GMF_linear.bias.requires_grad_(False)
+        else:
+            nn.init.xavier_uniform_(self.item_GMF_linear.weight)
+            nn.init.zeros_(self.item_GMF_linear.bias)
+            nn.init.xavier_uniform_(self.item_MLP_linear.weight)
+            nn.init.zeros_(self.item_MLP_linear.bias)
+
         for m in self.MLP_layers:
             if isinstance(m, nn.Linear):
                 nn.init.xavier_uniform_(m.weight)
