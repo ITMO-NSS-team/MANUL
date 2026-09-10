@@ -62,11 +62,12 @@ hatch is closed). If real still doesn't win, the escape hatch is
 downstream (MLP tower / GMF's free user-side multiplication) and would
 need a further architectural fix there too.
 
-**Scheduled, not yet run:** one-shot cron job (id `6be345d5`, fires
-~12:03 local on 2026-09-10) will check `nvidia-smi` is actually free, then
-launch the test and report back - GPU is busy with other work until then
-per the user. Session-only cron (not persisted to disk) - if the session
-ends before then, needs manual re-launch.
+**Scheduled, not yet run:** rescheduled from tomorrow noon to TODAY
+~16:03 (cron job id `b3bcd5ff`, replaces the cancelled `6be345d5`) - user
+said the machine reboots tonight, so waiting until tomorrow wouldn't
+survive that anyway. Will check `nvidia-smi` is actually free, then launch
+the test and report back. Session-only cron (not persisted to disk) - if
+the session ends before it fires, needs manual re-launch.
 
 **Still open / not yet decided:**
 - The decisive result: does freezing the item projection make the model
