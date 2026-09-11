@@ -8,6 +8,73 @@ Read that first for the why; this file tracks the where-are-we-now.
 ## CURRENT STATUS / NEXT STEP
 *(this block is overwritten each session — always current, read this first)*
 
+**2026-09-11, later: frozen-projection outer-loop test (eta=0.03/60 steps)
+did NOT show a clearer convergence trend than unfrozen - user asked to
+re-verify this wasn't a bug, then to retry with a smaller outer lr.**
+
+**Result:** val_hr trend r²=0.034, p=0.158 (not significant), std=0.041 -
+comparable to or weaker than the unfrozen dropout=0.2 control at the same
+horizon (r²=0.114, p=0.008, significant). Plot:
+`frozenproj_vs_unfrozen_outer_trend.png`. So `freeze_item_projection`
+fixed the FIXED-Z diagnostic (geometry causally matters when Z is held
+still) but did not, on this one run, make the OUTER loop's own trajectory
+more directional - the outer loop still recreates a fully fresh NCF (user
+embeddings + MLP tower still free and reinitialized) every step, so the
+basin-hopping noise source identified earlier isn't touched by this fix.
+
+**User's sharp catch:** the control run's p=0.008 "significant downward
+trend" looked suspiciously clean given nothing like it had shown up
+before - asked to re-check the implementation for a bug rather than
+assume it was real. Compiled every outer-loop trend measured across this
+whole investigation (8 runs) side by side:
+
+| config | r² | p | direction | had_bad_grad |
+|---|---|---|---|---|
+| eta=0.00001, 500 steps | 0.001 | 0.48 | down | False |
+| eta=0.03, 200 steps | 0.039 | **0.005** | down | False |
+| eta=0.1, 200 steps | 0.002 | 0.51 | down | False |
+| eta=0.0001, 200 steps | 0.026 | **0.024** | **up** | False |
+| 6000u/2500i, 60 steps | 0.006 | 0.54 | down | False |
+| unfrozen dropout=0.2, 60 steps (control) | 0.114 | **0.008** | down | False |
+| warm_start, 60 steps | 0.009 | 0.46 | up | False |
+| frozen+dropout, 60 steps | 0.034 | 0.16 | up | False |
+
+3/8 "significant" but with INCONSISTENT sign (2 down, 1 up) - exactly the
+pattern expected from noise under repeated significance testing across
+~8 runs, not a real systematic effect (a real bug or genuine trend would
+push the sign the same way most of the time). Verified epoch numbering is
+sequential (no off-by-one), zero gradient-guard triggers anywhere (no
+numerical corruption). Conclusion: not a bug, just one noisy draw that
+happened to land at p<0.05 - same lesson as the whole warm-start A/B
+saga, single runs aren't reliable evidence here.
+
+**In progress:** user's next hypothesis - smaller outer lr under
+`freeze_item_projection=True` should perturb the manifold less per step,
+so the now-geometry-sensitive critic's gradient direction should show up
+more clearly (even if slower), unlike the earlier exhaustive small-eta
+sweep under the UNFROZEN architecture (down to eta=0.00001/500 steps,
+never significant, r²=0.001). Launched
+`run_amazon_beauty_frozenproj_smalleta_test.py`: eta=0.001 (10x smaller
+than the eta=0.03 test above), outer_epochs=200 (matches the horizon used
+for the eta=0.1/eta=0.0001 unfrozen probes in the table, for direct
+comparability), same dropout=0.2/select_by=hr/patience=30/cap=200. First
+step confirmed healthy (82.7s). Estimated ~5.5-6h. Not yet analyzed.
+
+**Still open / not yet decided:**
+- Does eta=0.001 reveal a trend under frozen_item_projection where
+  eta=0.03 didn't? Result pending.
+- If still no trend at any eta: the basin-hopping noise (free user-side
+  embeddings + MLP tower reinitializing every step) is confirmed as the
+  dominant, still-unaddressed noise source - would need an even more
+  invasive fix (e.g. constrain/warm-start those too) to test further, or
+  accept this as a documented limitation of the bilevel search itself.
+- ML-1M/ML-10M still sit at the pre-dropout, pre-frozen-projection
+  generation - resweep decision deferred.
+- Item-representation/parameter-count table still not added to main.tex.
+- Gromov delta section (4.1) and empty Conclusion - still deferred.
+
+---
+
 **2026-09-11: frozen-projection hypothesis CONFIRMED on the fixed-Z
 diagnostic (real Z significantly beats shuffled Z), now wired into the
 production pipeline and testing whether the outer loop finally converges.**
