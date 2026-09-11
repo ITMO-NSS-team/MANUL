@@ -271,7 +271,8 @@ class GradientIsomapCF:
                  select_by: str = "loss",
                  final_patience: int = 3,
                  inner_patience: int = 5,
-                 warm_start_inner: bool = False):
+                 warm_start_inner: bool = False,
+                 freeze_item_projection: bool = False):
 
         self.features = train_feature
         self.train_events = np.array(train_events, dtype=np.int64)
@@ -320,6 +321,20 @@ class GradientIsomapCF:
         # evolves - warm-starting is a direct test of that hypothesis.
         self.warm_start_inner = warm_start_inner
         self._warm_ncf_model = None
+        # freeze_item_projection=True: NeuMFOnManifold's item-side layers
+        # (item_GMF_linear/item_MLP_linear) no longer freely relearn a
+        # reinterpretation of item_Z at every outer step - the MLP branch
+        # uses z_i unchanged (identity, latent_len==mlp_user_dim by design),
+        # the GMF branch uses a fixed PCA projection of the CURRENT item_Z
+        # (recomputed fresh each outer step, tracking the evolving
+        # manifold). Only user-side embeddings and the downstream MLP
+        # tower/predict layer stay trainable. Closes the "escape hatch"
+        # that let the inner loop reach similar quality regardless of the
+        # manifold's actual geometry - confirmed via a real/shuffled/
+        # random-Z controlled test, real Z significantly beat shuffled Z
+        # (p=0.0005) only once this option was enabled. See
+        # docs/recsys_paper_diary.md, 2026-09-09/2026-09-11.
+        self.freeze_item_projection = freeze_item_projection
 
         if device is None:
             device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -508,13 +523,16 @@ class GradientIsomapCF:
                     factor_num=self.factor_num,
                     num_layers=self.num_layers,
                     dropout=self.dropout,
-                    model_type=self.model_type
+                    model_type=self.model_type,
+                    freeze_item_projection=self.freeze_item_projection,
+                    item_projection_init_data=item_Z_epoch if self.freeze_item_projection else None,
                 ).to(self.device)
             # Fresh optimizer every step even under warm_start_inner - only
             # the NCF weights carry over, not AdamW's momentum/variance
             # state, so this isolates the effect of "same basin" from "same
             # optimizer trajectory".
-            ncf_optim = optim.AdamW(ncf_model.parameters(), lr=self.lr_ncf)
+            ncf_optim = optim.AdamW(
+                [p for p in ncf_model.parameters() if p.requires_grad], lr=self.lr_ncf)
 
             early_stop = EarlyStopping(
                 patience=self.inner_patience,
@@ -758,10 +776,13 @@ class GradientIsomapCF:
             factor_num=self.factor_num,
             num_layers=self.num_layers,
             dropout=self.dropout,
-            model_type=self.model_type
+            model_type=self.model_type,
+            freeze_item_projection=self.freeze_item_projection,
+            item_projection_init_data=item_Z_final if self.freeze_item_projection else None,
         ).to(self.device)
 
-        final_optim = optim.AdamW(final_ncf.parameters(), lr=self.lr_ncf)
+        final_optim = optim.AdamW(
+            [p for p in final_ncf.parameters() if p.requires_grad], lr=self.lr_ncf)
 
         patience_final = self.final_patience
         best_val_loss_final = np.inf

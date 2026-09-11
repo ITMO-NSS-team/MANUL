@@ -39,7 +39,8 @@ def run_one(eta_outer: float, n_run_prefix: str = "eta_sweep", max_users: int = 
            dataset_type: str = "movielens", amazon_category: str = "Beauty_and_Personal_Care",
            select_by: str = "loss", cf_epochs: int = 30, final_cf_epochs: int = 30,
            inner_patience: int = 5, final_patience: int = 3, outer_epochs: int = 30,
-           warm_start_inner: bool = False, seed: int = 0, dropout: float = 0.0):
+           warm_start_inner: bool = False, seed: int = 0, dropout: float = 0.0,
+           freeze_item_projection: bool = False):
     n_run = f"{n_run_prefix}_{eta_outer}"
     print(f"\n{'=' * 70}")
     print(f"=== eta_outer = {eta_outer}  (n_run={n_run}, dataset={dataset_dir_name}, "
@@ -57,6 +58,7 @@ def run_one(eta_outer: float, n_run_prefix: str = "eta_sweep", max_users: int = 
         dataset_type=dataset_type, amazon_category=amazon_category,
         select_by=select_by, inner_patience=inner_patience, final_patience=final_patience,
         warm_start_inner=warm_start_inner, dropout=dropout,
+        freeze_item_projection=freeze_item_projection,
     )
     elapsed = time.time() - t0
     print(f"[eta_outer={eta_outer}] finished in {elapsed:.1f}s", flush=True)
@@ -84,6 +86,7 @@ def main(n_run_prefix="eta_sweep", max_users=300, max_movies=800, dataset_dir_na
         select_by="loss", cf_epochs=30, final_cf_epochs=30,
         inner_patience=5, final_patience=3, outer_epochs=30,
         eta_values=None, warm_start_inner=False, seed=0, dropout=0.0,
+        freeze_item_projection=False,
         summary_filename="eta_outer_sweep_summary.json"):
     summary = []
     for eta in (eta_values if eta_values is not None else ETA_OUTER_VALUES):
@@ -93,7 +96,7 @@ def main(n_run_prefix="eta_sweep", max_users=300, max_movies=800, dataset_dir_na
                                select_by=select_by, cf_epochs=cf_epochs, final_cf_epochs=final_cf_epochs,
                                inner_patience=inner_patience, final_patience=final_patience,
                                outer_epochs=outer_epochs, warm_start_inner=warm_start_inner, seed=seed,
-                               dropout=dropout))
+                               dropout=dropout, freeze_item_projection=freeze_item_projection))
         # Save incrementally after each config, so a later config's failure
         # doesn't lose earlier results.
         with open(os.path.join(HERE, summary_filename), "w") as f:

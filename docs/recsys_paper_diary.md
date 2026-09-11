@@ -8,6 +8,84 @@ Read that first for the why; this file tracks the where-are-we-now.
 ## CURRENT STATUS / NEXT STEP
 *(this block is overwritten each session — always current, read this first)*
 
+**2026-09-11: frozen-projection hypothesis CONFIRMED on the fixed-Z
+diagnostic (real Z significantly beats shuffled Z), now wired into the
+production pipeline and testing whether the outer loop finally converges.**
+
+**Decisive result (reran with per-epoch history capture for convergence
+plots, commit `6c50d82`, identical numbers to the first run - fully
+reproducible):**
+
+| condition | test HR@10 | val_loss | inner-loop epochs used |
+|---|---|---|---|
+| real Z | 0.159 ± 0.012 | 0.367 ± 0.013 | 42-67 (mean 50.8) |
+| shuffled Z | 0.097 ± 0.019 | 0.453 ± 0.075 | 31-33 (mean 32.4) |
+| random Z | 0.107 ± 0.026 | 0.517 ± 0.058 | 31-97 (mean 60.0) |
+
+real vs shuffled: t=5.583, **p=0.0005**. Convergence plots
+(`frozen_projection_convergence_all_conditions.png`) show all runs
+early-stop cleanly (no cap hits, monotonic loss curves) - real Z takes
+longer to converge (more to learn from real structure) and reaches a
+clearly higher val_hr plateau; shuffled Z converges fast to a lower
+ceiling. This is the first time in the whole investigation that swapping
+in a wrong-but-structurally-identical Z has actually hurt - confirming
+`freeze_item_projection` closes the "escape hatch" (see below).
+
+**Code changes this investigation, for the record:**
+- `recsys/GradIsomapCF_movielens/NeuMFOnManifold.py`: new
+  `freeze_item_projection`/`item_projection_init_data` params. When
+  enabled: MLP branch uses `z_i` unchanged (identity - `latent_dim` is
+  deliberately set equal to `mlp_user_dim` for exactly this reason, a
+  fair "our embedding vs. baseline's" comparison, confirmed intentional
+  by the user, not an oversight); GMF branch uses a FIXED PCA projection
+  (SVD of the actual `item_Z`, not random - user flagged random-frozen as
+  risky/poorly-conditioned) down to `factor_num` dims. Only user-side
+  embeddings + the downstream MLP tower/predict layer stay trainable.
+- `recsys/my_verification/ablation_geometry_vs_optimization.py`:
+  `train_and_eval_ncf_on_fixed_Z` gained `dropout`, `weight_decay`,
+  `freeze_item_projection` (previously `dropout` hardcoded 0.0,
+  `weight_decay` left at AdamW's unexamined 0.01 default).
+- `recsys/GradIsomapCF_movielens/GradientIsomapCF_log.py` (production):
+  `freeze_item_projection` threaded into BOTH `NeuMFOnManifold`
+  construction points (inner loop + final-NCF stage), passing
+  `item_projection_init_data=item_Z_epoch`/`item_Z_final` so the frozen
+  GMF projection is recomputed fresh from whatever the manifold's CURRENT
+  state is at each point (not stale). Optimizers now filter to
+  `requires_grad` params only. (Also carries `warm_start_inner`, tested
+  and closed out earlier - no significant effect - and the DataLoader/
+  cudnn determinism fixes from the outer-loop noise investigation.)
+- `recsys/my_verification/run_experiment.py` /
+  `recsys/my_verification/run_eta_outer_sweep.py`: `dropout` and
+  `freeze_item_projection` exposed as pass-through params (previously
+  `dropout` hardcoded 0.0 at both call sites; `outer_epochs`/`seed` were
+  hardcoded too, fixed earlier in this investigation).
+
+**In progress:** smoke-testing `freeze_item_projection=True` in the real
+outer loop (2 outer steps) before committing to the full 60-step run
+(`run_amazon_beauty_frozen_proj_outer_test.py`, eta=0.03, dropout=0.2,
+same protocol as every other A/B test here). This is THE question the
+whole investigation has been building toward: does the outer loop's
+val_hr trajectory finally show a real trend once the inner critic
+actually depends on Z's geometry (unlike every prior test, all of which
+used the unfrozen architecture and topped out at r²<=0.04, never
+significant)? Result pending.
+
+**Still open / not yet decided:**
+- Does the outer loop converge under freeze_item_projection=True? The
+  central open question right now.
+- If yes: main.tex's whole framing shifts - frozen projection may need to
+  become the primary reported architecture, not a side diagnostic.
+- If no: the noise is confirmed to come from elsewhere (fresh-reinit
+  multimodality itself, already documented) rather than "critic blind to
+  geometry" - still a valuable, publishable negative result either way.
+- ML-1M/ML-10M still sit at the pre-dropout, pre-frozen-projection
+  generation - far behind the current investigation; resweep decision
+  deferred until the frozen-projection outer-loop result is in.
+- Item-representation/parameter-count table still not added to main.tex.
+- Gromov delta section (4.1) and empty Conclusion - still deferred.
+
+---
+
 **2026-09-09, later: root-caused WHY "any topology works" - no channel for
 pairwise-distance information exists anywhere in NCF's training objective
 - and built a fix (frozen item projection) to test tomorrow.**
