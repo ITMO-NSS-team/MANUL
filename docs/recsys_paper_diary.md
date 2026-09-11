@@ -8,6 +8,58 @@ Read that first for the why; this file tracks the where-are-we-now.
 ## CURRENT STATUS / NEXT STEP
 *(this block is overwritten each session — always current, read this first)*
 
+**2026-09-11, even later: eta=0.001 frozen-projection result IS the
+strongest convergence signal in the whole investigation - now verifying
+with 3 more seeds (extended to 300 steps) and a fair (dropout=0.2)
+baseline recompute, all running in parallel.**
+
+**Single-run headline result:** eta=0.001, freeze_item_projection=True,
+dropout=0.2, 200 outer steps: val_hr trend r²=0.088, **p=2e-5**;
+train_loss trend r²=0.203, **p=2e-11** - both highly significant AND
+consistent direction (loss down, HR@10 up). Best checkpoint at step
+187/200 (late, not an early fluke - first time this has happened in the
+whole investigation, every other test's best step landed in the first
+15-30% of the run). Plot: `frozenproj_eta001_outer200_convergence.png`.
+Checked for a plateau (rolling-12 mean of the last ~30 steps sits flat
+around 0.18-0.19, even ticking down slightly at the very end) - looks
+close to plateaued, not clearly still climbing, so extending much further
+may have diminishing returns, but not conclusive from one run.
+
+**Final test metrics: HR@10=0.2067, NDCG@10=0.0896** - beats the existing
+Euclidean baseline (HR@10=0.1767, NDCG@10=0.0778) by ~17% relative. BUT
+that baseline number predates `dropout` support in
+`train_and_eval_euclidean_baseline` (never had the parameter at all until
+now, commit `693f5d0`) - not an apples-to-apples comparison yet.
+
+**Now running in parallel (4 processes, deliberately fewer than the usual
+~5-8 since the GPU currently has ~72-80% utilization from unrelated
+external jobs - `examples.gradient_isomap.synthetic.e8_euclidean_init_drift`,
+not ours, confirmed via /proc cmdline inspection - keeping to 4 to avoid
+badly contending with that):**
+1-3. `run_amazon_beauty_frozenproj_eta001_seed.py --seed {0,1,2}` - same
+   config, outer_epochs raised 200→300 to test the plateau question with
+   a longer horizon, for a real multi-seed comparison (the whole
+   investigation's standing lesson: single runs aren't reliable evidence).
+4. `save_euclidean_baseline_geometry.py --dropout 0.2` (tag
+   `amazon_beauty_dropout02fair`) - a genuinely fair baseline number to
+   compare the frozen-projection result against.
+
+**Still open / not yet decided:**
+- Does the strong eta=0.001 trend replicate across seeds, and does 300
+  steps confirm or break the apparent plateau? Results pending.
+- Does the frozen-projection method still beat the Euclidean baseline
+  once the baseline also gets dropout=0.2? Result pending.
+- If both hold up: this eta=0.001/frozen_item_projection configuration is
+  a strong candidate for the paper's main reported result, a real
+  departure from every earlier generation (original/hrfix/realfix/p30,
+  all unfrozen, all without a real outer-loop trend).
+- ML-1M/ML-10M still sit at the pre-dropout, pre-frozen-projection
+  generation - resweep decision deferred until this settles.
+- Item-representation/parameter-count table still not added to main.tex.
+- Gromov delta section (4.1) and empty Conclusion - still deferred.
+
+---
+
 **2026-09-11, later: frozen-projection outer-loop test (eta=0.03/60 steps)
 did NOT show a clearer convergence trend than unfrozen - user asked to
 re-verify this wasn't a bug, then to retry with a smaller outer lr.**
