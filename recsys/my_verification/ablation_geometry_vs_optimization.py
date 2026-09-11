@@ -254,7 +254,8 @@ def train_and_eval_ncf_on_fixed_Z(item_Z, data, device, latent_dim, factor_num=1
 
 def train_and_eval_euclidean_baseline(data, device, factor_num=16, num_layers=3, lr=1e-3,
                                       epochs=30, patience=3, seed=0, return_item_embeddings=False,
-                                      verbose=False, return_history=False, select_by="loss"):
+                                      verbose=False, return_history=False, select_by="loss",
+                                      dropout=0.0, weight_decay=0.01):
     """Plain NeuMF (learnable embedding tables, geometry-free) trained
     through the exact same inter_loader/val_loader/test_loader as the
     manifold-based arms (train_and_eval_ncf_on_fixed_Z, poincare_baseline.py)
@@ -269,9 +270,9 @@ def train_and_eval_euclidean_baseline(data, device, factor_num=16, num_layers=3,
 
     ncf = NCF(
         user_num=data["num_users"], item_num=data["num_movies"], factor_num=factor_num,
-        num_layers=num_layers, dropout=0.0, model="NeuMF-end",
+        num_layers=num_layers, dropout=dropout, model="NeuMF-end",
     ).to(device)
-    optimizer = optim.AdamW(ncf.parameters(), lr=lr)
+    optimizer = optim.AdamW(ncf.parameters(), lr=lr, weight_decay=weight_decay)
     loss_fn = nn.BCEWithLogitsLoss()
 
     best_val_loss = float("inf")

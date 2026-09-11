@@ -33,6 +33,9 @@ def main():
     parser.add_argument("--select_by", default="loss", choices=["loss", "hr"])
     parser.add_argument("--patience", type=int, default=3)
     parser.add_argument("--epochs", type=int, default=30)
+    parser.add_argument("--dropout", type=float, default=0.0)
+    parser.add_argument("--weight_decay", type=float, default=0.01)
+    parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -48,7 +51,8 @@ def main():
 
     hr, ndcg, val_loss, item_emb = train_and_eval_euclidean_baseline(
         data, device, return_item_embeddings=True, select_by=args.select_by,
-        patience=args.patience, epochs=args.epochs)
+        patience=args.patience, epochs=args.epochs, dropout=args.dropout,
+        weight_decay=args.weight_decay, seed=args.seed)
     print(f"Euclidean NeuMF baseline: test HR@10={hr:.4f} NDCG@10={ndcg:.4f} "
           f"best_val_loss={val_loss:.4f}", flush=True)
 
