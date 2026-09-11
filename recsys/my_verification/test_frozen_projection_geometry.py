@@ -25,7 +25,7 @@ projection forces genuine dependence on the manifold's geometry. If real
 still doesn't beat shuffled/random, the escape hatch is elsewhere
 (downstream MLP tower / GMF's free user-side multiplication).
 """
-import sys, os
+import sys, os, pickle
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import numpy as np
 import torch
@@ -63,23 +63,33 @@ CONDITIONS = [
 ]
 
 all_results = {}
+all_histories = {}
 for label, Z, n_seeds in CONDITIONS:
     print(f"\n=== {label} Z, freeze_item_projection=True ===", flush=True)
     test_hrs, val_losses = [], []
+    histories = []
     for seed in range(n_seeds):
-        hr, ndcg, best_val_loss = train_and_eval_ncf_on_fixed_Z(
+        hr, ndcg, best_val_loss, history = train_and_eval_ncf_on_fixed_Z(
             Z, data, device, latent_dim=64, epochs=200, patience=30,
             seed=seed, select_by="hr", dropout=0.2, weight_decay=0.01,
-            freeze_item_projection=True,
+            freeze_item_projection=True, return_history=True,
         )
-        print(f"  seed={seed}: test_hr={hr:.4f} test_ndcg={ndcg:.4f} best_val_loss={best_val_loss:.4f}", flush=True)
+        n_epochs_used = len(history["train_loss"])
+        print(f"  seed={seed}: test_hr={hr:.4f} test_ndcg={ndcg:.4f} best_val_loss={best_val_loss:.4f} "
+              f"n_epochs={n_epochs_used}", flush=True)
         test_hrs.append(hr)
         val_losses.append(best_val_loss)
+        histories.append(history)
     test_hrs = np.array(test_hrs)
     val_losses = np.array(val_losses)
     all_results[label] = (test_hrs, val_losses)
+    all_histories[label] = histories
     print(f"  test_hr: mean={test_hrs.mean():.4f} std={test_hrs.std():.4f} range=[{test_hrs.min():.4f},{test_hrs.max():.4f}]")
     print(f"  val_loss: mean={val_losses.mean():.4f} std={val_losses.std():.4f}")
+
+with open(f"{HERE}/frozen_projection_geometry_test_histories.pkl", "wb") as f:
+    pickle.dump(all_histories, f)
+print(f"[Save] {HERE}/frozen_projection_geometry_test_histories.pkl")
 
 print("\n\n=== SUMMARY ===")
 print("(for reference, unfrozen dropout=0.2 baseline on REAL Z, 5 seeds: "
