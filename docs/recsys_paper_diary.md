@@ -8,6 +8,64 @@ Read that first for the why; this file tracks the where-are-we-now.
 ## CURRENT STATUS / NEXT STEP
 *(this block is overwritten each session — always current, read this first)*
 
+**2026-09-12: METHOD FIXED - `freeze_item_projection=True` + `dropout=0.2` +
+`eta_outer=0.001` is the adopted configuration going forward. Hyperbolicity
+diagnostics rerun on it (same "geometry doesn't track quality" finding as
+always); next direction is spectral/connectivity properties; scale-
+robustness of this exact config is an explicitly open gap.**
+
+**3-seed replication of eta=0.001 (300 steps, extended from 200 to check
+a plateau) landed:** test HR@10 = 0.194 ± 0.009, beats the properly fair
+(dropout=0.2) Euclidean baseline (0.123) with t=11.5, p=0.0075. train_loss
+trend significantly decreasing in ALL 3 seeds (p from 1e-7 to 1e-19) -
+robust, reproducible. val_hr trend weaker on replication (sig in 1/3 of
+seeds) than the flagship single run suggested, but consistently positive
+direction. Plateau confirmed real (last-100 mean not above mid-100 in any
+seed) - extending past ~300 steps likely has diminishing returns. Full
+writeup in memory (`project_gincf_outer_loop_noise_warmstart`).
+
+**Hyperbolicity/geometry diagnostics table rebuilt for this final config**
+(`full_hyperbolicity_table_frozenproj.py`/`.csv`), using the RESTORED-BEST
+epoch's geometry per seed (not last, since that distinction now matters -
+best epochs were 187/216/89 out of 300, never the last). Same core
+finding as throughout the whole project: hyperbolicity doesn't track
+quality. Poincare-pretrained: most hyperbolic (delta_rel=0.169), worst
+quality (HR@10=0.10). Winning GINCF: mid-range hyperbolicity (0.240-0.247,
+barely moved from its own pre-optimization ~0.230-0.237), best quality
+(0.19-0.21). Euclidean (dropout=0.2 fair baseline): least hyperbolic
+(0.383), by far the most topological complexity (H1=968, 3-13x every
+other arm), middling quality (0.123). Plot:
+`hyperbolicity_frozenproj_comparison.png` in process_docs.
+
+**New direction, requested by the user:** since hyperbolicity doesn't
+explain the winner, check whether connectivity/spectral properties do
+instead - GINCF's lambda2 roughly doubles during optimization (0.20-0.25
+-> 0.43-0.58) and H1 count roughly quadruples (70-80 -> 270-360), both
+far more dramatic shifts than delta_rel's near-flat movement. Next: check
+whether spectral_gap/lambda2/H1 correlate with downstream quality (a
+cheap re-analysis of ALREADY-collected geometry_diagnostics.csv data, no
+new training needed) and whether this generalizes across other datasets/
+scales - not started yet.
+
+**Explicitly flagged gap:** the adopted config's behavior at larger scale
+is UNVERIFIED. The one large-scale run we have (6000u/2500i, HR@10=0.2827,
+2026-09-09) predates `freeze_item_projection` entirely (dropout=0.2 only)
+and was a single run - it does not test whether the CURRENT method scales.
+Needs a dedicated test before any scale-robustness claim.
+
+**Still open / not yet decided:**
+- Spectral/connectivity-vs-quality correlation check (cheap, existing
+  data) - not yet run.
+- Scale-robustness test of the final adopted config - not yet run,
+  probably the more important of the two before writing anything into
+  main.tex.
+- ML-1M/ML-10M still sit at the pre-dropout, pre-frozen-projection
+  generation - resweep decision deferred until scale-robustness settles.
+- Item-representation/parameter-count table still not added to main.tex.
+- Gromov delta section (4.1) and empty Conclusion - still deferred.
+
+---
+
 **2026-09-11, even later: eta=0.001 frozen-projection result IS the
 strongest convergence signal in the whole investigation - now verifying
 with 3 more seeds (extended to 300 steps) and a fair (dropout=0.2)
