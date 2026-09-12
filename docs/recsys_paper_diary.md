@@ -8,6 +8,64 @@ Read that first for the why; this file tracks the where-are-we-now.
 ## CURRENT STATUS / NEXT STEP
 *(this block is overwritten each session — always current, read this first)*
 
+**2026-09-12/13: scale-robustness recon test found a new, real instability
+risk - a single gradient-guard trigger can be followed by a severe,
+silent slowdown, not just a one-off self-corrected blip.**
+
+Launched `run_amazon_beauty_frozenproj_scaletest.py` (3000u/2500i, eta=0.001,
+freeze_item_projection=True, dropout=0.2, outer_epochs=100, single seed) as
+a cheap recon before committing to the full 200-300 step horizon at this
+scale (would cost ~27-28h). Ran cleanly for the first 26 outer steps
+(~350-450s/step, one gradient-guard trigger at outer epoch 20 - 22036
+non-finite entries zeroed, seemingly self-corrected since outer steps
+21-26 completed normally). Then the log stopped advancing entirely.
+
+**Diagnosed via PowerShell `Get-Process`, not just log-watching:** the
+actual Windows process (distinct from the git-bash wrapper PID) had
+accumulated ~45,000 CPU-seconds over ~6 hours wall-clock (~2 cores'
+worth) - i.e. NOT hung/deadlocked, but genuinely still computing,
+just catastrophically slower than before (no progress visible in the log
+for 3+ hours on a single inner-loop epoch that should take seconds).
+Leading hypothesis: the guard-triggered near-degenerate weights pushed
+some downstream computation into the subnormal/denormalized float range,
+which is a well-known cause of 10-100x silent slowdowns on most hardware
+with no error or crash. Stopped the task (`TaskStop`), verified via
+`Get-Process` that the real PID was gone (no orphan) and GPU memory
+returned to baseline.
+
+**This is a genuinely new finding, not previously seen at the 300u/800i
+scale** (where the same config's occasional guard triggers never caused
+follow-on slowdown) - suggests the current NaN/Inf gradient guard (which
+only zeroes bad gradient entries before the optimizer step) may be
+insufficient at larger scale, where a near-degenerate state might need
+more aggressive recovery (e.g. clipping/renormalizing the weights
+themselves, not just their gradients, or a temporary lr reduction after
+a trigger).
+
+**Not yet decided how to proceed:**
+- Retry 3000u/2500i with a different seed (this might be a one-off numerical
+  fluke specific to this seed's trajectory) - cheapest option.
+- Drop to a smaller/safer scale-up first (1000u/1200i, never seen a guard
+  trigger even in earlier probes) to get at least one clean scale
+  data point before tackling the trickier 3000x2500 regime.
+- Harden the gradient guard itself (e.g. also clip/renormalize weights
+  after a trigger, or briefly reduce lr) - more invasive, addresses the
+  root cause but is a real code change to a shared safety mechanism.
+- User has not yet chosen between these.
+
+**Still open / not yet decided (carried over):**
+- Scale-robustness of the adopted config (freeze_item_projection=True,
+  dropout=0.2, eta=0.001) - still unverified, now complicated by this
+  new instability risk at 3000u/2500i.
+- Spectral/connectivity-vs-quality correlation check across other
+  datasets/scales - deferred, revisit later per the user.
+- ML-1M/ML-10M still sit at the pre-dropout, pre-frozen-projection
+  generation - resweep decision deferred until scale-robustness settles.
+- Item-representation/parameter-count table still not added to main.tex.
+- Gromov delta section (4.1) and empty Conclusion - still deferred.
+
+---
+
 **2026-09-12: METHOD FIXED - `freeze_item_projection=True` + `dropout=0.2` +
 `eta_outer=0.001` is the adopted configuration going forward. Hyperbolicity
 diagnostics rerun on it (same "geometry doesn't track quality" finding as
