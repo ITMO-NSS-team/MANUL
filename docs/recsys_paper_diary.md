@@ -8,9 +8,63 @@ Read that first for the why; this file tracks the where-are-we-now.
 ## CURRENT STATUS / NEXT STEP
 *(this block is overwritten each session — always current, read this first)*
 
-**2026-09-12/13: scale-robustness recon test found a new, real instability
-risk - a single gradient-guard trigger can be followed by a severe,
-silent slowdown, not just a one-off self-corrected blip.**
+**2026-09-13: CORRECTION - the "instability at scale" finding below was
+WRONG. Root cause was a logging bug (missing `flush=True`), not a real
+hang. Fixed, and both scale tests relaunched.**
+
+Both the 3000u/2500i recon and the 1000u/1200i full test appeared to
+"hang" (log stopped advancing for 3+ hours / 50+ minutes respectively).
+Both were killed based on that stale-log signal - the second one (per
+the user's explicit "перезапустить если что" instruction) via an
+automated health-check cron job using the same log-staleness heuristic.
+
+**Both kills were mistakes.** Checked the actual `matrices_epochN.npz`
+files (real, unbuffered disk writes) after the fact: the 3000u/2500i run
+had really reached epoch 56 (vs ~26 visible in the log) and the
+1000u/1200i run had reached epoch 285/300 - 95% done - at the moment each
+was killed. Neither was stuck; both were healthy and actively
+progressing. Root cause: none of the hot-path print statements
+(`[Inner NCF] ep N/200`, `[Outer N/M]`, `[Final NCF]`, `[Guard]`) had
+`flush=True` - when stdout is redirected to a file (not a terminal),
+Python fully block-buffers instead of line-buffering, so long silences in
+the log are normal, not evidence of a hang. At larger data scale, each
+buffered chunk covers more wall-clock time (slower per-epoch), making a
+perfectly healthy run look stuck to anyone watching the log file. The
+earlier "post-guard subnormal-float slowdown" hypothesis was an
+overcomplicated wrong explanation for a much more mundane cause.
+
+**Fixed (commit `08e1b6b`):** added `flush=True` to all the hot-path
+prints in `GradientIsomapCF_log.py`. Cancelled the flawed health-check
+cron job (`ccea4135`) and replaced it (`af7848c8`, every 30 min) with a
+corrected one that NEVER kills on log-staleness alone - it now requires
+independent confirmation from BOTH the actual `matrices_epochN.npz` file
+progress (numeric-sorted, not lexicographic) AND a PowerShell
+`Get-Process` CPU-time-growth check before concluding a run is truly
+stuck.
+
+**Relaunched `run_amazon_beauty_frozenproj_scaletest_1000x1200.py` from
+scratch** (no mid-run resumability, so the 95%-complete progress from the
+killed run is lost) with the flush fix in place. 3000u/2500i retry still
+pending behind this one, per the user's stated order (safer scale first).
+
+**Still open / not yet decided (carried over):**
+- Scale-robustness of the adopted config (freeze_item_projection=True,
+  dropout=0.2, eta=0.001) at 1000u/1200i - result pending (relaunched).
+- 3000u/2500i retry - queued behind 1000u/1200i.
+- Spectral/connectivity-vs-quality correlation check across other
+  datasets/scales - deferred, revisit later per the user.
+- ML-1M/ML-10M still sit at the pre-dropout, pre-frozen-projection
+  generation - resweep decision deferred until scale-robustness settles.
+- Item-representation/parameter-count table still not added to main.tex.
+- Gromov delta section (4.1) and empty Conclusion - still deferred.
+
+---
+
+**2026-09-12/13, SUPERSEDED BY THE CORRECTION ABOVE - kept for the
+record, do not trust this diagnosis:** scale-robustness recon test found
+a new, real instability risk - a single gradient-guard trigger can be
+followed by a severe, silent slowdown, not just a one-off self-corrected
+blip.
 
 Launched `run_amazon_beauty_frozenproj_scaletest.py` (3000u/2500i, eta=0.001,
 freeze_item_projection=True, dropout=0.2, outer_epochs=100, single seed) as
@@ -32,37 +86,6 @@ which is a well-known cause of 10-100x silent slowdowns on most hardware
 with no error or crash. Stopped the task (`TaskStop`), verified via
 `Get-Process` that the real PID was gone (no orphan) and GPU memory
 returned to baseline.
-
-**This is a genuinely new finding, not previously seen at the 300u/800i
-scale** (where the same config's occasional guard triggers never caused
-follow-on slowdown) - suggests the current NaN/Inf gradient guard (which
-only zeroes bad gradient entries before the optimizer step) may be
-insufficient at larger scale, where a near-degenerate state might need
-more aggressive recovery (e.g. clipping/renormalizing the weights
-themselves, not just their gradients, or a temporary lr reduction after
-a trigger).
-
-**Not yet decided how to proceed:**
-- Retry 3000u/2500i with a different seed (this might be a one-off numerical
-  fluke specific to this seed's trajectory) - cheapest option.
-- Drop to a smaller/safer scale-up first (1000u/1200i, never seen a guard
-  trigger even in earlier probes) to get at least one clean scale
-  data point before tackling the trickier 3000x2500 regime.
-- Harden the gradient guard itself (e.g. also clip/renormalize weights
-  after a trigger, or briefly reduce lr) - more invasive, addresses the
-  root cause but is a real code change to a shared safety mechanism.
-- User has not yet chosen between these.
-
-**Still open / not yet decided (carried over):**
-- Scale-robustness of the adopted config (freeze_item_projection=True,
-  dropout=0.2, eta=0.001) - still unverified, now complicated by this
-  new instability risk at 3000u/2500i.
-- Spectral/connectivity-vs-quality correlation check across other
-  datasets/scales - deferred, revisit later per the user.
-- ML-1M/ML-10M still sit at the pre-dropout, pre-frozen-projection
-  generation - resweep decision deferred until scale-robustness settles.
-- Item-representation/parameter-count table still not added to main.tex.
-- Gromov delta section (4.1) and empty Conclusion - still deferred.
 
 ---
 
