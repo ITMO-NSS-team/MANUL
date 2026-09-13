@@ -117,5 +117,5 @@ def plot_cf_losses(cf_history, images_dir, run_name="run", poly_degree=2):
 
 
 if __name__ == "__main__":
-    target_folder = "logs_amazon_books_isomap_cf/717/images"
-    create_collage(target_folder, "logs_amazon_books_isomap_cf/717/images/final_report_collage.png", n_cols=5)
+    target_folder = "logs_tecd_marketplace_isomap_cf/802/images"
+    create_collage(target_folder, "logs_tecd_marketplace_isomap_cf/802/images/final_report_collage.png", n_cols=5)

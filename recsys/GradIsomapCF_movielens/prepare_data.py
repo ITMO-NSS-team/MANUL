@@ -171,6 +171,54 @@ def prepare_sequences_amazon(df: pd.DataFrame):
     return df, user2seq, user2idx, item2idx
 
 
+DATASET_TECD = "tecd_marketplace"
+
+def load_tecd_marketplace(
+    subset_path: str = "recsys/GradIsomapCF_movielens/data/tecd/tecd_marketplace_subset.parquet",
+    use_positive_only: bool = False,
+    **kwargs,
+) -> pd.DataFrame:
+    """
+    Загружает подвыборку T-ECD Marketplace.
+    
+    Parameters
+    ----------
+    use_positive_only : bool
+        Если True — берём только позитивные (order/cart).
+        Если False — берём все, rating = feedback.
+    """
+    if not os.path.exists(subset_path):
+        raise FileNotFoundError(
+            f"Файл не найден: {subset_path}\n"
+            f"Создайте его в Google Colab с помощью скрипта подготовки."
+        )
+
+    print(f"[T-ECD Marketplace] Загружаем: {subset_path}")
+    df = pd.read_parquet(subset_path)
+
+    if use_positive_only:
+        df = df[df["feedback"] == 1].copy()
+        df["rating"] = 1.0
+        print(f"  Режим: только позитивные взаимодействия")
+    else:
+        # rating = feedback (0 или 1)
+        df["rating"] = df["feedback"].astype(float)
+        print(f"  Режим: позитивные + негативные")
+
+    # Проверяем наличие обязательных колонок
+    for col in ["userId", "movieId", "rating", "timestamp"]:
+        assert col in df.columns, f"Отсутствует колонка {col}"
+
+    print(f"  Пользователей: {df['userId'].nunique():,}")
+    print(f"  Товаров:       {df['movieId'].nunique():,}")
+    print(f"  Записей:       {len(df):,}")
+    if "feedback" in df.columns:
+        print(f"  Позитивных:    {(df['feedback']==1).sum():,}")
+        print(f"  Негативных:    {(df['feedback']==0).sum():,}")
+
+    return df
+
+
 def subsample_users_items(df_mapped,
                           max_users=500,
                           max_movies=1000,

@@ -13,7 +13,8 @@ import torch.nn.functional as F
 
 from torch.utils.data import DataLoader
 
-from GradientIsomapCF_log import GradientIsomapCF
+#from GradientIsomapCF_log import GradientIsomapCF
+from GradientIsomapCF_log_best_final import GradientIsomapCF
 from evaluation import evaluate_topk_isomap, evaluate_topk_pure
 from NCF import NCF
 from prepare_data import (
@@ -23,6 +24,7 @@ from prepare_data import (
     train_val_test_split_next_item,
     build_movie_user_matrix,
     load_amazon_books,
+    load_tecd_marketplace
 )
 from manifold_visualization import (
     plot_gi_losses, plot_pure_ncf_losses,
@@ -51,6 +53,92 @@ def load_movielens_1m_ratings(ml1m_dir: str) -> pd.DataFrame:
     return df
 
 
+# В evaluate_topk — разделите на repeat / new
+
+def evaluate_topk_split(model, test_loader, top_k, device,
+                        user_train_items: dict,
+                        isomap_model=None):
+    """
+    Считает HR@K и NDCG@K отдельно для:
+      - repeat items (тест-айтем уже был в train у пользователя)
+      - new items    (тест-айтем НЕ был в train у пользователя)
+    
+    Поддерживает как обычный NCF, так и NeuMFOnManifold (с передачей isomap_model).
+    """
+    hr_repeat, hr_new = [], []
+    ndcg_repeat, ndcg_new = [], []
+
+    model.eval()
+    if isomap_model is not None:
+        isomap_model.eval()
+        with torch.no_grad():
+            item_Z = isomap_model().to(torch.float32)
+    else:
+        item_Z = None
+
+    with torch.no_grad():
+        for users, items, labels in test_loader:
+            users = users.to(device)
+            items = items.to(device)
+
+            # Получаем предсказания модели
+            if item_Z is not None:
+                predictions = model(users, items, item_Z)
+            else:
+                predictions = model(users, items)
+
+            predictions = predictions.view(-1)
+
+            # В NCFTestDatasetSampled на каждого юзера приходится ровно 100 примеров (1 pos + 99 negs)
+            group_size = 100
+            for start_idx in range(0, len(predictions), group_size):
+                u_group = users[start_idx:start_idx + group_size]
+                i_group = items[start_idx:start_idx + group_size]
+                l_group = labels[start_idx:start_idx + group_size]
+                p_group = predictions[start_idx:start_idx + group_size]
+
+                u_int = u_group[0].item()
+
+                # Находим индекс позитивного (целевого) элемента (где label == 1.0)
+                pos_indices = (l_group == 1.0).nonzero(as_tuple=True)[0]
+                if len(pos_indices) == 0:
+                    continue
+                
+                target_idx = pos_indices[0].item()
+                target_item = i_group[target_idx].item()
+                target_score = p_group[target_idx].item()
+
+                # Считаем ранг целевого элемента (сколько негативов получили скор выше)
+                rank = (p_group > target_score).sum().item()
+
+                if rank < top_k:
+                    hit = 1.0
+                    ndcg = 1.0 / np.log2(rank + 2)
+                else:
+                    hit = 0.0
+                    ndcg = 0.0
+
+                # Проверяем, был ли целевой элемент в обучающей выборке данного пользователя
+                is_repeat = target_item in user_train_items.get(u_int, set())
+
+                if is_repeat:
+                    hr_repeat.append(hit)
+                    ndcg_repeat.append(ndcg)
+                else:
+                    hr_new.append(hit)
+                    ndcg_new.append(ndcg)
+
+    return {
+        "HR@K_all":      np.mean(hr_repeat + hr_new) if (hr_repeat or hr_new) else 0.0,
+        "NDCG@K_all":    np.mean(ndcg_repeat + ndcg_new) if (ndcg_repeat or ndcg_new) else 0.0,
+        "HR@K_repeat":   np.mean(hr_repeat) if hr_repeat else 0.0,
+        "NDCG@K_repeat": np.mean(ndcg_repeat) if ndcg_repeat else 0.0,
+        "HR@K_new":      np.mean(hr_new) if hr_new else 0.0,
+        "NDCG@K_new":    np.mean(ndcg_new) if ndcg_new else 0.0,
+        "n_repeat":      len(hr_repeat),
+        "n_new":         len(hr_new),
+    }
+
 # ─────────────────────────────────────────────
 #  Роутер: загрузка + prepare_sequences
 #  по имени датасета
@@ -58,6 +146,7 @@ def load_movielens_1m_ratings(ml1m_dir: str) -> pd.DataFrame:
 
 DATASET_MOVIELENS = "movielens"
 DATASET_AMAZON    = "amazon_books"
+DATASET_TECD = "tecd_marketplace"
 
 
 def load_and_prepare(dataset_name: str, config: dict) -> tuple[pd.DataFrame, dict]:
@@ -79,6 +168,16 @@ def load_and_prepare(dataset_name: str, config: dict) -> tuple[pd.DataFrame, dic
             #cache_path        = config.get("cache_path", "data/amazon_books_reviews.parquet"),
         )
         df_mapped, user2seq, _, _ = prepare_sequences_amazon(raw_df)
+
+    elif dataset_name == DATASET_TECD:
+        raw_df = load_tecd_marketplace(
+            subset_path = config.get(
+                "subset_path",
+                "data/tecd/tecd_marketplace_subset.parquet"),
+            use_positive_only = config.get("use_positive_only", True),
+        )
+        df_mapped, user2seq, _, _ = prepare_sequences_amazon(raw_df)
+        # prepare_sequences_amazon подходит — там тоже строковые ID
 
     else:
         raise ValueError(
@@ -219,12 +318,12 @@ def main(
         pure_model = NCF(
             user_num   = num_users,
             item_num   = num_movies,
-            factor_num = 8,
+            factor_num = 32,
             num_layers = 4,
             dropout    = 0.0,
             model      = "NeuMF-end",
         ).to(device)
-        print("factor_num=8, num_layers=4")
+        print("factor_num=32, num_layers=4")
 
         pos_weight = torch.tensor([num_ng], device=device, dtype=torch.float32)
         loss_fn    = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
@@ -327,16 +426,16 @@ def main(
             num_items        = num_movies,
             user_pos_set     = user_pos_set,
             ng_seed          = 42,
-            latent_len       = 128,
+            latent_len       = 256,
             n_neighbors      = 10,
             epochs           = gradisomap_epochs,
             cf_epochs        = 100,
             final_cf_epochs  = 100,
             batch_size       = 2048,
             lr_isomap        = 3e-2,
-            lr_ncf           = 1e-3, #5e-4,
+            lr_ncf           = 1e-3,
             factor_num       = 32,
-            num_layers       = 3,
+            num_layers       = 4,
             dropout          = 0.0,
             model_type       = "NeuMF-end",
             logs_folder      = f"{logs_gi_dir}/{n_run}",
@@ -368,6 +467,26 @@ def main(
             save_path=os.path.join(logs_gi_dir, f"{n_run}/images/metrics.png"),
         )
 
+                # === ДОПОЛНИТЕЛЬНАЯ ОЦЕНКА С РАЗДЕЛЕНИЕМ НА REPEAT/NEW ===
+        print("\n--- Оценка с разделением на repeat/new items ---")
+
+        # Передаем user_pos_train_set (он уже содержит ТОЛЬКО train-взаимодействия!)
+        split_results = evaluate_topk_split(
+            model=ncf_manifold_model,
+            test_loader=test_loader,
+            top_k=top_k,
+            device=device,
+            user_train_items=user_pos_train_set,  # <--- ИСПРАВЛЕНО ЗДЕСЬ
+            isomap_model=isomap_model,            # <--- ИСПРАВЛЕНО ЗДЕСЬ
+        )
+
+        # Выводим подробный отчет
+        print(f"  HR@{top_k} all:        {split_results['HR@K_all']:.4f}")
+        print(f"  NDCG@{top_k} all:      {split_results['NDCG@K_all']:.4f}")
+        print(f"  HR@{top_k} repeat:     {split_results['HR@K_repeat']:.4f} (n={split_results['n_repeat']})")
+        print(f"  NDCG@{top_k} repeat:   {split_results['NDCG@K_repeat']:.4f}")
+        print(f"  HR@{top_k} new:        {split_results['HR@K_new']:.4f} (n={split_results['n_new']})")
+        print(f"  NDCG@{top_k} new:      {split_results['NDCG@K_new']:.4f}")
 
 # ─────────────────────────────────────────────
 #  ТОЧКА ВХОДА
@@ -392,21 +511,42 @@ if __name__ == "__main__":
     # )
 
     # ── Amazon Books ─────────────────────────────────────────────────
+    #main(
+    #    dataset_name   = DATASET_AMAZON,
+    #    dataset_config = {
+    #        "hf_name":    "cogsci13/Amazon-Reviews-2023-Books-Review",
+    #        "hf_config":  "raw_review_Books",
+    #        "cache_path": "data/amazon_books_reviews.parquet",
+    #    },
+    #    max_users      = 2000,
+    #    max_movies     = 5000,
+    #    min_seq_len    = 1,
+    #    num_ng         = 2,
+    #    top_k          = 10,
+    #    epochs_pure    = 100,
+    #    gradisomap_epochs = 30,
+    #    run_ncf        = False,
+    #    run_gincf      = True,
+    #    n_run          = 717,
+    #)
+
+    # ── T-ECD ─────────────────────────────────────────────────
     main(
-        dataset_name   = DATASET_AMAZON,
-        dataset_config = {
-            "hf_name":    "cogsci13/Amazon-Reviews-2023-Books-Review",
-            "hf_config":  "raw_review_Books",
-            "cache_path": "data/amazon_books_reviews.parquet",
-        },
-        max_users      = 2000,
-        max_movies     = 5000,
-        min_seq_len    = 1,
-        num_ng         = 2,
-        top_k          = 10,
-        epochs_pure    = 100,
-        gradisomap_epochs = 30,
-        run_ncf        = False,
-        run_gincf      = True,
-        n_run          = 717,
-    )
+                dataset_name   = DATASET_TECD,
+                dataset_config = {
+                    "subset_path": "recsys/GradIsomapCF_movielens/data/tecd/tecd_retail_subset.parquet",
+                    "use_positive_only": True,   # как MovieLens — только позитив
+                },
+                max_users      = 1000,
+                max_movies     = 1500,
+                min_seq_len    = 5,
+                num_ng         = 2,
+                top_k          = 10,
+                epochs_pure    = 100,
+                gradisomap_epochs = 20,
+                run_ncf        = False,
+                run_gincf      = True,
+                n_run          = 905,
+            )
+    
+    
