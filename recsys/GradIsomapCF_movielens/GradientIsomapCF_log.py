@@ -213,7 +213,7 @@ def save_epoch_matrices(
         Z=Z,
         D_latent=D_latent,
     )
-    print(f"[Save] Эпоха {epoch + 1}: матрицы сохранены → {save_path}")
+    print(f"[Save] Эпоха {epoch + 1}: матрицы сохранены → {save_path}", flush=True)
 
 
 def _build_knn_adjacency(D_input: np.ndarray, k: int) -> np.ndarray:
@@ -601,7 +601,7 @@ class GradientIsomapCF:
 
                     print(f"  [Inner NCF] ep {cf_ep + 1}/{self.cf_epochs} | "
                           f"train={avg_cf_train_loss:.4f}, val={avg_cf_val_loss:.4f}, "
-                          f"val_hr@10={avg_cf_val_hr:.4f}")
+                          f"val_hr@10={avg_cf_val_hr:.4f}", flush=True)
 
                     if early_stop.step(avg_cf_train_loss, avg_cf_val_loss, ncf_model, val_hr=avg_cf_val_hr):
                         break
@@ -610,7 +610,7 @@ class GradientIsomapCF:
                 else:
                     cf_val_losses.append(None)
                     print(f"  [Inner NCF] ep {cf_ep + 1}/{self.cf_epochs} | "
-                          f"train={avg_cf_train_loss:.4f}")
+                          f"train={avg_cf_train_loss:.4f}", flush=True)
 
             if self.select_by == "hr":
                 early_stop.restore_best_hr(ncf_model)
@@ -658,7 +658,7 @@ class GradientIsomapCF:
                         torch.nan_to_num_(p.grad, nan=0.0, posinf=0.0, neginf=0.0)
             if had_bad_grad:
                 print(f"  [Guard] Outer epoch {epoch}: {grad_nonfinite_count} non-finite "
-                      f"gradient entries zeroed before isomap_optim.step()")
+                      f"gradient entries zeroed before isomap_optim.step()", flush=True)
 
             isomap_optim.step()
 
@@ -722,7 +722,7 @@ class GradientIsomapCF:
                   f"val={avg_val_loss if avg_val_loss is not None else float('nan'):.4f}, "
                   f"HR@{top_k}={hr_val if hr_val is not None else float('nan'):.4f}, "
                   f"NDCG@{top_k}={ndcg_val if ndcg_val is not None else float('nan'):.4f}, "
-                  f"time={elapsed:.1f}s")
+                  f"time={elapsed:.1f}s", flush=True)
 
             stop_loss = avg_val_loss if avg_val_loss is not None else avg_train_loss
 
@@ -840,7 +840,7 @@ class GradientIsomapCF:
 
                 print(f"[Final NCF] ep {ep + 1}/{self.final_cf_epochs} | "
                       f"train={avg_train_loss:.4f}, val={avg_val_loss:.4f}, "
-                      f"val_hr@10={avg_val_hr_final:.4f}")
+                      f"val_hr@10={avg_val_hr_final:.4f}", flush=True)
 
                 # select_by="hr" (default recommended, see class docstring
                 # note above EarlyStopping): pick the checkpoint with the best
@@ -880,7 +880,7 @@ class GradientIsomapCF:
                     break
             else:
                 print(f"[Final NCF] ep {ep + 1}/{self.final_cf_epochs} | "
-                      f"train={avg_train_loss:.4f}")
+                      f"train={avg_train_loss:.4f}", flush=True)
 
         if best_state_final is not None:
             final_ncf.load_state_dict(best_state_final)
