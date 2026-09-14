@@ -8,6 +8,51 @@ Read that first for the why; this file tracks the where-are-we-now.
 ## CURRENT STATUS / NEXT STEP
 *(this block is overwritten each session — always current, read this first)*
 
+**2026-09-14: 1000u/1200i scale result in (single run, mixed picture),
+3000u/2500i retry launched with the flush fix.**
+
+**1000u/1200i result:** HR@10=0.2221, NDCG@10=0.1106, 12.0h, zero guard
+triggers - the best absolute quality seen anywhere in this investigation.
+train_loss trend still robustly significant and decreasing (r²=0.134,
+p=6.2e-11) - reproduces the core finding from 300u/800i. But val_hr trend
+is significant in the OPPOSITE direction this time (r²=0.022, p=0.0097,
+declining: first100 mean=0.200 -> last100 mean=0.172), unlike all 3 seeds
+at 300u/800i (which rose). Best checkpoint at step 137/300 (mid-run, not
+early or late). Restore-best-not-last still clearly earned its keep
+(last-step val_hr=0.189 vs restored 0.251). Plot:
+`scaletest_1000x1200_convergence.png` in process_docs. **Caveat
+explicitly flagged by the user: this is n=1 at this scale - no seed
+repeats yet, same standing caution as everywhere else in this
+investigation.**
+
+**User's idea for later (not yet built):** extend the hyperbolicity/
+quality scatter plot (`hyperbolicity_frozenproj_comparison.png`) to
+include runs from every scale tested, once there's enough data - to show
+whether quality trends up with scale and whether same-scale seeds
+cluster together on the plot. Revisit once more scale points exist.
+
+**Now running:** 3000u/2500i retry (`run_amazon_beauty_frozenproj_scaletest.py`,
+outer_epochs=100, seed=0) - same config as the original recon that
+appeared to hang (see the correction below: it hadn't actually hung, just
+the log wasn't flushing). Relaunched fresh with the flush fix now in
+place, so this time progress should be visible in real time and the
+run can be trusted to complete or fail honestly.
+
+**Still open / not yet decided (carried over):**
+- 3000u/2500i result - pending.
+- Whether to get seed repeats at 1000u/1200i and/or 3000u/2500i once both
+  land, given the user's standing caution about n=1 results.
+- A fair (dropout=0.2) Euclidean baseline at these larger scales, for a
+  true apples-to-apples comparison (currently only exists at 300u/800i).
+- Spectral/connectivity-vs-quality correlation check across other
+  datasets/scales - deferred, revisit later per the user.
+- ML-1M/ML-10M still sit at the pre-dropout, pre-frozen-projection
+  generation - resweep decision deferred until scale-robustness settles.
+- Item-representation/parameter-count table still not added to main.tex.
+- Gromov delta section (4.1) and empty Conclusion - still deferred.
+
+---
+
 **2026-09-13: CORRECTION - the "instability at scale" finding below was
 WRONG. Root cause was a logging bug (missing `flush=True`), not a real
 hang. Fixed, and both scale tests relaunched.**
