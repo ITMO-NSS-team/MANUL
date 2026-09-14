@@ -8,6 +8,34 @@ Read that first for the why; this file tracks the where-are-we-now.
 ## CURRENT STATUS / NEXT STEP
 *(this block is overwritten each session — always current, read this first)*
 
+**2026-09-14, later: measured training-time vs post-hoc-diagnostics-time
+scaling separately - they scale completely differently.** User asked to
+track both components with scale to estimate growth rate, after noticing
+the post-hoc geometry diagnostics phase (per-snapshot ORC/persistent-
+homology/spectral analysis, run once via `analyze_run` after training -
+NOT part of the method itself, only feeds the paper's diagnostic tables)
+was taking unexpectedly long at 3000u/2500i.
+
+| items | train s/outer-step | diagnostics s/snapshot |
+|---|---|---|
+| 800 | 114.8 | 3.05 |
+| 1200 (1.5x) | 140.7 (1.2x) | 3.75 (1.2x) |
+| 2500 (2.1-3.1x) | 361.7 (2.6-3.2x) | **~296.6 (79-97x!)** |
+
+Training time scales roughly proportionally with data size, as expected.
+Post-hoc diagnostics time is dramatically superlinear - a ~2-3x increase
+in item count produced a ~80-100x increase in per-snapshot diagnostics
+cost, suggesting some sub-computation (likely all-pairs shortest paths
+for Ollivier-Ricci curvature, and/or persistent homology's simplicial
+complex construction - the log already shows the triangle-count safety
+cap being hit at this scale) crosses into a much more expensive
+complexity regime around n=2500. This diagnostics cost is separable from
+and irrelevant to the method's actual downstream quality (HR@10/NDCG@10)
+- it only matters for building the geometry/hyperbolicity comparison
+tables. At larger scales, this phase could be skipped or subsampled
+(e.g. only analyze every Nth snapshot, or just epoch0+restored-best)
+without affecting any quality conclusion - not yet decided/implemented.
+
 **2026-09-14: 1000u/1200i scale result in (single run, mixed picture),
 3000u/2500i retry launched with the flush fix.**
 
