@@ -8,6 +8,76 @@ Read that first for the why; this file tracks the where-are-we-now.
 ## CURRENT STATUS / NEXT STEP
 *(this block is overwritten each session — always current, read this first)*
 
+**2026-09-15: 3000u/2500i result landed (best quality across all scales
+tested), machine rebooted mid-diagnostics but training results survived,
+diagnostics recomputation made crash-resilient and parallelized.**
+
+**3000u/2500i result:** HR@10=0.3119, NDCG@10=0.1612, 100 outer epochs,
+best absolute quality seen at any scale tested so far (beats both
+300u/800i and 1000u/1200i). train_loss dropped from 0.366 (first-10 mean)
+to 0.311 (last-10 mean), val_hr from 0.162 to 0.205 (first-10 vs last-10
+mean), best val_hr=0.314 at epoch 87/100 (near the end, not mid-run like
+1000u/1200i). 4/100 outer steps triggered the bad-gradient guard (handled,
+not fatal). **Still n=1 at this scale** - same standing caution as
+1000u/1200i.
+
+A machine reboot hit partway through the post-hoc geometry-diagnostics
+pass for this run (`geometry_diagnostics.csv`, the ORC/persistent-homology/
+spectral table - separate from and irrelevant to the HR/NDCG numbers
+above, which are saved live during training and were untouched by the
+reboot). ~8h of diagnostics computation was lost because `analyze_run`
+only wrote the CSV once at the very end. Fixed: `analyze_run` now writes
+`out_csv` incrementally after every processed snapshot, and optionally
+parallelizes across snapshots via `n_workers` (multiprocessing.Pool with
+a top-level picklable worker, kept spawn-safe for Windows - see the
+documented past multiprocessing-freeze incident in
+`geometry_diagnostics.py`'s `ollivier_ricci_curvature` docstring, which
+this deliberately avoids repeating). Verified byte-identical output
+against the existing serial 300-row baseline before trusting it on the
+real target (commit `efab0dd`).
+
+**Diagnostics recomputation completed** (100/100 snapshots, `n_workers=8`,
+well under the ~8h serial estimate). H1 (persistent homology) had to be
+skipped at BOTH 1000u/1200i and 3000u/2500i - the 1-skeleton's estimated
+triangle count (2.3M at 3000u/2500i) exceeds `geometry_diagnostics.py`'s
+300k safety cap by far, so H0-only at these scales. This was already true
+at 800i scale for some configs (see the 2026-09-12 hyperbolicity entry
+below) but is now the norm, not the exception, above ~1000 items - H1
+comparisons across scale are not available with the current cap.
+
+**Built the scale-extended hyperbolicity/quality comparison
+(`full_hyperbolicity_table_scaling.py`, `plot_hyperbolicity_scaling.py`,
+per the user's earlier-deferred idea), reusing `diagnostics_for_D` on each
+scale's restored-best-by-val_hr epoch for an apples-to-apples comparison
+with the existing 300u/800i 3-seed table:**
+
+| scale | delta_rel | test HR@10 |
+|---|---|---|
+| 300u/800i (3 seeds) | 0.237-0.247 | 0.187-0.207 |
+| 1000u/1200i (n=1) | 0.311 | 0.222 |
+| 3000u/2500i (n=1) | 0.338 | 0.312 |
+
+Quality rises monotonically with scale. Hyperbolicity does NOT explain
+this - if anything delta_rel also rises with scale (geometry becomes
+LESS hyperbolic as scale grows), the opposite of what a "more hyperbolic
+= better" story would predict, while quality improves anyway. This is
+the same "hyperbolicity doesn't track quality" finding as the 2026-09-12
+entry below, now confirmed to hold (not reverse or resolve) across scale.
+Plot saved to `process_docs/hyperbolicity_scaling_comparison.png`
+(2026-09-15) - two panels: delta_rel-vs-HR@10 scatter with scale points
+as diamonds, and a direct HR@10-vs-scale panel (replacing the original
+H1 bar chart, since H1 isn't available above 300u/800i - see above).
+
+**Next steps:**
+- Seed repeats at 1000u/1200i and 3000u/2500i, per the standing n=1
+  caution - not yet done at either larger scale.
+- Decide whether to raise `geometry_diagnostics.py`'s H1 safety cap (or
+  subsample nodes before persistent homology) to get H1 comparable across
+  scales - currently only available at 300u/800i.
+- Everything else carried over below is still open.
+
+---
+
 **2026-09-14, later: measured training-time vs post-hoc-diagnostics-time
 scaling separately - they scale completely differently.** User asked to
 track both components with scale to estimate growth rate, after noticing
