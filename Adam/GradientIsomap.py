@@ -79,7 +79,7 @@ class GradientIsomap:
             dist_train = self.generate_random_matrix(self.features.shape[0], dist_type='normal', device=self.device)
         isomap_model = IsomapNN(dist_train, n_components=self.latent_len, n_neighbors=self.n_neighbors, eigval_choice='MDS')
         isomap_model.to(self.device)
-        isomap_optim = torch.optim.AdamW(params=isomap_model.parameters(), lr=0.0001)
+        isomap_optim = torch.optim.AdamW(params=isomap_model.parameters(), lr=0.0001)  ## EDITED!! original=0.0001
         isomap_criterion = nn.MSELoss()
 
         losses = []
@@ -209,7 +209,7 @@ class GradientIsomap:
                 print('Egv degenerate')
         if abs(isomap_eigenvalues[0]) >= 0.01:
             for param_group in isomap_optim.param_groups:
-                param_group['lr'] = 0.0001
+                param_group['lr'] = 0.0001   ## EDITED!! original=0.0001
 
     @staticmethod
     def generate_random_matrix(n_samples, dist_type='normal', device='cuda'):
