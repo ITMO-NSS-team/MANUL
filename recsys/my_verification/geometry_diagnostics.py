@@ -20,6 +20,7 @@ Section 3.3.4/3.3.5 of the draft.
 """
 import argparse
 import glob
+import multiprocessing as mp
 import os
 import re
 import sys
@@ -29,6 +30,7 @@ import gudhi
 import networkx as nx
 import numpy as np
 import ot
+import pandas as pd
 from scipy.stats import spearmanr, pearsonr
 
 
@@ -365,38 +367,88 @@ def summarize_epoch(data: dict) -> dict:
     return out
 
 
-def analyze_run(logs_folder: str, max_epochs_to_show: int = None) -> list:
-    print(f"\n=== Geometry diagnostics for {logs_folder} ===")
-    results = []
+def _epoch_num(path: str) -> int:
+    m = re.search(r"matrices_epoch(\d+)\.npz", os.path.basename(path))
+    return int(m.group(1)) if m else -1
+
+
+def _process_one_epoch_file(path: str) -> dict:
+    """Top-level, picklable worker - loads and summarizes ONE snapshot.
+    Must stay top-level (not a closure/method) for Windows' multiprocessing
+    spawn semantics: spawned workers re-import this module rather than
+    inheriting the parent's memory, so anything the worker calls has to be
+    reachable by that fresh import, not just defined in an enclosing scope."""
+    k = _epoch_num(path)
+    data = np.load(path)
+    row = {"epoch": k}
+    row.update(summarize_epoch(data))
+    return row
+
+
+def _print_epoch_row(row: dict) -> None:
+    k = row["epoch"]
+    print(f"[epoch {k}] ORC mean={row.get('orc_mean', float('nan')):.4f} "
+          f"f_neg={row.get('orc_f_neg', float('nan')):.3f} | "
+          f"lambda2={row.get('spectral_lambda2', float('nan')):.4f} "
+          f"gap={row.get('spectral_spectral_gap', float('nan')):.4f} | "
+          f"stress={row.get('kruskal_stress', float('nan')):.4f} "
+          f"rho={row.get('spearman_rho', float('nan')):.4f} | "
+          f"H1(geo)={row.get('geo_h1_count', 'n/a')} H1(lat)={row.get('lat_h1_count', 'n/a')}", flush=True)
+
+
+def analyze_run(logs_folder: str, max_epochs_to_show: int = None, out_csv: str = None,
+                n_workers: int = 1) -> list:
+    """n_workers > 1 processes independent snapshots in parallel (each
+    matrices_epoch{k}.npz is self-contained, so this is embarrassingly
+    parallel - no shared state between snapshots). Uses multiprocessing.Pool
+    with a top-level worker function specifically so it's safe under
+    Windows' spawn-based process creation (see the docstring on
+    ollivier_ricci_curvature for a past incident where a THIRD-PARTY
+    library's multiprocessing was NOT spawn-safe on Windows and froze the
+    whole machine - this local implementation avoids that class of bug by
+    keeping the worker function top-level and picklable).
+
+    out_csv: if given, the accumulated results are written to this path
+    after EVERY completed snapshot (not just once at the end) - so a crash/
+    reboot partway through only loses the not-yet-processed snapshots, not
+    the whole run. See docs/recsys_paper_diary.md, 2026-09-15 (a full
+    3000u/2500i diagnostics pass - ~8h - was lost to a machine reboot at
+    98/100 snapshots because it only saved once at the very end)."""
+    print(f"\n=== Geometry diagnostics for {logs_folder} (n_workers={n_workers}) ===")
 
     epoch_files = glob.glob(os.path.join(logs_folder, "matrices_epoch*.npz"))
-
-    def epoch_num(path):
-        m = re.search(r"matrices_epoch(\d+)\.npz", os.path.basename(path))
-        return int(m.group(1)) if m else -1
-
-    epoch_files = sorted(epoch_files, key=epoch_num)
+    epoch_files = sorted(epoch_files, key=_epoch_num)
     if max_epochs_to_show is not None:
-        shown = sorted(set(epoch_num(p) for p in epoch_files))
+        shown = sorted(set(_epoch_num(p) for p in epoch_files))
         keep = set(shown[:1] + shown[-max_epochs_to_show:]) if len(shown) > max_epochs_to_show else set(shown)
-        epoch_files = [p for p in epoch_files if epoch_num(p) in keep]
+        epoch_files = [p for p in epoch_files if _epoch_num(p) in keep]
 
-    for file_idx, path in enumerate(epoch_files):
-        k = epoch_num(path)
-        _progress(f"=== epoch {k} ({file_idx + 1}/{len(epoch_files)} files) ===")
-        data = np.load(path)
-        row = {"epoch": k}
-        row.update(summarize_epoch(data))
-        results.append(row)
-        print(f"[epoch {k}] ORC mean={row.get('orc_mean', float('nan')):.4f} "
-              f"f_neg={row.get('orc_f_neg', float('nan')):.3f} | "
-              f"lambda2={row.get('spectral_lambda2', float('nan')):.4f} "
-              f"gap={row.get('spectral_spectral_gap', float('nan')):.4f} | "
-              f"stress={row.get('kruskal_stress', float('nan')):.4f} "
-              f"rho={row.get('spearman_rho', float('nan')):.4f} | "
-              f"H1(geo)={row.get('geo_h1_count', 'n/a')} H1(lat)={row.get('lat_h1_count', 'n/a')}")
+    results = []
 
-    return results
+    def _save_incremental():
+        if out_csv:
+            pd.DataFrame(sorted(results, key=lambda r: r["epoch"])).to_csv(out_csv, index=False)
+
+    if n_workers > 1:
+        n_done = 0
+        with mp.Pool(n_workers) as pool:
+            for row in pool.imap_unordered(_process_one_epoch_file, epoch_files):
+                results.append(row)
+                n_done += 1
+                _progress(f"=== epoch {row['epoch']} ({n_done}/{len(epoch_files)} files, "
+                          f"{n_workers} workers) ===")
+                _print_epoch_row(row)
+                _save_incremental()
+    else:
+        for file_idx, path in enumerate(epoch_files):
+            k = _epoch_num(path)
+            _progress(f"=== epoch {k} ({file_idx + 1}/{len(epoch_files)} files) ===")
+            row = _process_one_epoch_file(path)
+            results.append(row)
+            _print_epoch_row(row)
+            _save_incremental()
+
+    return sorted(results, key=lambda r: r["epoch"])
 
 
 def main():
@@ -405,14 +457,16 @@ def main():
                          help="e.g. .../logs_movielens_isomap_cf/main01")
     parser.add_argument("--max_epochs_to_show", type=int, default=None)
     parser.add_argument("--out_csv", default=None,
-                         help="if given, write per-epoch results as CSV here")
+                         help="if given, write per-epoch results as CSV here, "
+                              "incrementally after every snapshot (not just at the end)")
+    parser.add_argument("--n_workers", type=int, default=1,
+                         help="parallel worker processes, one per independent snapshot")
     args = parser.parse_args()
 
-    results = analyze_run(args.logs_folder, args.max_epochs_to_show)
+    results = analyze_run(args.logs_folder, args.max_epochs_to_show,
+                          out_csv=args.out_csv, n_workers=args.n_workers)
 
     if args.out_csv:
-        import pandas as pd
-        pd.DataFrame(results).to_csv(args.out_csv, index=False)
         print(f"\n[Save] {args.out_csv}")
 
 
