@@ -367,6 +367,26 @@ class GradientIsomapCF:
     def train(self, val_loader=None, top_k: int = 10, device=None,
           use_init_assumption: bool = True):
 
+        def _flush_histories(logs_folder: str, history: dict, cf_history: dict):
+                """Атомарная запись обеих историй на диск после каждой outer-эпохи."""
+        
+                # --- outer history (npz) ---
+                cleaned = {}
+                for key, values in history.items():
+                    cleaned[key] = np.array(
+                        [v if v is not None else np.nan for v in values],
+                        dtype=np.float32,
+                    )
+                np.savez_compressed(
+                    os.path.join(logs_folder, "history.npz"), **cleaned
+                )
+        
+                # --- inner history (json) ---
+                # cf_history содержит списки списков → json-сериализуемо
+                cf_path = os.path.join(logs_folder, "cf_history.json")
+                with open(cf_path, "w", encoding="utf-8") as f:
+                    json.dump(cf_history, f, indent=2, default=float)
+
         if device is None:
             device = self.device
         elif isinstance(device, str):
@@ -399,6 +419,10 @@ class GradientIsomapCF:
             dist_train.cpu().numpy().astype(np.float32)
         )
         print(f"[Save] Начальная D_input сохранена → D_input_init.npy")
+                # ── создаём файлы истории сразу, чтобы при прерывании было что читать ──
+        
+        _flush_histories(self.logs_folder, self.history, self.cf_history)
+        print(f"[Save] Пустые файлы истории инициализированы")
 
         isomap_model = IsomapNN(
             dist_train,
@@ -687,6 +711,13 @@ class GradientIsomapCF:
             if val_loader is not None:
                 _maybe_update_best_outer(epoch, avg_val_loss, hr_val, ndcg_val)
 
+                        # ── инкрементальное сохранение после каждой outer-эпохи ──
+            _flush_histories(self.logs_folder, self.history, self.cf_history)
+            print(
+                f"[Save] Outer epoch {epoch + 1}: "
+                f"history + cf_history сброшены на диск"
+            )
+
             stop_loss = avg_val_loss if avg_val_loss is not None else avg_train_loss
             if stop_loss < best_val_loss:
                 best_val_loss = stop_loss
@@ -889,29 +920,68 @@ class GradientIsomapCF:
             json.dump(summary, f, indent=4, default=float)
         print("[Summary]", json.dumps(summary, indent=2, default=float))
 
-        self.isomap_model = isomap_model
-        # основная ncf — BEST (по outer rank); LAST лежит отдельно на диске
-        self.ncf_model = ncf_best
+        #self.isomap_model = isomap_model
+        ## основная ncf — BEST (по outer rank); LAST лежит отдельно на диске
+        #self.ncf_model = ncf_best
+#
+        #torch.save(
+        #    self.isomap_model.state_dict(),
+        #    os.path.join(self.logs_folder, "isomap_model_final.pt"),
+        #)
+        ## дубль best-ncf под старым именем для совместимости
+        #torch.save(
+        #    self.ncf_model.state_dict(),
+        #    os.path.join(self.logs_folder, "ncf_model_final.pt"),
+        #)
+        ## last isomap state тоже сохраняем
+        #torch.save(
+        #    state_last,
+        #    os.path.join(self.logs_folder, "isomap_model_LAST_outer.pt"),
+        #)
+        #print(f"[Save] Модели сохранены в {self.logs_folder}")
+#
+        #save_history(self.logs_folder, self.history, filename="history.npz")
+        #cf_history_path = os.path.join(self.logs_folder, "cf_history.json")
+        #with open(cf_history_path, "w") as f:
+        #    json.dump(self.cf_history, f, indent=4, default=float)
+#
+        #return self.isomap_model, self.ncf_model
+                # ── LAST isomap: отдельный экземпляр с весами последней эпохи ──
+        import copy
+        isomap_model_last = copy.deepcopy(isomap_model)
+        isomap_model_last.load_state_dict(state_last)
+        isomap_model_last.eval()
+        with torch.no_grad():
+            _ = isomap_model_last()   # синхронизируем внутренние буферы
+
+        # ── сохраняем все четыре модели как атрибуты ──
+        self.isomap_model      = isomap_model       # BEST (уже загружен выше)
+        self.ncf_model         = ncf_best           # BEST
+        self.isomap_model_last = isomap_model_last  # LAST
+        self.ncf_model_last    = ncf_last           # LAST
 
         torch.save(
             self.isomap_model.state_dict(),
             os.path.join(self.logs_folder, "isomap_model_final.pt"),
         )
-        # дубль best-ncf под старым именем для совместимости
         torch.save(
             self.ncf_model.state_dict(),
             os.path.join(self.logs_folder, "ncf_model_final.pt"),
         )
-        # last isomap state тоже сохраняем
         torch.save(
             state_last,
             os.path.join(self.logs_folder, "isomap_model_LAST_outer.pt"),
         )
         print(f"[Save] Модели сохранены в {self.logs_folder}")
 
-        save_history(self.logs_folder, self.history, filename="history.npz")
-        cf_history_path = os.path.join(self.logs_folder, "cf_history.json")
-        with open(cf_history_path, "w") as f:
-            json.dump(self.cf_history, f, indent=4, default=float)
+        #save_history(self.logs_folder, self.history, filename="history.npz")
+        #cf_history_path = os.path.join(self.logs_folder, "cf_history.json")
+        #with open(cf_history_path, "w") as f:
+        #    json.dump(self.cf_history, f, indent=4, default=float)
+                # ── финальный сброс (включает данные final stage, если добавятся) ──
+        _flush_histories(self.logs_folder, self.history, self.cf_history)
+        print(f"[Save] Финальная история сохранена")
 
-        return self.isomap_model, self.ncf_model
+        # возвращаем оба чекпоинта явно
+        return (self.isomap_model, self.ncf_model), \
+               (self.isomap_model_last, self.ncf_model_last)

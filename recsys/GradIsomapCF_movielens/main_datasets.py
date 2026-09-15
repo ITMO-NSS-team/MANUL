@@ -424,10 +424,10 @@ def main(
             train_events     = train_events,
             num_users        = num_users,
             num_items        = num_movies,
-            user_pos_set     = user_pos_set,
+            user_pos_set     = user_pos_train_set,
             ng_seed          = 42,
-            latent_len       = 256,
-            n_neighbors      = 10,
+            latent_len       = 128,
+            n_neighbors      = 20,
             epochs           = gradisomap_epochs,
             cf_epochs        = 100,
             final_cf_epochs  = 100,
@@ -435,7 +435,7 @@ def main(
             lr_isomap        = 3e-2,
             lr_ncf           = 1e-3,
             factor_num       = 32,
-            num_layers       = 4,
+            num_layers       = 3,
             dropout          = 0.0,
             model_type       = "NeuMF-end",
             logs_folder      = f"{logs_gi_dir}/{n_run}",
@@ -443,51 +443,130 @@ def main(
             stop_criteria_value = 0.001,
             num_ng           = num_ng,)
 
-        isomap_model, ncf_manifold_model = gi_cf.train(
+                # ── обучение: получаем оба чекпоинта сразу ──
+        (isomap_best, ncf_best), (isomap_last, ncf_last) = gi_cf.train(
             val_loader = val_loader,
             top_k      = top_k,
             device     = device,
         )
 
-        hr_iso, ndcg_iso = evaluate_topk_isomap(
-            ncf_manifold_model, isomap_model, test_loader, top_k, device
+        # ── Test metrics: BEST ──
+        hr_best, ndcg_best = evaluate_topk_isomap(
+            ncf_best, isomap_best, test_loader, top_k, device
         )
-        print(f"GradientIsomapCF final TEST: "
-              f"HR@{top_k}={hr_iso:.4f}, NDCG@{top_k}={ndcg_iso:.4f}")
+        print(f"[FINAL/BEST] TEST: HR@{top_k}={hr_best:.4f}, NDCG@{top_k}={ndcg_best:.4f}")
 
+        # ── Test metrics: LAST ──
+        hr_last, ndcg_last = evaluate_topk_isomap(
+            ncf_last, isomap_last, test_loader, top_k, device
+        )
+        print(f"[FINAL/LAST] TEST: HR@{top_k}={hr_last:.4f}, NDCG@{top_k}={ndcg_last:.4f}")
+
+        # ── Графики (не зависят от return value — используют gi_cf.history) ──
         images_dir = os.path.join(logs_gi_dir, f"{n_run}/images")
+        os.makedirs(images_dir, exist_ok=True)
+
         plot_gi_losses(gi_cf.history, gi_cf.cf_history, images_dir, run_name="ginmf")
 
-        with open(f"{logs_gi_dir}/{n_run}/images/history.json", "w",
-                  encoding="utf-8") as f:
+        with open(os.path.join(images_dir, "history.json"), "w", encoding="utf-8") as f:
             json.dump(gi_cf.history, f, ensure_ascii=False, indent=4)
 
         plot_gi_convergence(
             gi_cf.history, top_k=top_k,
-            save_path=os.path.join(logs_gi_dir, f"{n_run}/images/metrics.png"),
+            save_path=os.path.join(images_dir, "metrics.png"),
         )
 
-                # === ДОПОЛНИТЕЛЬНАЯ ОЦЕНКА С РАЗДЕЛЕНИЕМ НА REPEAT/NEW ===
-        print("\n--- Оценка с разделением на repeat/new items ---")
-
-        # Передаем user_pos_train_set (он уже содержит ТОЛЬКО train-взаимодействия!)
-        split_results = evaluate_topk_split(
-            model=ncf_manifold_model,
-            test_loader=test_loader,
-            top_k=top_k,
-            device=device,
-            user_train_items=user_pos_train_set,  # <--- ИСПРАВЛЕНО ЗДЕСЬ
-            isomap_model=isomap_model,            # <--- ИСПРАВЛЕНО ЗДЕСЬ
+        # ── Repeat / New: BEST ──
+        print("\n--- [BEST] Оценка с разделением на repeat/new items ---")
+        split_best = evaluate_topk_split(
+            model            = ncf_best,
+            test_loader      = test_loader,
+            top_k            = top_k,
+            device           = device,
+            user_train_items = user_pos_train_set,
+            isomap_model     = isomap_best,
         )
+        print(f"  HR@{top_k} all:      {split_best['HR@K_all']:.4f}")
+        print(f"  NDCG@{top_k} all:    {split_best['NDCG@K_all']:.4f}")
+        print(f"  HR@{top_k} repeat:   {split_best['HR@K_repeat']:.4f}  (n={split_best['n_repeat']})")
+        print(f"  NDCG@{top_k} repeat: {split_best['NDCG@K_repeat']:.4f}")
+        print(f"  HR@{top_k} new:      {split_best['HR@K_new']:.4f}  (n={split_best['n_new']})")
+        print(f"  NDCG@{top_k} new:    {split_best['NDCG@K_new']:.4f}")
 
-        # Выводим подробный отчет
-        print(f"  HR@{top_k} all:        {split_results['HR@K_all']:.4f}")
-        print(f"  NDCG@{top_k} all:      {split_results['NDCG@K_all']:.4f}")
-        print(f"  HR@{top_k} repeat:     {split_results['HR@K_repeat']:.4f} (n={split_results['n_repeat']})")
-        print(f"  NDCG@{top_k} repeat:   {split_results['NDCG@K_repeat']:.4f}")
-        print(f"  HR@{top_k} new:        {split_results['HR@K_new']:.4f} (n={split_results['n_new']})")
-        print(f"  NDCG@{top_k} new:      {split_results['NDCG@K_new']:.4f}")
+        # ── Repeat / New: LAST ──
+        print("\n--- [LAST] Оценка с разделением на repeat/new items ---")
+        split_last = evaluate_topk_split(
+            model            = ncf_last,
+            test_loader      = test_loader,
+            top_k            = top_k,
+            device           = device,
+            user_train_items = user_pos_train_set,
+            isomap_model     = isomap_last,
+        )
+        print(f"  HR@{top_k} all:      {split_last['HR@K_all']:.4f}")
+        print(f"  NDCG@{top_k} all:    {split_last['NDCG@K_all']:.4f}")
+        print(f"  HR@{top_k} repeat:   {split_last['HR@K_repeat']:.4f}  (n={split_last['n_repeat']})")
+        print(f"  NDCG@{top_k} repeat: {split_last['NDCG@K_repeat']:.4f}")
+        print(f"  HR@{top_k} new:      {split_last['HR@K_new']:.4f}  (n={split_last['n_new']})")
+        print(f"  NDCG@{top_k} new:    {split_last['NDCG@K_new']:.4f}")
 
+        # ── сохранить итоговые test-метрики рядом с графиками ──
+        test_summary = {
+            "BEST": {"HR": hr_best, "NDCG": ndcg_best,
+                     "repeat_new": split_best},
+            "LAST": {"HR": hr_last, "NDCG": ndcg_last,
+                     "repeat_new": split_last},
+        }
+        with open(os.path.join(images_dir, "test_summary.json"), "w") as f:
+            json.dump(test_summary, f, indent=4, default=float)
+
+        #isomap_model, ncf_manifold_model = gi_cf.train(
+        #    val_loader = val_loader,
+        #    top_k      = top_k,
+        #    device     = device,
+        #)
+#
+        #hr_iso, ndcg_iso = evaluate_topk_isomap(
+        #    ncf_manifold_model, isomap_model, test_loader, top_k, device
+        #)
+        #print(f"GradientIsomapCF final TEST: "
+        #      f"HR@{top_k}={hr_iso:.4f}, NDCG@{top_k}={ndcg_iso:.4f}")
+
+        #
+        #
+        #images_dir = os.path.join(logs_gi_dir, f"{n_run}/images")
+        #plot_gi_losses(gi_cf.history, gi_cf.cf_history, images_dir, run_name="ginmf")
+#
+        #with open(f"{logs_gi_dir}/{n_run}/images/history.json", "w",
+        #          encoding="utf-8") as f:
+        #    json.dump(gi_cf.history, f, ensure_ascii=False, indent=4)
+#
+        #plot_gi_convergence(
+        #    gi_cf.history, top_k=top_k,
+        #    save_path=os.path.join(logs_gi_dir, f"{n_run}/images/metrics.png"),
+        #)
+#
+        #        # === ДОПОЛНИТЕЛЬНАЯ ОЦЕНКА С РАЗДЕЛЕНИЕМ НА REPEAT/NEW ===
+        #print("\n--- Оценка с разделением на repeat/new items ---")
+#
+        ## Передаем user_pos_train_set (он уже содержит ТОЛЬКО train-взаимодействия!)
+        #split_results = evaluate_topk_split(
+        #    model=ncf_manifold_model,
+        #    test_loader=test_loader,
+        #    top_k=top_k,
+        #    device=device,
+        #    user_train_items=user_pos_train_set,  # <--- ИСПРАВЛЕНО ЗДЕСЬ
+        #    isomap_model=isomap_model,            # <--- ИСПРАВЛЕНО ЗДЕСЬ
+        #)
+#
+        ## Выводим подробный отчет
+        #print(f"  HR@{top_k} all:        {split_results['HR@K_all']:.4f}")
+        #print(f"  NDCG@{top_k} all:      {split_results['NDCG@K_all']:.4f}")
+        #print(f"  HR@{top_k} repeat:     {split_results['HR@K_repeat']:.4f} (n={split_results['n_repeat']})")
+        #print(f"  NDCG@{top_k} repeat:   {split_results['NDCG@K_repeat']:.4f}")
+        #print(f"  HR@{top_k} new:        {split_results['HR@K_new']:.4f} (n={split_results['n_new']})")
+        #print(f"  NDCG@{top_k} new:      {split_results['NDCG@K_new']:.4f}")
+#
 # ─────────────────────────────────────────────
 #  ТОЧКА ВХОДА
 # ─────────────────────────────────────────────
@@ -534,19 +613,19 @@ if __name__ == "__main__":
     main(
                 dataset_name   = DATASET_TECD,
                 dataset_config = {
-                    "subset_path": "recsys/GradIsomapCF_movielens/data/tecd/tecd_retail_subset.parquet",
+                    "subset_path": "recsys/GradIsomapCF_movielens/data/tecd/tecd_marketplace_subset.parquet",
                     "use_positive_only": True,   # как MovieLens — только позитив
                 },
-                max_users      = 1000,
+                max_users      = 500,
                 max_movies     = 1500,
-                min_seq_len    = 5,
+                min_seq_len    = 4,
                 num_ng         = 2,
-                top_k          = 10,
+                top_k          = 20,
                 epochs_pure    = 100,
-                gradisomap_epochs = 20,
+                gradisomap_epochs = 30,
                 run_ncf        = False,
                 run_gincf      = True,
-                n_run          = 905,
+                n_run          = 816,
             )
     
     

@@ -110,8 +110,8 @@ def analyze_and_plot_folder(folder_path: str, save_path: str = None):
 # Пример запуска:
 if __name__ == "__main__":
     # Укажите путь к вашей папке с матрицами (например, 'logs_tecd_marketplace_isomap_cf/802/')
-    # folder_to_analyze = "logs_tecd_marketplace_isomap_cf/905"
-    folder_to_analyze = "recsys/GradIsomapCF_movielens/logs_movielens_isomap_cf/run61"
+    folder_to_analyze = "logs_tecd_marketplace_isomap_cf/816"
+    #folder_to_analyze = "recsys/GradIsomapCF_movielens/logs_movielens_isomap_cf/run61"
 
     # Запуск. График также сохранится на диск в этой же папке
     analyze_and_plot_folder(
