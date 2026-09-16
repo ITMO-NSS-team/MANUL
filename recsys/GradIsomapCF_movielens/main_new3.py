@@ -312,6 +312,7 @@ def main(
             num_ng=num_ng,
             partial_warm_start=partial_warm_start,
             warm_start_inner=warm_start_inner,
+            inner_patience=40,
             outer_patience=outer_patience,
             use_item_projection=use_item_projection,
             use_procrustes_align=use_procrustes_align,
@@ -367,7 +368,7 @@ if __name__ == "__main__":
     parser.add_argument("--final-cf-epochs", type=int, default=20)
     parser.add_argument("--save-matrices", action="store_true", default=False)
     parser.add_argument("--n-neighbors", type=int, default=20, help="k for the Isomap kNN graph")
-    parser.add_argument("--latent-len", type=int, default=1024)
+    parser.add_argument("--latent-len", type=int, default=32)
     parser.add_argument("--use-init-assumption", action="store_true", default=False)
     parser.add_argument("--warm-start-inner", action="store_true", default=False,
                         help="fully reuse last outer epoch's NCF model")
