@@ -252,13 +252,21 @@ def main(
         pure_history = {'epoch': [], 'train_loss': [], 'val_loss': [], 'hr_val': [], 'ndcg_val': []}
 
         train_pure_ncf(
-            pure_model, train_pairs, neg_set,
-            num_users=num_users, num_movies=num_movies,
-            num_ng=num_ng, top_k=top_k, device=device,
+            pure_model,
+            train_pairs,
+            neg_set,
+            num_users=num_users,
+            num_movies=num_movies,
+            num_ng=num_ng,
+            top_k=top_k,
+            device=device,
             val_tensors=val_tensors,
-            epochs=epochs_pure, patience=patience_pure,
-            lr=lr_ncf, weight_decay=ncf_weight_decay,
-            batch_size=batch_size, select_by=select_by,
+            epochs=epochs_pure,
+            patience=patience_pure,
+            lr=lr_ncf,
+            weight_decay=ncf_weight_decay,
+            batch_size=batch_size,
+            select_by=select_by,
             history=pure_history,
             use_pos_weight=ncf_use_pos_weight,
         )
@@ -342,7 +350,7 @@ if __name__ == "__main__":
     parser.add_argument("--top-k", type=int, default=10)
     parser.add_argument("--epochs-pure", type=int, default=50)
     parser.add_argument("--gradisomap-epochs", type=int, default=50)
-    parser.add_argument("--patience-pure", type=int, default=15)
+    parser.add_argument("--patience-pure", type=int, default=40)
     parser.add_argument("--run-ncf", action="store_true", default=False)
     parser.add_argument("--run-gincf", action="store_true", default=False)
     parser.add_argument("--partial-warm-start", action="store_true", default=False)
@@ -356,14 +364,14 @@ if __name__ == "__main__":
     parser.add_argument("--lr-ncf", type=float, default=1e-3,
                         help="lr for the inner/final NCF loops")
     parser.add_argument("--cf-epochs", type=int, default=50)
-    parser.add_argument("--final-cf-epochs", type=int, default=25)
+    parser.add_argument("--final-cf-epochs", type=int, default=20)
     parser.add_argument("--save-matrices", action="store_true", default=False)
-    parser.add_argument("--n-neighbors", type=int, default=10, help="k for the Isomap kNN graph")
+    parser.add_argument("--n-neighbors", type=int, default=20, help="k for the Isomap kNN graph")
     parser.add_argument("--latent-len", type=int, default=1024)
     parser.add_argument("--use-init-assumption", action="store_true", default=False)
     parser.add_argument("--warm-start-inner", action="store_true", default=False,
                         help="fully reuse last outer epoch's NCF model")
-    parser.add_argument("--outer-patience", type=int, default=12,
+    parser.add_argument("--outer-patience", type=int, default=40,
                         help="stop the gradisomap outer loop after this many outer")
     parser.add_argument("--no-item-projection", dest="use_item_projection",
                         action="store_false", default=True,
