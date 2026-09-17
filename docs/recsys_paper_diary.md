@@ -92,8 +92,21 @@ like the other two. Left panel confirms hyperbolicity (delta_rel) still
 shows no clean relationship to quality at any scale, for any geometry.
 
 **Still open:**
-- 1000u/1200i seed1's retry (relaunched clean, solo, after the fork-bomb
-  fix) - once it lands, add it to `full_hyperbolicity_table_scaling.py`
+- 1000u/1200i seed1 has now failed TWICE. First: `MemoryError` during a
+  checkpoint save (system RAM pressure from 4 parallel jobs, see above).
+  Second (2026-09-17 16:24:51, at outer step 156/300 - 52% through):
+  `torch.AcceleratorError: CUDA error: out of memory`, occurring ~1 minute
+  after an unrelated process on this shared machine
+  (`ArcticCompendium/.venv - analysis.pixel_maps_daily --workers 12`)
+  started at 16:23:44 - almost certainly external GPU/resource contention
+  from someone else's job, not a bug in this pipeline. GPU was back to
+  ~1GB/16GB free immediately after, so relaunched a third time. Worth
+  remembering going forward: this machine is shared and other users'
+  jobs can cause a training run to die with no code-level cause - if this
+  keeps happening, it may be worth adding basic OOM-retry/checkpoint-
+  resume to `GradientIsomapCF.train()`, but that's a real engineering
+  lift, not done yet (two isolated incidents so far, not a pattern).
+- Once seed1 finally lands, add it to `full_hyperbolicity_table_scaling.py`
   for a true 3rd seed at that scale (currently n=2 there: seed0, seed2).
 - The narrowing-gap pattern above is worth a dedicated look once more
   scale points or seeds exist - not yet statistically tested, just visible
