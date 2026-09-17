@@ -8,6 +8,129 @@ Read that first for the why; this file tracks the where-are-we-now.
 ## CURRENT STATUS / NEXT STEP
 *(this block is overwritten each session — always current, read this first)*
 
+**2026-09-17: caught and fixed a real bug - a self-sustaining fork-and-
+crash loop that burned ~20h of GPU time on 3 of the 4 parallel seed runs
+after they'd already finished legitimately. No training data was lost.**
+
+**Root cause:** none of the `run_*.py` driver scripts (the small
+per-experiment launchers like `run_amazon_beauty_frozenproj_scaletest_
+3000x2500_seed1.py`) guarded their top-level `sweep.main(...)` call with
+`if __name__ == "__main__":`. This had been harmless for years because
+nothing in the pipeline used real multiprocessing - until this session's
+`diagnostics_workers=4` (added 2026-09-15 for the incremental+parallel
+`analyze_run` fix) got threaded into these scripts for the first time.
+Windows' multiprocessing `spawn` start method re-imports the top-level
+script inside every worker process it creates; with no `__main__` guard,
+that re-import re-executes `sweep.main(...)` too - so each "diagnostics
+worker" was actually re-running the ENTIRE ~10-12h bilevel training
+pipeline from scratch instead of the lightweight per-snapshot diagnostics
+task it was supposed to do. Most such workers died quickly (GPU/CPU
+contention from 4+ processes fighting over one GPU), and
+`multiprocessing.Pool` silently replaces dead workers by default - so the
+whole thing repeated automatically, forever, needing no external trigger.
+
+**How it was caught:** a routine "как дела?" progress check showed the
+outer-step counter jumping backward and forward across log lines
+(`[Outer 42/100]` then `[Outer 6/100]`) - the tell that more than one
+process was writing to the same log file. `Get-CimInstance Win32_Process`
+confirmed real `--multiprocessing-fork` children under each of the 3
+training parents' PIDs, and the parents' CPU time had gone completely flat
+(one sample-pair showed 48723.1875 -> 48723.65625 across several hours -
+essentially zero new work), meaning each parent was permanently blocked
+in `Pool.imap_unordered()` waiting for results that would never arrive.
+Counting `"[Save] Начальная D_input сохранена"` occurrences (printed once
+per fresh `train()` invocation) in each polluted log gave 45-74 - i.e.
+45-74 separate full pipeline re-executions per job, not just 4.
+
+**Recovery:** killed the 3 hung parent process trees (`taskkill /T /F`) -
+GPU dropped from ~15GB/93% util back to ~1GB/1% immediately, confirming
+the runaway work stopped. Checked disk state before assuming anything was
+lost: all 3 affected runs (1000u/1200i seed2, 3000u/2500i seed1, 3000u/2500i
+seed2) had already written a complete `history.npz`, `ncf_model_final.pt`,
+and - critically - `results_*.json` BEFORE getting stuck (the hang is in
+`run_one()`'s *post*-training `analyze_run()` call, strictly after
+`run_experiment.main()` already returned and saved results) - so real,
+valid results were recovered with zero retraining:
+
+| scale | seed | test HR@10 | test NDCG@10 |
+|---|---|---|---|
+| 1000u/1200i | 0 | 0.2221 | 0.1106 |
+| 1000u/1200i | 2 | 0.2272 | 0.1151 |
+| 3000u/2500i | 0 | 0.3119 | 0.1612 |
+| 3000u/2500i | 1 | 0.3072 | 0.1566 |
+| 3000u/2500i | 2 | 0.3052 | 0.1561 |
+
+Seed-to-seed spread is small at both scales (reassuring for the "quality
+rises with scale" finding - not an artifact of one lucky seed). The 4th
+run (1000u/1200i seed1) crashed separately, mid-training, on an unrelated
+`MemoryError` during a `np.savez_compressed` checkpoint write (likely
+system memory pressure from all 4 parallel jobs at once, not the fork
+bug) - lost 299/300 epochs' worth of progress since no `history.npz`
+had been written yet; relaunched clean from scratch (solo, no contention
+this time) after the fix.
+
+**Fix:** added `if __name__ == "__main__":` around the top-level call in
+all 12 `run_*.py` driver scripts in `my_verification/` (commit `bff1207`),
+not just the 4 that triggered this - the same landmine was live in every
+one of them, just unfired because they'd never been run with
+`diagnostics_workers>1` before.
+
+**Rebuilt `hyperbolicity_scaling_comparison.png` (2026-09-17) with GINCF,
+Poincare, and the fair Euclidean baseline all computed at all 3 scales
+under equal conditions** (`full_hyperbolicity_table_scaling.py`, now
+extended to take multiple seeds per scale plus per-scale Poincare/
+Euclidean rows via the same `diagnostics_for_D` pass). New finding, clearly
+visible on the right panel (HR@10 vs scale, one line per geometry):
+**GINCF's margin over the Euclidean baseline narrows as scale grows** -
+300u/800i: ~0.19 vs ~0.12 (GINCF well ahead); 1000u/1200i: ~0.22-0.23 vs
+~0.20 (narrower); 3000u/2500i: ~0.31 vs ~0.29 (narrowest yet). GINCF still
+wins at every scale tested so far, but the gap shrinking is worth watching
+as a possible ceiling effect - not yet enough scale points to know if it
+keeps shrinking, flattens, or reverses. Poincare stays worst at every
+scale (consistent with earlier findings) but also improves with scale
+like the other two. Left panel confirms hyperbolicity (delta_rel) still
+shows no clean relationship to quality at any scale, for any geometry.
+
+**Still open:**
+- 1000u/1200i seed1's retry (relaunched clean, solo, after the fork-bomb
+  fix) - once it lands, add it to `full_hyperbolicity_table_scaling.py`
+  for a true 3rd seed at that scale (currently n=2 there: seed0, seed2).
+- The narrowing-gap pattern above is worth a dedicated look once more
+  scale points or seeds exist - not yet statistically tested, just visible
+  on the plot.
+
+Running (all with `OMP_NUM_THREADS=3`/`MKL_NUM_THREADS=3` to avoid CPU
+thread oversubscription across 8 concurrent processes; GPU has headroom -
+CUDA does the heavy compute, confirmed via `device=cuda` in every script):
+- `run_amazon_beauty_frozenproj_scaletest_{1000x1200,3000x2500}_seed{1,2}.py`
+  (new driver scripts, seed=1/seed=2, otherwise identical config to the
+  existing seed=0 runs) - the 4 expensive ones, ~10-12h each serially, so
+  parallelized specifically to compress this from ~45h sequential.
+- `poincare_baseline.py --tag amazon_beauty_{1000x1200,3000x2500}` and
+  `save_euclidean_baseline_geometry.py --dropout 0.2 --tag
+  amazon_beauty_{1000x1200,3000x2500}_dropout02fair` - much cheaper
+  (single NCF training pass, no bilevel loop), should land within 1-2h.
+
+**Hit and fixed a launch bug**: all 4 GINCF jobs crashed immediately on
+`UnicodeEncodeError` from a Cyrillic print in `GradientIsomapCF_log.py`'s
+`train()` (`[Save] Начальная D_input сохранена → ...`) - stdout redirected
+to a file without a console attached defaults to the system codepage
+(cp1251), not UTF-8. This is the same class of issue as the known
+"PYTHONIOENCODING=utf-8 needed for Cyrillic prints" gotcha (see Windows
+shell gotchas memory) but had not actually bitten a background run before
+now. Fixed by adding `PYTHONIOENCODING=utf-8` to the launch command;
+relaunched cleanly, confirmed all 4 passed the crash point into real
+training. GPU at ~91% VRAM (14.9/16.3GB) and 93% util, CPU ~51% - healthy,
+no more headroom for additional concurrent jobs though.
+
+**Once these land:** extend `full_hyperbolicity_table_scaling.py` and
+`plot_hyperbolicity_scaling.py` to include the new seeds/baselines - 3
+seeds per scale (mean+std, matching 300u/800i's presentation) instead of
+n=1, and Poincare/Euclidean reference points recomputed per-scale instead
+of reusing the 300u/800i-only ones.
+
+---
+
 **2026-09-15: 3000u/2500i result landed (best quality across all scales
 tested), machine rebooted mid-diagnostics but training results survived,
 diagnostics recomputation made crash-resilient and parallelized.**
