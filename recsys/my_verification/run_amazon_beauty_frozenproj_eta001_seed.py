@@ -22,29 +22,30 @@ import sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import run_eta_outer_sweep as sweep
 
-parser = argparse.ArgumentParser()
-parser.add_argument("--seed", type=int, required=True)
-args = parser.parse_args()
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--seed", type=int, required=True)
+    args = parser.parse_args()
 
-n_run_prefix = f"amazon_beauty_frozenproj_eta001_outer300_seed{args.seed}"
-print(f"\n=== eta=0.001 frozen seed={args.seed} n_run_prefix={n_run_prefix} ===\n", flush=True)
+    n_run_prefix = f"amazon_beauty_frozenproj_eta001_outer300_seed{args.seed}"
+    print(f"\n=== eta=0.001 frozen seed={args.seed} n_run_prefix={n_run_prefix} ===\n", flush=True)
 
-sweep.main(
-    n_run_prefix=n_run_prefix,
-    max_users=300,
-    max_movies=800,
-    dataset_dir_name="amazon_beauty",
-    dataset_type="amazon",
-    amazon_category="Beauty_and_Personal_Care",
-    select_by="hr",
-    cf_epochs=200,
-    final_cf_epochs=200,
-    inner_patience=30,
-    final_patience=30,
-    outer_epochs=300,
-    eta_values=[0.001],
-    dropout=0.2,
-    freeze_item_projection=True,
-    seed=args.seed,
-    summary_filename=f"{n_run_prefix}_summary.json",
-)
+    sweep.main(
+        n_run_prefix=n_run_prefix,
+        max_users=300,
+        max_movies=800,
+        dataset_dir_name="amazon_beauty",
+        dataset_type="amazon",
+        amazon_category="Beauty_and_Personal_Care",
+        select_by="hr",
+        cf_epochs=200,
+        final_cf_epochs=200,
+        inner_patience=30,
+        final_patience=30,
+        outer_epochs=300,
+        eta_values=[0.001],
+        dropout=0.2,
+        freeze_item_projection=True,
+        seed=args.seed,
+        summary_filename=f"{n_run_prefix}_summary.json",
+    )

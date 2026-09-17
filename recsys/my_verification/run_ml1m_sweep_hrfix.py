@@ -14,16 +14,17 @@ import sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import run_eta_outer_sweep as sweep
 
-sweep.main(
-    n_run_prefix="eta_sweep_hrfix",
-    max_users=300,
-    max_movies=800,
-    dataset_dir_name="ml-1m",
-    dataset_type="movielens",
-    select_by="hr",
-    cf_epochs=60,
-    final_cf_epochs=60,
-    inner_patience=8,
-    final_patience=8,
-    summary_filename="eta_outer_sweep_hrfix_summary.json",
-)
+if __name__ == "__main__":
+    sweep.main(
+        n_run_prefix="eta_sweep_hrfix",
+        max_users=300,
+        max_movies=800,
+        dataset_dir_name="ml-1m",
+        dataset_type="movielens",
+        select_by="hr",
+        cf_epochs=60,
+        final_cf_epochs=60,
+        inner_patience=8,
+        final_patience=8,
+        summary_filename="eta_outer_sweep_hrfix_summary.json",
+    )
