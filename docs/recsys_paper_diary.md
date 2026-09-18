@@ -91,23 +91,50 @@ scale (consistent with earlier findings) but also improves with scale
 like the other two. Left panel confirms hyperbolicity (delta_rel) still
 shows no clean relationship to quality at any scale, for any geometry.
 
-**Still open:**
-- 1000u/1200i seed1 has now failed TWICE. First: `MemoryError` during a
-  checkpoint save (system RAM pressure from 4 parallel jobs, see above).
-  Second (2026-09-17 16:24:51, at outer step 156/300 - 52% through):
-  `torch.AcceleratorError: CUDA error: out of memory`, occurring ~1 minute
-  after an unrelated process on this shared machine
-  (`ArcticCompendium/.venv - analysis.pixel_maps_daily --workers 12`)
-  started at 16:23:44 - almost certainly external GPU/resource contention
-  from someone else's job, not a bug in this pipeline. GPU was back to
-  ~1GB/16GB free immediately after, so relaunched a third time. Worth
-  remembering going forward: this machine is shared and other users'
-  jobs can cause a training run to die with no code-level cause - if this
-  keeps happening, it may be worth adding basic OOM-retry/checkpoint-
-  resume to `GradientIsomapCF.train()`, but that's a real engineering
-  lift, not done yet (two isolated incidents so far, not a pattern).
-- Once seed1 finally lands, add it to `full_hyperbolicity_table_scaling.py`
-  for a true 3rd seed at that scale (currently n=2 there: seed0, seed2).
+**1000u/1200i seed1 needed 3 attempts before landing clean** - first
+`MemoryError` mid-checkpoint (RAM pressure from 4 parallel jobs), second
+`torch.AcceleratorError: CUDA out of memory` ~1 minute after an unrelated
+process on this shared machine (`ArcticCompendium/.venv - analysis.
+pixel_maps_daily --workers 12`) started - almost certainly external
+contention, not a pipeline bug. Third attempt (solo, no contention) ran
+clean end to end in 15.96h, INCLUDING the automatic post-training
+`analyze_run` diagnostics sweep (n_workers=4) completing correctly this
+time - confirms the `__main__`-guard fix actually resolved the fork-bomb,
+not just papered over one instance of it. Result: HR@10=0.2140,
+NDCG@10=0.1089. Worth remembering: this machine is shared, and other
+users' jobs can kill a training run with no code-level cause - if this
+keeps recurring, basic OOM-retry/checkpoint-resume in
+`GradientIsomapCF.train()` would be worth the engineering lift, but two
+isolated incidents so far isn't yet a clear pattern.
+
+**Final 3-seed picture at every scale (`full_hyperbolicity_table_scaling.py`,
+`hyperbolicity_scaling_comparison.png`, rebuilt 2026-09-18):**
+
+| scale | GINCF seeds (HR@10) | GINCF mean | Poincare | Euclidean (fair) |
+|---|---|---|---|---|
+| 300u/800i | 0.187, 0.190, 0.207 | 0.195 | 0.100 | 0.123 |
+| 1000u/1200i | 0.214, 0.222, 0.227 | 0.221 | 0.116 | 0.205 |
+| 3000u/2500i | 0.305, 0.307, 0.312 | 0.308 | 0.172 | 0.292 |
+
+The narrowing-gap finding holds up with full seed coverage, not just the
+earlier partial picture: GINCF's margin over Euclidean is ~0.07 at
+300u/800i, narrows to ~0.02 at both larger scales and stays there (not a
+monotonically-shrinking-to-zero trend past 1000u/1200i, at least not yet -
+3000u/2500i's gap is about the same size as 1000u/1200i's, not smaller).
+GINCF's own seed-to-seed spread stays tight at every scale (a good sign -
+the "equal conditions" comparison isn't being won/lost on noise). Poincare
+stays worst at every scale, improving in absolute terms with scale like
+everything else but never catching up. Hyperbolicity (delta_rel) still
+shows no clean relationship to quality anywhere on this plot.
+
+**Open follow-ups, not yet done:**
+- The narrowing-then-plateauing gap pattern is only 3 scale points - not
+  enough to know if it keeps flat, or would keep narrowing/reverse with a
+  4th, larger scale point. Not yet statistically tested either (means
+  from 2-3 seeds each, no formal comparison).
+- Poincare/Euclidean baselines at the 2 larger scales are still n=1 each
+  (only GINCF has seed repeats) - same standing caution as everywhere
+  else in this investigation.
 - The narrowing-gap pattern above is worth a dedicated look once more
   scale points or seeds exist - not yet statistically tested, just visible
   on the plot.
