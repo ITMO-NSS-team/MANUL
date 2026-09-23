@@ -2,6 +2,18 @@
 data/MNIST/
 data/*.npy
 
+# MovieLens datasets - too large for git history, kept local-only. ML-1M:
+# https://files.grouplens.org/datasets/movielens/ml-1m.zip . ML-10M (265MB):
+# https://files.grouplens.org/datasets/movielens/ml-10m.zip . Extract
+# ratings.dat/movies.dat/users.dat into the respective folder to reproduce.
+recsys/GradIsomapCF_movielens/data/ml-1m/ratings.dat
+recsys/GradIsomapCF_movielens/data/ml-10m/
+
+# Experiment run logs/snapshots (per-epoch D matrices, heatmaps, collages) -
+# large, regenerable, not meant to live in git history.
+recsys/GradIsomapCF_movielens/logs_movielens_isomap_cf/
+recsys/my_verification/logs_movielens_isomap_cf/
+
 outputs/
 
 # Python

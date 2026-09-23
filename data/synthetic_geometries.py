@@ -45,7 +45,7 @@ def helicoid(n_samples=1000, normalize=True):
     return points_euq[:n_samples], colors[:n_samples]
 
 
-def torus(n_samples=1000, normalize=True):
+def torus(n_samples=1000, normalize=True, return_tube_angle=False, return_azimuthal_angle=False):
     r = 1
     R = 3
 
@@ -58,6 +58,21 @@ def torus(n_samples=1000, normalize=True):
     v_ = np.ravel(v_)
     points = np.vstack([v_, u_]).T
 
+    # NB: points[:, 0] (= v_) is the angle fed into the "R + r*cos(.)" tube
+    # term below, i.e. it is the geometric TUBE angle that analytic Gaussian
+    # curvature K(angle) = cos(angle) / (r*(R + r*cos(angle))) depends on -
+    # despite the local variable being named v_/points[:,0] rather than u,
+    # matching the swapped meshgrid axis order used here. Exposed via
+    # return_tube_angle for ground-truth curvature diagnostics
+    # (utils/manifold_diagnostics.torus_analytic_curvature). points[:, 1]
+    # (= u_) is the other, azimuthal angle around the hole - it's what the
+    # default `colors` target below is actually built from, i.e. the
+    # default target depends on ONLY ONE of the two torus angles and is
+    # therefore blind to the tube angle that drives curvature. Exposed via
+    # return_azimuthal_angle for building a target that depends on both.
+    tube_angle = points[:, 0]
+    azimuthal_angle = points[:, 1]
+
     x = (R + r * np.cos(points[:, 0])) * np.cos(points[:, 1])
     y = (R + r * np.cos(points[:, 0])) * np.sin(points[:, 1])
     z = r * np.sin(points[:, 0])
@@ -68,7 +83,12 @@ def torus(n_samples=1000, normalize=True):
     colors = u_
 
     colors = (colors - colors.min()) / (colors.max() - colors.min())
-    return points_euq[:n_samples], colors[:n_samples]
+    result = [points_euq[:n_samples], colors[:n_samples]]
+    if return_tube_angle:
+        result.append(tube_angle[:n_samples])
+    if return_azimuthal_angle:
+        result.append(azimuthal_angle[:n_samples])
+    return tuple(result)
 
 
 def sphere(n_samples=1000, normalize=True):
@@ -249,6 +269,65 @@ def connected_multiscale_manifold(n_samples=1000, normalize=True):
     return points, colors
 
 
+def swiss_roll_tight(n_samples=1000, normalize=True, rotation_multiplier=3.0):
+    """Swiss roll with rotation_multiplier x more windings packed into the
+    same overall footprint (radius AND height both scaled down by the same
+    factor, to avoid the height axis coming to dominate the shape and
+    diluting the effect). Deliberately makes ambient Euclidean distance a
+    much worse proxy for true (unrolled arc-length) geodesic distance than
+    the standard swiss_roll: validated analytically (Euclidean-vs-true-
+    geodesic correlation drops from ~0.49 at rotation_multiplier=1 to
+    ~0.17 at 3.0, see docs/regularization_investigation_journal.md
+    Дополнение 12) - i.e. ambient-nearest-neighbor selection is wrong for
+    a much larger fraction of points here than in the original swiss_roll.
+    """
+    rng = np.random.RandomState(42)
+    t = 1.5 * np.pi * (1 + 2 * rotation_multiplier * rng.rand(n_samples))
+    x = t * np.cos(t) / rotation_multiplier
+    y = (21 / rotation_multiplier) * rng.rand(n_samples)
+    z = t * np.sin(t) / rotation_multiplier
+    points_euq = np.vstack([x, y, z]).T
+    if normalize:
+        points_euq = normalize_points(points_euq)
+    colors = (t - t.min()) / (t.max() - t.min())
+    return points_euq, colors
+
+
+def torus_fat(n_samples=1000, normalize=True, R=1.2, r=1.0, return_tube_angle=False):
+    """Torus with a much smaller hole relative to tube thickness than the
+    standard torus (R/r=1.2 here vs 3.0 for `torus`) - points on opposite
+    sides of the (now small) hole are much closer in ambient Euclidean
+    distance while still requiring a long geodesic path around the tube.
+    Validated analytically (Euclidean-vs-true-geodesic correlation drops
+    from ~0.90 at R/r=3.0 to ~0.63 at R/r=1.2, see
+    docs/regularization_investigation_journal.md Дополнение 12).
+    """
+    s = math.ceil(n_samples ** 0.5)
+    u = np.linspace(0.1, 2 * np.pi, s)
+    v = np.linspace(0, 2 * np.pi, s)
+    u_, v_ = np.meshgrid(u, v)
+    u_ = np.ravel(u_)
+    v_ = np.ravel(v_)
+    points = np.vstack([v_, u_]).T
+
+    # See torus()'s comment: points[:, 0] is the tube angle the "R + r*cos(.)"
+    # term (and thus analytic curvature) depends on.
+    tube_angle = points[:, 0]
+
+    x = (R + r * np.cos(points[:, 0])) * np.cos(points[:, 1])
+    y = (R + r * np.cos(points[:, 0])) * np.sin(points[:, 1])
+    z = r * np.sin(points[:, 0])
+
+    points_euq = np.vstack([x, y, z]).T
+    if normalize:
+        points_euq = normalize_points(points_euq)
+    colors = points[:, 1]
+    colors = (colors - colors.min()) / (colors.max() - colors.min())
+    if return_tube_angle:
+        return points_euq[:n_samples], colors[:n_samples], tube_angle[:n_samples]
+    return points_euq[:n_samples], colors[:n_samples]
+
+
 def noisy_manifold(base_func, noise_percent=0.1, n_samples=1000):
     """Add topological noise to any base manifold."""
     points, colors = base_func(n_samples)
@@ -273,7 +352,9 @@ geometries = {'sphere': [sphere, 2],
               'nonuniform_sphere': [nonuniform_sphere, 2],
               'cone_surface': [cone_surface, 2],
               'genus_2_surface': [genus_2_surface, 2],
-              'connected_multiscale_manifold': [connected_multiscale_manifold, 1]
+              'connected_multiscale_manifold': [connected_multiscale_manifold, 1],
+              'swiss_roll_tight': [swiss_roll_tight, 2],
+              'torus_fat': [torus_fat, 2],
               }
 
 '''for g in geometries:

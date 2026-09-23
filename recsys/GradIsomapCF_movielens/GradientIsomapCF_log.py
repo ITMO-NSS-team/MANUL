@@ -1,0 +1,906 @@
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import TensorDataset, DataLoader
+
+import copy
+import os
+import sys
+import time
+import json
+from datetime import datetime
+
+import numpy as np
+import scipy.sparse as sp
+
+current_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(os.path.dirname(current_dir))
+sys.path.append(project_root)
+
+from MANUL.Adam.Isomap import IsomapNN
+from NeuMFOnManifold import NeuMFOnManifold
+from evaluation import evaluate_topk_isomap
+
+
+class EarlyStopping:
+
+    def __init__(
+            self,
+            patience: int = 10,
+            window: int = 5,
+            smooth_window: int = 5,
+            min_delta: float = 1e-4,
+            convergence_delta: float = 0.005,
+            overfit_gap: float = 0.05,
+            overfit_patience: int = 5,
+            select_by: str = "loss",
+    ):
+        self.patience = patience
+        self.window = window
+        self.smooth_window = smooth_window
+        self.min_delta = min_delta
+        self.convergence_delta = convergence_delta
+        self.overfit_gap = overfit_gap
+        self.overfit_patience = overfit_patience
+        # select_by="hr": should_stop() is driven by plain HR@10 patience
+        # (stop once val_hr hasn't improved for `patience` epochs) instead of
+        # the loss-based convergence/overfit-gap logic below. The loss-based
+        # conditions are structurally unreliable here (see note above) - val
+        # loss sits far below train loss throughout training because of the
+        # train/val negative-sampling ratio mismatch, so cond_converged and
+        # cond_overfit rarely fire either way, and training silently runs to
+        # whatever epoch cap is set instead of actually stopping. See
+        # docs/recsys_paper_diary.md, 2026-08-27.
+        self.select_by = select_by
+        self._no_improve_hr = 0
+
+        self.best_val_loss = np.inf
+        self.best_state_global = None
+        self.best_epoch_global = -1
+
+        self.best_val_in_window = np.inf
+        self.best_state_window = None
+        self.best_epoch_window = -1
+
+        # HR@10-based tracking, parallel to the loss-based tracking above.
+        # Val loss here is computed on a 1-positive+99-negative sampled batch
+        # per user (~1% positive rate) while train loss is computed on a
+        # 1-positive+num_ng-negative batch (much higher positive rate) - the
+        # two are not on a comparable scale, so val loss alone is a noisy
+        # model-selection signal (see docs/recsys_paper_diary.md, 2026-08-26).
+        # HR@10 on the same sampled val batches is what most NCF-style
+        # papers actually select on.
+        self.best_val_hr = -np.inf
+        self.best_state_window_hr = None
+        self.best_epoch_window_hr = -1
+
+        self._no_improve = 0
+        self._overfit_streak = 0
+        self._val_history = []
+        self._train_history = []
+        self._val_hr_history = []
+        self._window_states = []
+        self._epoch = 0
+
+    def _smooth(self, history: list) -> float:
+        window = history[-self.smooth_window:]
+        return float(np.mean(window))
+
+    def step(self, train_loss: float, val_loss: float, model: nn.Module, val_hr: float = None) -> bool:
+        self._val_history.append(val_loss)
+        self._train_history.append(train_loss)
+        epoch = self._epoch
+        self._epoch += 1
+
+        state_copy = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+        self._window_states.append((epoch, val_loss, state_copy))
+
+        while len(self._window_states) > self.window:
+            self._window_states.pop(0)
+
+        best_in_window = min(self._window_states, key=lambda x: x[1])
+        self.best_epoch_window = best_in_window[0]
+        self.best_val_in_window = best_in_window[1]
+        self.best_state_window = best_in_window[2]
+
+        if val_loss < self.best_val_loss - self.min_delta:
+            self.best_val_loss = val_loss
+            self.best_state_global = state_copy
+            self.best_epoch_global = epoch
+            self._no_improve = 0
+        else:
+            self._no_improve += 1
+
+        if val_hr is not None:
+            self._val_hr_history.append(val_hr)
+            if val_hr > self.best_val_hr + self.min_delta:
+                self.best_val_hr = val_hr
+                self.best_epoch_window_hr = epoch
+                self.best_state_window_hr = state_copy
+                self._no_improve_hr = 0
+            else:
+                self._no_improve_hr += 1
+
+        if self.select_by == "hr":
+            # Plain HR@10 patience: stop once val_hr hasn't improved for
+            # `patience` epochs. Bypasses the loss-based convergence/overfit
+            # logic below entirely (see __init__ docstring note).
+            return val_hr is not None and self._no_improve_hr >= self.patience
+
+        enough = len(self._val_history) >= self.smooth_window
+        smooth_val = self._smooth(self._val_history)
+        smooth_train = self._smooth(self._train_history)
+        raw_gap = val_loss - train_loss
+        smooth_gap = smooth_val - smooth_train
+
+        cond_converged = enough and (abs(smooth_gap) <= self.convergence_delta)
+
+        if enough and (smooth_gap > self.overfit_gap):
+            self._overfit_streak += 1
+        else:
+            self._overfit_streak = 0
+
+        cond_overfit = self._overfit_streak >= self.overfit_patience
+
+        cond_no_improve = self._no_improve >= self.patience
+        should_stop = (cond_converged or cond_overfit) and cond_no_improve
+
+        return should_stop
+
+    def restore_best_global(self, model: nn.Module):
+        if self.best_state_global is not None:
+            model.load_state_dict(self.best_state_global)
+            print(
+                f"  [EarlyStopping] Глобально лучшая: "
+                f"ep {self.best_epoch_global + 1}, val={self.best_val_loss:.4f}"
+            )
+
+    def restore_best_window(self, model: nn.Module):
+        if self.best_state_window is not None:
+            model.load_state_dict(self.best_state_window)
+            print(
+                f"  [EarlyStopping] Лучшая в окне (window={self.window}): "
+                f"ep {self.best_epoch_window + 1}, val={self.best_val_in_window:.4f}"
+            )
+
+    def restore_best_hr(self, model: nn.Module):
+        if self.best_state_window_hr is not None:
+            model.load_state_dict(self.best_state_window_hr)
+            print(
+                f"  [EarlyStopping] Лучшая по val HR@10: "
+                f"ep {self.best_epoch_window_hr + 1}, hr={self.best_val_hr:.4f}"
+            )
+
+    @property
+    def converged(self) -> bool:
+        if len(self._val_history) < self.smooth_window:
+            return False
+        smooth_gap = self._smooth(self._val_history) - self._smooth(self._train_history)
+        return abs(smooth_gap) <= self.convergence_delta
+
+    @property
+    def history(self) -> dict:
+        gaps = [abs(t - v) for t, v in zip(self._train_history, self._val_history)]
+        return {
+            'train': self._train_history.copy(),
+            'val': self._val_history.copy(),
+            'gap': gaps,
+        }
+
+
+def save_epoch_matrices(
+        logs_folder: str,
+        epoch: int,
+        isomap_model,
+        device: torch.device,
+):
+    with torch.no_grad():
+        D_input = isomap_model.distances_matrix.detach().cpu().numpy().astype(np.float32)
+        D_geodesic = isomap_model.dist_matrix_.detach().cpu().numpy().astype(np.float32)
+        Z = isomap_model.embedding_.detach().cpu().numpy().astype(np.float32)
+
+    knn_adj = _build_knn_adjacency(D_input, isomap_model.n_neighbors)
+
+    Z_tensor = torch.tensor(Z, dtype=torch.float32)
+    D_latent = torch.cdist(Z_tensor, Z_tensor).numpy().astype(np.float32)
+
+    save_path = os.path.join(logs_folder, f"matrices_epoch{epoch}.npz")
+    np.savez_compressed(
+        save_path,
+        D_input=D_input,
+        D_geodesic=D_geodesic,
+        knn_adj=knn_adj,
+        Z=Z,
+        D_latent=D_latent,
+    )
+    print(f"[Save] Эпоха {epoch + 1}: матрицы сохранены → {save_path}", flush=True)
+
+
+def _build_knn_adjacency(D_input: np.ndarray, k: int) -> np.ndarray:
+    n = D_input.shape[0]
+    adj = np.zeros((n, n), dtype=np.float32)
+
+    for i in range(n):
+        neighbors = np.argsort(D_input[i])[1: k + 1]
+        for nb in neighbors:
+            adj[i, nb] = D_input[i, nb]
+            adj[nb, i] = D_input[nb, i]
+
+    return adj
+
+
+def save_history(logs_folder: str, history: dict, filename: str = "history.npz"):
+    save_path = os.path.join(logs_folder, filename)
+
+    cleaned = {}
+    for key, values in history.items():
+        cleaned[key] = np.array(
+            [v if v is not None else np.nan for v in values],
+            dtype=np.float32
+        )
+
+    np.savez_compressed(save_path, **cleaned)
+    print(f"[Save] История обучения сохранена → {save_path}")
+
+
+class GradientIsomapCF:
+
+    def __init__(self,
+                 train_feature: torch.Tensor,
+                 train_events,
+                 num_users: int,
+                 num_items: int,
+                 user_pos_set=None,
+                 ng_seed=42,
+                 latent_len: int = 128,
+                 n_neighbors: int = 10,
+                 epochs: int = 5,
+                 cf_epochs: int = 2,
+                 final_cf_epochs: int = 3,
+                 batch_size: int = 2048,
+                 lr_isomap: float = 1e-4,
+                 lr_ncf: float = 1e-3,
+                 factor_num: int = 16,
+                 num_layers: int = 3,
+                 dropout: float = 0.0,
+                 model_type: str = 'NeuMF-end',
+                 logs_folder: str = None,
+                 device: str = None,
+                 stop_criteria_value: float = 0.001,
+                 num_ng: int = 3,
+                 select_by: str = "loss",
+                 final_patience: int = 3,
+                 inner_patience: int = 5,
+                 warm_start_inner: bool = False,
+                 freeze_item_projection: bool = False):
+
+        self.features = train_feature
+        self.train_events = np.array(train_events, dtype=np.int64)
+        self.num_users = num_users
+        self.num_items = num_items
+
+        self.user_pos_set = user_pos_set
+        self.ng_seed = ng_seed
+
+        self.latent_len = latent_len
+        self.n_neighbors = n_neighbors
+
+        self.epochs = epochs
+        self.cf_epochs = cf_epochs
+        self.final_cf_epochs = final_cf_epochs
+
+        self.batch_size = batch_size
+        self.lr_isomap = lr_isomap
+        self.lr_ncf = lr_ncf
+        self.factor_num = factor_num
+        self.num_layers = num_layers
+        self.dropout = dropout
+        self.model_type = model_type
+        self.stop_criteria_value = stop_criteria_value
+        self.num_ng = num_ng
+        # select_by="hr": pick the best checkpoint (inner-loop proxy NCF and
+        # final-NCF retrain) by val HR@10 instead of val BCE loss. Val loss is
+        # computed on a 1-positive+99-negative sampled batch (~1% positive
+        # rate) while train loss uses a 1-positive+num_ng-negative batch (much
+        # higher positive rate) - the two are not on a comparable scale, so a
+        # loss-based "best epoch"/early-stop decision is a noisy signal here.
+        # See docs/recsys_paper_diary.md, 2026-08-26.
+        self.select_by = select_by
+        self.final_patience = final_patience
+        self.inner_patience = inner_patience
+        # warm_start_inner=True: instead of creating a brand-new, randomly-
+        # initialized NeuMFOnManifold at every outer step, continue training
+        # the previous outer step's converged weights against the new Z.
+        # Default False preserves the original fresh-reinit-every-step
+        # behavior exactly. See docs/recsys_paper_diary.md, 2026-08-30 -
+        # a controlled experiment (fixed Z, 5 random seeds) found seed-only
+        # variance in test HR@10 (std=0.038) comparable to the ENTIRE
+        # outer-loop step-to-step noise observed at every eta/horizon tested,
+        # suggesting fresh reinit resamples a new random local optimum
+        # ("basin") every step rather than tracking one continuously as Z
+        # evolves - warm-starting is a direct test of that hypothesis.
+        self.warm_start_inner = warm_start_inner
+        self._warm_ncf_model = None
+        # freeze_item_projection=True: NeuMFOnManifold's item-side layers
+        # (item_GMF_linear/item_MLP_linear) no longer freely relearn a
+        # reinterpretation of item_Z at every outer step - the MLP branch
+        # uses z_i unchanged (identity, latent_len==mlp_user_dim by design),
+        # the GMF branch uses a fixed PCA projection of the CURRENT item_Z
+        # (recomputed fresh each outer step, tracking the evolving
+        # manifold). Only user-side embeddings and the downstream MLP
+        # tower/predict layer stay trainable. Closes the "escape hatch"
+        # that let the inner loop reach similar quality regardless of the
+        # manifold's actual geometry - confirmed via a real/shuffled/
+        # random-Z controlled test, real Z significantly beat shuffled Z
+        # (p=0.0005) only once this option was enabled. See
+        # docs/recsys_paper_diary.md, 2026-09-09/2026-09-11.
+        self.freeze_item_projection = freeze_item_projection
+
+        if device is None:
+            device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        self.device = torch.device(device)
+        print(f"Device: {self.device}")
+
+        if logs_folder is None:
+            logs_folder = f"gradisomap_cf_{datetime.now().strftime('%d%m%Y-%H.%M')}"
+        self.logs_folder = logs_folder
+        os.makedirs(self.logs_folder, exist_ok=True)
+        print(f"Logs folder: {self.logs_folder}")
+
+        self.history = {
+            'epoch': [],
+            'train_loss': [],
+            'val_loss': [],
+            'val_hr': [],
+            'val_ndcg': [],
+            'had_bad_grad': [],
+            'grad_nonfinite_count': [],
+        }
+
+        self.cf_history = {
+            'train_loss': [],
+            'val_loss': [],
+            'val_hr': [],
+        }
+
+        self.isomap_model = None
+        self.ncf_model = None
+
+        self.interactions = self._build_implicit_interactions()
+        self._build_dataloader_and_full_tensors()
+
+    def _build_implicit_interactions2(self):
+        print("Building implicit interactions with negative sampling...")
+        train_mat = sp.dok_matrix((self.num_users, self.num_items), dtype=np.float32)
+        pos_pairs = []
+
+        for (u, m, r) in self.train_events:
+            u, m = int(u), int(m)
+            pos_pairs.append((u, m))
+            train_mat[u, m] = 1.0
+
+        interactions = [(u, m, 1) for (u, m) in pos_pairs]
+
+        rng = np.random.default_rng()
+        for (u, m) in pos_pairs:
+            for _ in range(self.num_ng):
+                j = int(rng.integers(low=0, high=self.num_items))
+                while (u, j) in train_mat:
+                    j = int(rng.integers(low=0, high=self.num_items))
+                interactions.append((u, j, 0))
+
+        interactions = np.array(interactions, dtype=np.int64)
+        print(f"Позитивов: {len(pos_pairs)}, всего: {len(interactions)}")
+        return interactions
+
+    def _build_implicit_interactions(self):
+        print("Building implicit interactions with negative sampling...")
+
+        pos_pairs = []
+        for (u, m, r) in self.train_events:
+            u, m = int(u), int(m)
+            pos_pairs.append((u, m))
+
+        # Если user_pos_set не передан — строим только из train
+        # (менее корректно, но совместимо со старым поведением)
+        if self.user_pos_set is not None:
+            check_set = self.user_pos_set
+            print("  Негативы проверяются по ПОЛНОМУ user_pos_set (train+val+test)")
+        else:
+            # Строим train_only множества
+            train_only = {}
+            for (u, m) in pos_pairs:
+                if u not in train_only:
+                    train_only[u] = set()
+                train_only[u].add(m)
+            check_set = train_only
+            print("  ВНИМАНИЕ: негативы проверяются только по train взаимодействиям")
+
+        interactions = [(u, m, 1) for (u, m) in pos_pairs]
+
+        # Воспроизводимый генератор
+        rng = np.random.default_rng(self.ng_seed)
+
+        for (u, m) in pos_pairs:
+            u = int(u)
+            for _ in range(self.num_ng):
+                j = int(rng.integers(low=0, high=self.num_items))
+                while j in check_set.get(u, set()):
+                    j = int(rng.integers(low=0, high=self.num_items))
+                interactions.append((u, j, 0))
+
+        interactions = np.array(interactions, dtype=np.int64)
+        print(f"Позитивов: {len(pos_pairs)}, "
+              f"всего интеракций (pos+neg): {len(interactions)}")
+        return interactions
+
+    def _build_dataloader_and_full_tensors(self):
+        users = torch.tensor(self.interactions[:, 0], dtype=torch.long)
+        items = torch.tensor(self.interactions[:, 1], dtype=torch.long)
+        labels = torch.tensor(self.interactions[:, 2], dtype=torch.float32)
+
+        dataset = TensorDataset(users, items, labels)
+        shuffle_generator = torch.Generator()
+        shuffle_generator.manual_seed(self.ng_seed if self.ng_seed is not None else 0)
+        self.inter_loader = DataLoader(dataset, batch_size=self.batch_size, shuffle=True,
+                                       generator=shuffle_generator)
+
+        self.users_all = users.to(self.device)
+        self.items_all = items.to(self.device)
+        self.labels_all = labels.to(self.device)
+
+    @staticmethod
+    def _generate_random_matrix(n_samples, dist_type='normal', device='cuda'):
+        if dist_type == 'uniform':
+            matrix = torch.rand(n_samples, n_samples, device=device)
+        elif dist_type == 'normal':
+            matrix = torch.randn(n_samples, n_samples, device=device).abs()
+        elif dist_type == 'exp':
+            matrix = torch.rand(n_samples, n_samples, device=device).pow(2)
+        matrix = (matrix + matrix.T) / 2
+        matrix.fill_diagonal_(0)
+        return matrix / matrix.max()
+
+    def train(self, val_loader=None, top_k: int = 10, device=None,
+              use_init_assumption: bool = True):
+
+        if device is None:
+            device = self.device
+        elif isinstance(device, str):
+            device = torch.device(device)
+
+        start_time = time.time()
+        loss_fn = nn.BCEWithLogitsLoss()
+
+        self.features = self.features.to(torch.float32).to(self.device)
+        num_items = self.features.shape[0]
+
+        if use_init_assumption:
+            with torch.no_grad():
+                dist_train = torch.cdist(self.features, self.features)
+        else:
+            dist_train = self._generate_random_matrix(num_items, device=self.device)
+
+        max_val = dist_train.max()
+        if max_val > 0:
+            dist_train = dist_train / max_val
+
+        np.save(
+            os.path.join(self.logs_folder, "D_input_init.npy"),
+            dist_train.cpu().numpy().astype(np.float32)
+        )
+        print(f"[Save] Начальная D_input сохранена → D_input_init.npy")
+
+        isomap_model = IsomapNN(
+            dist_train,
+            n_components=self.latent_len,
+            n_neighbors=self.n_neighbors,
+            eigval_choice='MDS'
+        ).to(self.device)
+
+        isomap_optim = optim.AdamW(isomap_model.parameters(), lr=self.lr_isomap)
+
+        best_val_loss = np.inf
+        best_val_hr_outer = -np.inf
+        best_isomap_state = None
+
+        for epoch in range(self.epochs):
+            epoch_start = time.time()
+
+            isomap_model.eval()
+            with torch.no_grad():
+                item_Z_epoch = isomap_model().to(torch.float32).detach()
+
+            if self.warm_start_inner and self._warm_ncf_model is not None:
+                ncf_model = self._warm_ncf_model
+                for p in ncf_model.parameters():
+                    p.requires_grad_(True)
+                ncf_model.train()
+            else:
+                ncf_model = NeuMFOnManifold(
+                    user_num=self.num_users,
+                    latent_dim=self.latent_len,
+                    factor_num=self.factor_num,
+                    num_layers=self.num_layers,
+                    dropout=self.dropout,
+                    model_type=self.model_type,
+                    freeze_item_projection=self.freeze_item_projection,
+                    item_projection_init_data=item_Z_epoch if self.freeze_item_projection else None,
+                ).to(self.device)
+            # Fresh optimizer every step even under warm_start_inner - only
+            # the NCF weights carry over, not AdamW's momentum/variance
+            # state, so this isolates the effect of "same basin" from "same
+            # optimizer trajectory".
+            ncf_optim = optim.AdamW(
+                [p for p in ncf_model.parameters() if p.requires_grad], lr=self.lr_ncf)
+
+            early_stop = EarlyStopping(
+                patience=self.inner_patience,
+                window=6,
+                smooth_window=2,
+                min_delta=1e-4,
+                convergence_delta=0.001,
+                overfit_gap=0.003,
+                overfit_patience=1,
+                select_by=self.select_by,
+            )
+            cf_train_losses = []
+            cf_val_losses = []
+            cf_val_hrs = []
+
+            ncf_model.train()
+            for cf_ep in range(self.cf_epochs):
+                total_cf_loss = 0.0
+                n_batches = 0
+
+                for batch_users, batch_items, batch_labels in self.inter_loader:
+                    batch_users = batch_users.to(self.device)
+                    batch_items = batch_items.to(self.device)
+                    batch_labels = batch_labels.to(self.device)
+
+                    preds_cf = ncf_model(batch_users, batch_items, item_Z_epoch)
+                    loss_cf = loss_fn(preds_cf, batch_labels)
+
+                    ncf_optim.zero_grad()
+                    loss_cf.backward()
+                    ncf_optim.step()
+
+                    total_cf_loss += loss_cf.item()
+                    n_batches += 1
+
+                avg_cf_train_loss = total_cf_loss / max(1, n_batches)
+                cf_train_losses.append(avg_cf_train_loss)
+
+                if val_loader is not None:
+                    ncf_model.eval()
+                    total_val_loss = 0.0
+                    n_val_batches = 0
+                    hits = []
+
+                    with torch.no_grad():
+                        for val_users, val_items, val_labels in val_loader:
+                            val_users = val_users.to(self.device)
+                            val_items = val_items.to(self.device)
+                            val_labels = val_labels.to(self.device)
+
+                            preds_val = ncf_model(val_users, val_items, item_Z_epoch)
+                            loss_val = loss_fn(preds_val, val_labels)
+
+                            total_val_loss += loss_val.item()
+                            n_val_batches += 1
+                            # Each batch = one user's 1 positive (index 0) +
+                            # 99 sampled negatives (val_loader batch_size=100,
+                            # NCFTestDatasetSampled ordering).
+                            _, topk_idx = torch.topk(preds_val, 10)
+                            hits.append(1.0 if 0 in topk_idx.tolist() else 0.0)
+
+                    avg_cf_val_loss = total_val_loss / max(1, n_val_batches)
+                    avg_cf_val_hr = float(np.mean(hits)) if hits else 0.0
+                    cf_val_losses.append(avg_cf_val_loss)
+                    cf_val_hrs.append(avg_cf_val_hr)
+
+                    print(f"  [Inner NCF] ep {cf_ep + 1}/{self.cf_epochs} | "
+                          f"train={avg_cf_train_loss:.4f}, val={avg_cf_val_loss:.4f}, "
+                          f"val_hr@10={avg_cf_val_hr:.4f}", flush=True)
+
+                    if early_stop.step(avg_cf_train_loss, avg_cf_val_loss, ncf_model, val_hr=avg_cf_val_hr):
+                        break
+
+                    ncf_model.train()
+                else:
+                    cf_val_losses.append(None)
+                    print(f"  [Inner NCF] ep {cf_ep + 1}/{self.cf_epochs} | "
+                          f"train={avg_cf_train_loss:.4f}", flush=True)
+
+            if self.select_by == "hr":
+                early_stop.restore_best_hr(ncf_model)
+            else:
+                early_stop.restore_best_window(ncf_model)
+
+            self.cf_history['train_loss'].append(cf_train_losses)
+            self.cf_history['val_loss'].append(cf_val_losses)
+            self.cf_history['val_hr'].append(cf_val_hrs)
+
+            ncf_model.eval()
+            for p in ncf_model.parameters():
+                p.requires_grad_(False)
+
+            if self.warm_start_inner:
+                self._warm_ncf_model = ncf_model
+
+            isomap_model.train()
+            isomap_optim.zero_grad()
+
+            item_Z_full = isomap_model().to(torch.float32)  # forward с grad
+            preds_all = ncf_model(self.users_all, self.items_all, item_Z_full)
+            bce_loss = loss_fn(preds_all, self.labels_all)
+
+            bce_loss.backward()
+
+            # NaN/Inf-gradient guard: ported from Adam/GradientIsomap.py's
+            # (independently, already-hardened) outer-loop pattern - this
+            # loop never had it, so it was exposed to exactly the class of
+            # instability that was fixed there (eigh's backward can produce
+            # NaN when top eigenvalues are nearly degenerate). Scans grads
+            # right before the optimizer step and zeroes any non-finite
+            # entries rather than letting them corrupt D_input via
+            # isomap_optim.step() - an occasional bad epoch self-corrects
+            # this way instead of silently poisoning the outer loop.
+            had_bad_grad = False
+            grad_nonfinite_count = 0
+            for group in isomap_optim.param_groups:
+                for p in group['params']:
+                    if p.grad is not None:
+                        nonfinite_mask = ~torch.isfinite(p.grad)
+                        if nonfinite_mask.any():
+                            had_bad_grad = True
+                            grad_nonfinite_count += int(nonfinite_mask.sum().item())
+                        torch.nan_to_num_(p.grad, nan=0.0, posinf=0.0, neginf=0.0)
+            if had_bad_grad:
+                print(f"  [Guard] Outer epoch {epoch}: {grad_nonfinite_count} non-finite "
+                      f"gradient entries zeroed before isomap_optim.step()", flush=True)
+
+            isomap_optim.step()
+
+            with torch.no_grad():
+                isomap_model.update_distance_matrix()
+                _ = isomap_model()
+
+            save_epoch_matrices(
+                logs_folder=self.logs_folder,
+                epoch=epoch,
+                isomap_model=isomap_model,
+                device=self.device,
+            )
+
+            avg_train_loss = float(bce_loss.item())
+            elapsed = time.time() - epoch_start
+
+            if val_loader is not None:
+                isomap_model.eval()
+                ncf_model.eval()
+
+                with torch.no_grad():
+                    item_Z_val = isomap_model().to(torch.float32)
+                    total_val_loss_outer = 0.0
+                    n_val_batches_outer = 0
+
+                    for val_users, val_items, val_labels in val_loader:
+                        val_users = val_users.to(self.device)
+                        val_items = val_items.to(self.device)
+                        val_labels = val_labels.to(self.device)
+
+                        preds_val_outer = ncf_model(val_users, val_items, item_Z_val)
+                        loss_val_outer = loss_fn(preds_val_outer, val_labels)
+
+                        total_val_loss_outer += loss_val_outer.item()
+                        n_val_batches_outer += 1
+
+                avg_val_loss = total_val_loss_outer / max(1, n_val_batches_outer)
+            else:
+                avg_val_loss = None
+
+            # HR и NDCG
+            if val_loader is not None:
+                hr_val, ndcg_val = evaluate_topk_isomap(
+                    ncf_model, isomap_model, val_loader, top_k, device
+                )
+            else:
+                hr_val, ndcg_val = None, None
+
+            # Обновляем историю
+            self.history['epoch'].append(epoch)
+            self.history['train_loss'].append(avg_train_loss)
+            self.history['val_loss'].append(avg_val_loss)
+            self.history['val_hr'].append(hr_val)
+            self.history['val_ndcg'].append(ndcg_val)
+            self.history['had_bad_grad'].append(had_bad_grad)
+            self.history['grad_nonfinite_count'].append(grad_nonfinite_count)
+
+            print(f"[Outer {epoch + 1}/{self.epochs}] "
+                  f"train={avg_train_loss:.4f}, "
+                  f"val={avg_val_loss if avg_val_loss is not None else float('nan'):.4f}, "
+                  f"HR@{top_k}={hr_val if hr_val is not None else float('nan'):.4f}, "
+                  f"NDCG@{top_k}={ndcg_val if ndcg_val is not None else float('nan'):.4f}, "
+                  f"time={elapsed:.1f}s", flush=True)
+
+            stop_loss = avg_val_loss if avg_val_loss is not None else avg_train_loss
+
+            # Track the best outer-epoch snapshot of the geometry itself, not
+            # just the loss value - without this, item_Z_final below always
+            # used whichever D_input the LAST outer step happened to land on,
+            # regardless of whether an earlier step scored better. The outer
+            # trajectory is noisy (a fresh, randomly-initialised ncf_model is
+            # trained at every step - see docs/recsys_paper_diary.md,
+            # 2026-08-27), so "last" and "best" are frequently different
+            # points, and the difference in reported quality can be large.
+            if self.select_by == "hr":
+                outer_improved = hr_val is not None and hr_val > best_val_hr_outer
+            else:
+                outer_improved = stop_loss < best_val_loss
+            if outer_improved:
+                if self.select_by == "hr":
+                    best_val_hr_outer = hr_val
+                best_isomap_state = copy.deepcopy(isomap_model.state_dict())
+            if stop_loss < best_val_loss:
+                best_val_loss = stop_loss
+
+            if stop_loss <= self.stop_criteria_value:
+                print(f"Stop criteria: loss={stop_loss:.4f} <= {self.stop_criteria_value}")
+                break
+
+            del ncf_model, ncf_optim
+            torch.cuda.empty_cache()
+
+        total_time = time.time() - start_time
+        print(f"\nOuter loop finished in "
+              f"{time.strftime('%H:%M:%S', time.gmtime(total_time))}")
+        print(f"Best outer val/train loss = {best_val_loss:.4f}")
+
+        if best_isomap_state is not None:
+            isomap_model.load_state_dict(best_isomap_state)
+            if self.select_by == "hr":
+                print(f"[Outer] Restored best-by-HR@10 geometry (val_hr={best_val_hr_outer:.4f}), "
+                      f"not the last outer step's.")
+            else:
+                print(f"[Outer] Restored best-by-loss geometry (val_loss={best_val_loss:.4f}), "
+                      f"not the last outer step's.")
+
+        isomap_model.eval()
+        with torch.no_grad():
+            item_Z_final = isomap_model().to(torch.float32).detach()
+
+        final_ncf = NeuMFOnManifold(
+            user_num=self.num_users,
+            latent_dim=self.latent_len,
+            factor_num=self.factor_num,
+            num_layers=self.num_layers,
+            dropout=self.dropout,
+            model_type=self.model_type,
+            freeze_item_projection=self.freeze_item_projection,
+            item_projection_init_data=item_Z_final if self.freeze_item_projection else None,
+        ).to(self.device)
+
+        final_optim = optim.AdamW(
+            [p for p in final_ncf.parameters() if p.requires_grad], lr=self.lr_ncf)
+
+        patience_final = self.final_patience
+        best_val_loss_final = np.inf
+        best_val_hr_final = -np.inf
+        best_state_final = None
+        no_improve_final = 0
+
+        for ep in range(self.final_cf_epochs):
+            final_ncf.train()
+            total_train_loss = 0.0
+            n_train_batches = 0
+
+            for batch_users, batch_items, batch_labels in self.inter_loader:
+                batch_users = batch_users.to(self.device)
+                batch_items = batch_items.to(self.device)
+                batch_labels = batch_labels.to(self.device)
+
+                preds = final_ncf(batch_users, batch_items, item_Z_final)
+                loss = loss_fn(preds, batch_labels)
+
+                final_optim.zero_grad()
+                loss.backward()
+                final_optim.step()
+
+                total_train_loss += loss.item()
+                n_train_batches += 1
+
+            avg_train_loss = total_train_loss / max(1, n_train_batches)
+
+            if val_loader is not None:
+                final_ncf.eval()
+                total_val_loss = 0.0
+                n_val_batches = 0
+                hits = []
+
+                with torch.no_grad():
+                    for val_users, val_items, val_labels in val_loader:
+                        val_users = val_users.to(self.device)
+                        val_items = val_items.to(self.device)
+                        val_labels = val_labels.to(self.device)
+
+                        preds_val = final_ncf(val_users, val_items, item_Z_final)
+                        loss_val = loss_fn(preds_val, val_labels)
+
+                        total_val_loss += loss_val.item()
+                        n_val_batches += 1
+                        # Each batch = one user's 1 positive (index 0) + 99
+                        # sampled negatives (val_loader batch_size=100,
+                        # NCFTestDatasetSampled ordering).
+                        _, topk_idx = torch.topk(preds_val, 10)
+                        hits.append(1.0 if 0 in topk_idx.tolist() else 0.0)
+
+                avg_val_loss = total_val_loss / max(1, n_val_batches)
+                avg_val_hr_final = float(np.mean(hits)) if hits else 0.0
+
+                print(f"[Final NCF] ep {ep + 1}/{self.final_cf_epochs} | "
+                      f"train={avg_train_loss:.4f}, val={avg_val_loss:.4f}, "
+                      f"val_hr@10={avg_val_hr_final:.4f}", flush=True)
+
+                # select_by="hr" (default recommended, see class docstring
+                # note above EarlyStopping): pick the checkpoint with the best
+                # val HR@10 instead of val BCE loss - val loss is computed on
+                # a 1-positive+99-negative sampled batch (~1% positive rate),
+                # not comparable in scale to the train loss above, so it is a
+                # noisy "best epoch" signal on its own. See
+                # docs/recsys_paper_diary.md, 2026-08-26.
+                improved = (avg_val_hr_final > best_val_hr_final) if self.select_by == "hr" \
+                    else (avg_val_loss < best_val_loss_final)
+                if improved:
+                    best_val_loss_final = avg_val_loss
+                    best_val_hr_final = avg_val_hr_final
+                    # .state_dict() returns references to the live model's own
+                    # tensors, not a snapshot - optimizer.step() keeps mutating
+                    # them in place every subsequent epoch. Without deepcopy,
+                    # final_ncf.load_state_dict(best_state_final) below just
+                    # reloads the model's CURRENT (last-epoch) state into
+                    # itself, silently discarding whichever epoch actually had
+                    # the best checkpoint - the exact bug already fixed in
+                    # GraphRegTrainer/baseline_train_test (see git history),
+                    # missed here because this "final NCF" retrain step has
+                    # its own hand-rolled early-stopping instead of using the
+                    # (correctly-implemented, see EarlyStopping.step() above)
+                    # EarlyStopping class already used for the inner loop.
+                    best_state_final = copy.deepcopy(final_ncf.state_dict())
+                    no_improve_final = 0
+                else:
+                    no_improve_final += 1
+
+                if no_improve_final >= patience_final:
+                    print(f"[Final NCF] early stop at ep {ep + 1}")
+                    break
+
+                if avg_val_loss <= self.stop_criteria_value:
+                    print(f"[Final NCF] stop by threshold: val={avg_val_loss:.4f}")
+                    break
+            else:
+                print(f"[Final NCF] ep {ep + 1}/{self.final_cf_epochs} | "
+                      f"train={avg_train_loss:.4f}", flush=True)
+
+        if best_state_final is not None:
+            final_ncf.load_state_dict(best_state_final)
+
+        self.isomap_model = isomap_model
+        self.ncf_model = final_ncf
+
+        torch.save(
+            self.isomap_model.state_dict(),
+            os.path.join(self.logs_folder, "isomap_model_final.pt")
+        )
+        torch.save(
+            self.ncf_model.state_dict(),
+            os.path.join(self.logs_folder, "ncf_model_final.pt")
+        )
+        print(f"[Save] Модели сохранены в {self.logs_folder}")
+
+        save_history(self.logs_folder, self.history, filename="history.npz")
+        cf_history_path = os.path.join(self.logs_folder, "cf_history.json")
+        with open(cf_history_path, "w") as f:
+            json.dump(self.cf_history, f, indent=4)
+
+        return self.isomap_model, self.ncf_model
