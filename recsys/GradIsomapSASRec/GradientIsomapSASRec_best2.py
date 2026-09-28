@@ -240,6 +240,7 @@ class GradientIsomapSASRec:
         # Misc
         logs_folder: str = None,
         device: str = None,
+        n_outer_batches: int = None,
     ):
         self.train_feature = train_feature
         self.user_train = user_train
@@ -276,7 +277,7 @@ class GradientIsomapSASRec:
         # PCA projection recomputed fresh each outer step from current item_Z.
         self.freeze_item_projection = freeze_item_projection
 
-        self.n_outer_batches: int = None
+        self.n_outer_batches = n_outer_batches #: int = None
 
         n_users_with_seq = len([u for u, s in user_train.items() if len(s) >= 2])
         self.n_batches_inner = max(1, n_users_with_seq // batch_size)
@@ -401,15 +402,33 @@ class GradientIsomapSASRec:
             if self.warm_start_inner and self._warm_sasrec is not None:
                 # Carry weights from previous outer step.
                 # Re-init item_projection if freezing (new Z → new PCA).
+                #sasrec = self._warm_sasrec
+                #if self.freeze_item_projection:
+                #    # Recompute PCA from current Z (same as NCF does in outer loop)
+                #    sasrec._init_weights(self.latent_len, item_Z_epoch_raw)
+                #for p in sasrec.parameters():
+                #    p.requires_grad_(True)
+                #if self.freeze_item_projection:
+                #    sasrec.item_projection.weight.requires_grad_(False)
+                #    sasrec.item_projection.bias.requires_grad_(False)
+                #sasrec.train()
                 sasrec = self._warm_sasrec
-                if self.freeze_item_projection:
-                    # Recompute PCA from current Z (same as NCF does in outer loop)
-                    sasrec._init_weights(self.latent_len, item_Z_epoch_raw)
+
+                # 1) Размораживаем всё (как и было)
                 for p in sasrec.parameters():
                     p.requires_grad_(True)
+
+                # 2) Если freeze_item_projection=True: пересчитываем ТОЛЬКО item_projection (PCA от нового Z)
                 if self.freeze_item_projection:
+                    sasrec.refit_item_projection_pca(item_Z_epoch_raw)
                     sasrec.item_projection.weight.requires_grad_(False)
                     sasrec.item_projection.bias.requires_grad_(False)
+
+                def _norm(p): return float(p.detach().norm().cpu())
+
+                print("attn W norm:", _norm(sasrec.attention_layers[0].in_proj_weight))
+                print("pos_emb norm:", _norm(sasrec.pos_emb.weight))
+
                 sasrec.train()
             else:
                 # Fresh model each outer step — pass current Z for PCA init
@@ -465,6 +484,14 @@ class GradientIsomapSASRec:
 
                     sasrec_optim.zero_grad()
                     batch_loss.backward()
+
+                    # NEW ADD
+                    torch.nn.utils.clip_grad_norm_(
+                            [p for p in sasrec.parameters() if p.requires_grad],
+                            max_norm=1.0,
+                        )
+
+
                     sasrec_optim.step()
                     total_loss += batch_loss.item()
 

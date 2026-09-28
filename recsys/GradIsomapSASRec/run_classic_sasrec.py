@@ -1,28 +1,13 @@
 import os
-import sys
 import copy
 import numpy as np
 import pandas as pd
 import torch
-import json
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
-from collections import defaultdict
 
 # ==========================================================
-# 0. ПУТИ И ИМПОРТЫ (Используем функции подготовки данных руководителя)
-# ==========================================================
-HERE = os.path.dirname(os.path.abspath(__file__))
-# Путь к папке GradIsomapCF_movielens (рядом с GradIsomapSASRec)
-GINCF_DIR = os.path.join(os.path.dirname(HERE), "GradIsomapCF_movielens")
-sys.path.insert(0, GINCF_DIR)
-
-from prepare_data import (
-    prepare_sequences, subsample_users_items, train_val_test_split_next_item
-)
-
-# ==========================================================
-# 1. КЛАССИЧЕСКАЯ АРХИТЕКТУРА SASRec
+# 1. КЛАССИЧЕСКАЯ АРХИТЕКТУРА SASRec (из твоего репозитория)
 # ==========================================================
 
 class PointWiseFeedForward(nn.Module):
@@ -46,6 +31,7 @@ class SASRec(nn.Module):
         self.item_num = item_num
         self.pad_token = item_num
 
+        # Классический Embedding (вместо item_projection из Isomap)
         self.item_emb = nn.Embedding(self.item_num + 1, config['hidden_units'], padding_idx=self.pad_token)
         self.pos_emb = nn.Embedding(config['maxlen'], config['hidden_units'])
         self.emb_dropout = nn.Dropout(p=config['dropout_rate'])
@@ -109,53 +95,79 @@ class SASRec(nn.Module):
 
 
 # ==========================================================
-# 2. ПОДГОТОВКА ДАННЫХ (Строгая, как в run_experiment.py)
+# 2. ПОДГОТОВКА ДАННЫХ (Amazon Beauty)
 # ==========================================================
 
-def load_amazon_data(dataset_dir_name="amazon_beauty", category="Beauty_and_Personal_Care", 
-                     max_users=300, max_movies=800, min_seq_len=5):
-    """Загрузка данных через функции из GradIsomapCF_movielens/prepare_data.py"""
+def load_and_prepare_data(csv_path, max_users=300, max_items=800, min_seq_len=5):
+    """Загрузка, фильтрация (5-core) и разбиение данных Amazon."""
+    print("Загрузка данных...")
+    # Ожидаем формат Amazon Reviews '23 или похожий. Если колонки называются иначе, поправь.
+    df = pd.read_csv(csv_path)
     
-    dataset_dir = os.path.join(GINCF_DIR, "data", dataset_dir_name)
-    ratings_path = os.path.join(dataset_dir, f"{category}.csv")
-    
-    print(f"Загрузка данных из {ratings_path}...")
-    df = pd.read_csv(ratings_path)
-    
-    # Приводим к единому виду (как в run_experiment.py)
-    df = df.rename(columns={"user_id": "userId", "parent_asin": "movieId"})
-    df = df[["userId", "movieId", "rating", "timestamp"]]
+    # Приводим к единому виду
+    col_map = {}
+    if 'user_id' in df.columns: col_map['user_id'] = 'userId'
+    if 'parent_asin' in df.columns: col_map['parent_asin'] = 'itemId'
+    elif 'asin' in df.columns: col_map['asin'] = 'itemId'
+    if 'timestamp' in df.columns: col_map['timestamp'] = 'timestamp'
+    df = df.rename(columns=col_map)
+    df = df[['userId', 'itemId', 'timestamp']].dropna()
 
-    # Используем строгие функции подготовки из репозитория
-    df_mapped, user2seq = prepare_sequences(df)
-    df_sub, user2seq_sub, num_users, num_movies = subsample_users_items(
-        df_mapped, max_users=max_users, max_movies=max_movies,
-        min_seq_len=min_seq_len,
-    )
+    # Фильтрация (упрощенный k-core, чтобы оставить только активных)
+    for _ in range(5):
+        item_counts = df['itemId'].value_counts()
+        user_counts = df['userId'].value_counts()
+        df = df[df['itemId'].isin(item_counts[item_counts >= 5].index)]
+        df = df[df['userId'].isin(user_counts[user_counts >= 5].index)]
 
-    print("\nTrain/Val/Test split...")
-    train_events, val_next, test_next = train_val_test_split_next_item(
-        user2seq_sub, min_len=3,
-    )
-
-    # Собираем словари для SASRec
-    user_train = defaultdict(list)
-    for (u, m, r) in train_events:
-        user_train[int(u)].append(int(m))
-    train_seqs = dict(user_train)
+    # Маппинг ID в индексы от 0
+    users = df['userId'].unique()
+    items = df['itemId'].unique()
+    user2idx = {u: i for i, u in enumerate(users)}
+    item2idx = {i: idx for idx, i in enumerate(items)}
     
-    val_targets = {int(u): int(target) for (u, _, target) in val_next}
-    test_targets = {int(u): int(target) for (u, _, target) in test_next}
+    df['userId'] = df['userId'].map(user2idx)
+    df['itemId'] = df['itemId'].map(item2idx)
     
-    # Собираем множества всех позитивных взаимодействий (для исключения из негативов при оценке)
-    user_pos_set = {u: set(seq) for u, seq in train_seqs.items()}
-    for u, target in val_targets.items():
-        user_pos_set[u].add(target)
+    num_users = len(user2idx)
+    num_items = len(item2idx)
+    
+    # Ограничение выборки (для быстрого теста, как в твоем пайплайне)
+    if num_users > max_users:
+        valid_users = np.random.choice(num_users, max_users, replace=False)
+        df = df[df['userId'].isin(valid_users)]
+    if num_items > max_items:
+        valid_items = np.random.choice(num_items, max_items, replace=False)
+        df = df[df['itemId'].isin(valid_items)]
         
-    print(f"Подготовлено: {num_users} юзеров, {num_movies} товаров. "
+    # Пересчитываем индексы после сабсэмплинга
+    users = df['userId'].unique()
+    items = df['itemId'].unique()
+    user2idx = {u: i for i, u in enumerate(users)}
+    item2idx = {i: idx for idx, i in enumerate(items)}
+    df['userId'] = df['userId'].map(user2idx)
+    df['itemId'] = df['itemId'].map(item2idx)
+    num_users = len(user2idx)
+    num_items = len(item2idx)
+
+    # Сортировка по времени и группировка по пользователям
+    df = df.sort_values('timestamp')
+    user_seqs = df.groupby('userId')['itemId'].apply(list).to_dict()
+    
+    # Фильтрация по минимальной длине
+    user_seqs = {u: seq for u, seq in user_seqs.items() if len(seq) >= min_seq_len}
+    
+    # Разбиение Train / Val / Test (последние 2 элемента)
+    train_seqs, val_targets, test_targets = {}, {}, {}
+    for u, seq in user_seqs.items():
+        train_seqs[u] = seq[:-2]
+        val_targets[u] = seq[-2]
+        test_targets[u] = seq[-1]
+        
+    print(f"Подготовлено: {num_users} юзеров, {num_items} товаров. "
           f"Train: {len(train_seqs)}, Val: {len(val_targets)}, Test: {len(test_targets)}")
           
-    return train_seqs, val_targets, test_targets, num_users, num_movies, user_pos_set
+    return train_seqs, val_targets, test_targets, num_users, num_items
 
 
 # ==========================================================
@@ -164,15 +176,17 @@ def load_amazon_data(dataset_dir_name="amazon_beauty", category="Beauty_and_Pers
 
 class TrainDataset(Dataset):
     """Сэмплер для обучения: (seq, pos, neg)"""
-    def __init__(self, user_seqs, num_items, maxlen):
+    def __init__(self, user_seqs, num_items, maxlen, num_neg=1):
         self.user_seqs = {u: seq for u, seq in user_seqs.items() if len(seq) >= 2}
         self.users = list(self.user_seqs.keys())
         self.num_items = num_items
         self.maxlen = maxlen
+        self.num_neg = num_neg
         self.pad_token = num_items
 
     def __len__(self):
-        return len(self.users) * 10  # Виртуальная длина
+        # Виртуальная длина, чтобы DataLoader мог итерироваться
+        return len(self.users) * 10 
 
     def __getitem__(self, idx):
         rng = np.random.RandomState(idx)
@@ -191,6 +205,7 @@ class TrainDataset(Dataset):
             seq[idx_pos] = item
             pos[idx_pos] = nxt
             
+            # Семплируем негатив
             neg_item = rng.randint(self.num_items)
             while neg_item in seen_set:
                 neg_item = rng.randint(self.num_items)
@@ -204,7 +219,7 @@ class TrainDataset(Dataset):
 
 class TestDataset(Dataset):
     """Сэмплер для оценки: (seq, candidates, labels)"""
-    def __init__(self, user_seqs, targets, num_items, maxlen, user_pos_set, num_neg=99):
+    def __init__(self, user_seqs, targets, num_items, maxlen, num_neg=99):
         self.data = []
         self.pad_token = num_items
         rng = np.random.default_rng(42)
@@ -213,20 +228,19 @@ class TestDataset(Dataset):
             if u not in user_seqs: continue
             seq = user_seqs[u]
             
+            # Паддинг
             if len(seq) >= maxlen:
                 padded_seq = seq[-maxlen:]
             else:
                 padded_seq = [self.pad_token] * (maxlen - len(seq)) + seq
                 
+            # Кандидаты (1 позитив + 99 негативов)
             candidates = [target_item]
-            
-            # Исключаем из негативов ВСЕ позитивные товары пользователя (чтобы оценка была честной)
-            pos_set = user_pos_set.get(u, set())
-            
+            seen_set = set(seq)
             attempts = 0
             while len(candidates) < num_neg + 1 and attempts < 1000:
                 neg_item = rng.integers(0, num_items)
-                if neg_item not in pos_set and neg_item != target_item:
+                if neg_item not in seen_set and neg_item != target_item:
                     candidates.append(neg_item)
                 attempts += 1
                 
@@ -246,27 +260,6 @@ class TestDataset(Dataset):
 # ==========================================================
 # 4. ОБУЧЕНИЕ И ОЦЕНКА
 # ==========================================================
-def evaluate_loss(model, loader, device, num_items, criterion):
-    """Считает средний BCE loss на датасете (val loss)."""
-    model.eval()
-    total_loss = 0.0
-    num_batches = 0
-    with torch.no_grad():
-        for seq, cands, labels in loader:
-            seq = seq.to(device)
-            cands = cands.to(device)
-            labels = labels.to(device)
-
-            log_feats = model.log2feats(seq)
-            final_feat = log_feats[:, -1, :]          # (B, H)
-            cand_embs = model.item_emb(cands)          # (B, C, H)
-            logits = (final_feat.unsqueeze(1) * cand_embs).sum(dim=-1)  # (B, C)
-
-            loss = criterion(logits, labels)
-            total_loss += loss.item()
-            num_batches += 1
-    return total_loss / max(1, num_batches)
-
 
 def evaluate_model(model, test_loader, device, top_k=10):
     model.eval()
@@ -277,15 +270,21 @@ def evaluate_model(model, test_loader, device, top_k=10):
             seq = seq.to(device)
             cands = cands.to(device)
             
+            # Получаем скрытые состояния
             log_feats = model.log2feats(seq)
-            final_feat = log_feats[:, -1, :] 
+            final_feat = log_feats[:, -1, :]  # Берем последний шаг [B, H]
             
-            cand_embs = model.item_emb(cands) 
-            logits = (final_feat.unsqueeze(1) * cand_embs).sum(dim=-1) 
+            # Эмбеддинги кандидатов
+            cand_embs = model.item_emb(cands) # [B, C, H]
+            
+            # Скалярное произведение
+            logits = (final_feat.unsqueeze(1) * cand_embs).sum(dim=-1) # [B, C]
             
             for b in range(logits.shape[0]):
-                pos_idx = 0 
+                pos_idx = 0 # В TestDataset позитив всегда на 0-м месте
                 pos_score = logits[b, pos_idx].item()
+                
+                # Ранг = количество кандидатов с более высоким скором
                 rank = (logits[b] > pos_score).sum().item()
                 
                 if rank < top_k:
@@ -298,8 +297,9 @@ def evaluate_model(model, test_loader, device, top_k=10):
     return np.mean(HR), np.mean(NDCG)
 
 
-def main(history_path):
+def main():
     # --- НАСТРОЙКИ ---
+    CSV_PATH = "recsys/GradIsomapCF_movielens/data/amazon_beauty/Beauty_and_Personal_Care.csv" 
     DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
     
     CONFIG = {
@@ -308,9 +308,9 @@ def main(history_path):
         'num_blocks': 2,
         'num_heads': 1,
         'dropout_rate': 0.2,
-        'learning_rate':1e-2,
-        'batch_size': 2048,
-        'epochs': 50,
+        'learning_rate': 1e-3,
+        'batch_size': 256,
+        'epochs': 30,
         'patience': 5
     }
     
@@ -318,20 +318,21 @@ def main(history_path):
     np.random.seed(42)
 
     # --- ДАННЫЕ ---
-    train_seqs, val_targets, test_targets, num_users, num_items, user_pos_set = load_amazon_data(
-        max_users=300, max_movies=800, min_seq_len=5
+    train_seqs, val_targets, test_targets, num_users, num_items = load_and_prepare_data(
+        CSV_PATH, max_users=300, max_items=800, min_seq_len=5
     )
     
     train_dataset = TrainDataset(train_seqs, num_items, CONFIG['maxlen'])
-    val_dataset = TestDataset(train_seqs, val_targets, num_items, CONFIG['maxlen'], user_pos_set)
+    val_dataset = TestDataset(train_seqs, val_targets, num_items, CONFIG['maxlen'])
+    test_dataset = TestDataset(train_seqs, test_targets, num_items, CONFIG['maxlen'])
     
-    # Для теста добавляем val_targets в историю
+    # Для валидации используем все истории (включая val targets), чтобы тест был честным
     test_seqs_for_eval = {u: seq + [val_targets[u]] for u, seq in train_seqs.items() if u in val_targets}
-    test_dataset = TestDataset(test_seqs_for_eval, test_targets, num_items, CONFIG['maxlen'], user_pos_set)
+    test_dataset_full = TestDataset(test_seqs_for_eval, test_targets, num_items, CONFIG['maxlen'])
 
     train_loader = DataLoader(train_dataset, batch_size=CONFIG['batch_size'], shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False)
-    test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False)
+    test_loader = DataLoader(test_dataset_full, batch_size=32, shuffle=False)
 
     # --- МОДЕЛЬ ---
     model = SASRec(CONFIG, num_items).to(DEVICE)
@@ -345,18 +346,6 @@ def main(history_path):
     best_model_state = None
     no_improve = 0
 
-    history = {
-        "config": CONFIG,
-        "device": DEVICE,
-        "num_users": int(num_users),
-        "num_items": int(num_items),
-        "epochs": [],           # список словарей по эпохам
-        "best_val_hr": None,
-        "best_epoch": None,
-        "test_hr": None,
-        "test_ndcg": None,
-    }
-
     for epoch in range(CONFIG['epochs']):
         model.train()
         total_loss = 0.0
@@ -367,6 +356,7 @@ def main(history_path):
             
             pos_logits, neg_logits = model(seq, pos, neg)
             
+            # Маскируем паддинг
             indices = torch.where(pos != num_items)
             
             loss = criterion(pos_logits[indices], torch.ones_like(pos_logits[indices]))
@@ -383,23 +373,9 @@ def main(history_path):
         
         # --- ВАЛИДАЦИЯ ---
         val_hr, val_ndcg = evaluate_model(model, val_loader, DEVICE, top_k=10)
-        val_loss = evaluate_loss(model, val_loader, DEVICE, num_items, criterion)
-
-        print(f"Epoch {epoch+1:02d} | "
-            f"Train Loss: {avg_loss:.4f} | "
-            f"Val Loss: {val_loss:.4f} | "
-            f"Val HR@10: {val_hr:.4f} | Val NDCG@10: {val_ndcg:.4f}")
-
-        history["epochs"].append({
-            "epoch": epoch + 1,
-            "train_loss": float(avg_loss),
-            "val_loss": float(val_loss),
-            "val_hr@10": float(val_hr),
-            "val_ndcg@10": float(val_ndcg),
-        })
-
-        with open(history_path, "w", encoding="utf-8") as f:
-            json.dump(history, f, ensure_ascii=False, indent=2)
+        
+        print(f"Epoch {epoch+1:02d} | Loss: {avg_loss:.4f} | "
+              f"Val HR@10: {val_hr:.4f} | Val NDCG@10: {val_ndcg:.4f}")
         
         # Early Stopping
         if val_hr > best_val_hr:
@@ -424,18 +400,5 @@ def main(history_path):
     print(f"Test NDCG@10:    {test_ndcg:.4f}")
     print(f"=======================================\n")
 
-    history["best_val_hr"] = float(best_val_hr)
-    history["test_hr"] = float(test_hr)
-    history["test_ndcg"] = float(test_ndcg)
-
-    # Определяем, на какой эпохе был лучший val_hr (для удобства)
-    if history["epochs"]:
-        best_ep = max(history["epochs"], key=lambda e: e["val_hr@10"])
-        history["best_epoch"] = best_ep["epoch"]
-
-    with open(history_path, "w", encoding="utf-8") as f:
-        json.dump(history, f, ensure_ascii=False, indent=2)
-
-
 if __name__ == "__main__":
-    main(history_path="recsys/GradIsomapSASRec/classic_sasrec/history_sasrec_05.json")
+    main()

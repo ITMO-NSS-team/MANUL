@@ -19,6 +19,32 @@ from ablation_geometry_vs_optimization_sasrec import build_data_sasrec
 from evaluation_sasrec_manifold import evaluate_topk_sasrec_isomap
 from sasrec_manifold_sampler import SASRecManifoldTestDataset
 
+
+def evaluate_hr_at_k(model, loader, device, k=10):
+    """Считает HR@k для классического SASRec."""
+    model.eval()
+    hits = []
+
+    with torch.no_grad():
+        for seq, cands, labels in loader:
+            seq = seq.to(device)
+            cands = cands.to(device)
+
+            log_feats = model.log2feats(seq)
+            final_feat = log_feats[:, -1, :]          # [B, H]
+            cand_embs = model.item_emb(cands)         # [B, num_cands, H]
+
+            logits = (final_feat.unsqueeze(1) * cand_embs).sum(dim=-1)  # [B, num_cands]
+
+            # предполагается, что positive item стоит на позиции 0
+            pos_score = logits[:, 0]
+            rank = (logits > pos_score.unsqueeze(1)).sum(dim=1)
+
+            hits.extend((rank < k).cpu().numpy().astype(float).tolist())
+
+    return float(np.mean(hits)) if hits else 0.0
+
+
 def train_euclidean_sasrec(data, device, sasrec_config, lr=1e-3, epochs=50, patience=5):
     """Учим классический SASRec с нуля."""
     model = SASRec(sasrec_config, data["num_movies"]).to(device)
@@ -97,13 +123,17 @@ def main():
     print("--- training Euclidean SASRec baseline ---")
     model = train_euclidean_sasrec(data, device, sasrec_config)
 
+    # NEW ADD
+    test_hr10 = evaluate_hr_at_k(model, data["test_loader"], device, k=10)
+    print(f"[Test] HR@10 = {test_hr10:.4f}")
+
     # Достаем выученные эмбеддинги товаров
     item_emb = model.item_emb.weight[:-1].detach().cpu().numpy() # Убираем padding token
     
     # Считаем матрицу расстояний между ними
     D = np.linalg.norm(item_emb[:, None, :] - item_emb[None, :, :], axis=-1)
     
-    out_path = os.path.join(HERE, "euclidean_sasrec_baseline_geometry.npz")
+    out_path = os.path.join(HERE, "euclidean_sasrec_baseline_geometry2.npz")
     np.savez(out_path, D=D)
     print(f"[Save] Euclidean geometry saved to {out_path}")
 

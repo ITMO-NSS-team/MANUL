@@ -1,5 +1,6 @@
 """
 Poincaré baseline for SASRec: a priori hyperbolic geometry.
+Сохраняет геометрию в npz для последующего анализа delta_rel.
 """
 import argparse
 import os
@@ -38,8 +39,12 @@ def fit_poincare_embeddings(D_target: torch.Tensor, dim: int, device, epochs=100
         if ep % 200 == 0: print(f"  epoch {ep} loss={loss.item():.6f}")
 
     with torch.no_grad():
-        z_tangent = manifold.logmap0(z) # Перевод в касательное пространство для SASRec
-    return z_tangent.detach()
+        # Считаем финальные гиперболические расстояния для сохранения
+        d_final = manifold.dist(z[iu], z[ju]).cpu().numpy()
+        # Перевод в касательное пространство для SASRec
+        z_tangent = manifold.logmap0(z).detach().cpu().numpy() 
+        
+    return z_tangent, d_final, (iu.cpu().numpy(), ju.cpu().numpy()), n
 
 def main():
     parser = argparse.ArgumentParser()
@@ -58,11 +63,23 @@ def main():
     data = build_data_sasrec(args.max_users, args.max_movies, 5, args.dataset_dir_name, device, tmp_logs, args.dataset_type, args.amazon_category)
 
     # 1. Фитим гиперболическую геометрию
-    z_tangent = fit_poincare_embeddings(data["D_input_init"], dim=args.latent_dim, device=device)
+    z_tangent_np, d_final_flat, (iu, ju), n = fit_poincare_embeddings(
+        data["D_input_init"].cpu(), dim=args.latent_dim, device=device
+    )
 
-    # 2. Учим SASRec на ней
+    # 2. Сохраняем геометрию (матрицу гиперболических расстояний)
+    D_dense = np.zeros((n, n), dtype=np.float64)
+    D_dense[iu, ju] = d_final_flat
+    D_dense[ju, iu] = d_final_flat
+    
+    out_path = os.path.join(HERE, "poincare_sasrec_baseline_geometry.npz")
+    np.savez(out_path, D=D_dense)
+    print(f"[Save] Poincare geometry saved to {out_path}")
+
+    # 3. Учим SASRec на ней (используем z_tangent)
+    z_tangent_torch = torch.tensor(z_tangent_np, device=device)
     print("\n--- training SASRec on Poincare embeddings ---")
-    hr, ndcg = train_and_eval_sasrec_on_fixed_Z(z_tangent, data, device, args.latent_dim, sasrec_config, verbose=True)
+    hr, ndcg = train_and_eval_sasrec_on_fixed_Z(z_tangent_torch, data, device, args.latent_dim, sasrec_config, verbose=True)
     
     print(f"\n=== POINCARE BASELINE SUMMARY ===")
     print(f"Downstream SASRec: HR@10={hr:.4f}  NDCG@10={ndcg:.4f}")

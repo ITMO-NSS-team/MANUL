@@ -265,6 +265,119 @@ def plot_cf_history(cf_history, out_dir, prefix="cf"):
 
     return per_epoch_dir
 
+# ──────────────────────────────────────────────────────────────────
+#  cf_history.json — только 10 равноудалённых внешних эпох
+# ──────────────────────────────────────────────────────────────────
+
+def plot_cf_history_sampled(cf_history, out_dir, prefix="cf", n_samples=10):
+    """
+    То же, что plot_cf_history, но строит графики только для n_samples
+    равноудалённых внешних эпох (по умолчанию 10), чтобы не плодить
+    сотни PNG-файлов.
+
+    cf_history.json: dict со списками списков:
+      train_loss: [ [loss_inner_0, loss_inner_1, ...],   # outer epoch 0
+                    [loss_inner_0, ...],                  # outer epoch 1
+                    ... ]
+      val_loss:   аналогично
+      val_hr:     аналогично
+      (опц.) val_ndcg
+
+    Для каждой выбранной outer-эпохи создаёт ДВА PNG (loss и metrics)
+    (+ ndcg, если есть) в подпапке out_dir/<prefix>_per_epoch/.
+    Дополнительно строит сводный график best val_hr по всем outer-эпохам.
+    """
+    if cf_history is None:
+        return None
+
+    _ensure_dir(out_dir)
+    per_epoch_dir = _ensure_dir(os.path.join(out_dir, f"{prefix}_per_epoch"))
+
+    train_all = cf_history.get("train_loss", [])
+    val_all = cf_history.get("val_loss", [])
+    hr_all = cf_history.get("val_hr", [])
+    ndcg_all = cf_history.get("val_ndcg", [])
+
+    n_outer = max(len(train_all), len(val_all), len(hr_all), len(ndcg_all))
+    if n_outer == 0:
+        print("[WARN] cf_history пуст", flush=True)
+        return per_epoch_dir
+
+    # ── выбираем n_samples равноудалённых индексов ──
+    if n_outer <= n_samples:
+        indices = list(range(n_outer))
+    else:
+        # np.linspace даёт равномерную сетку, округляем и убираем дубли
+        indices = sorted(set(
+            int(round(i)) for i in np.linspace(0, n_outer - 1, n_samples)
+        ))
+
+    print(f"[info] всего outer-эпох: {n_outer}, "
+          f"строю для {len(indices)}: {indices}", flush=True)
+
+    saved = []
+    for i in indices:
+        t = train_all[i] if i < len(train_all) else None
+        v = val_all[i] if i < len(val_all) else None
+        h = hr_all[i] if i < len(hr_all) else None
+        nd = ndcg_all[i] if i < len(ndcg_all) else None
+
+        p_loss, p_metrics = _plot_one_outer_epoch(
+            outer_epoch=i,
+            train_loss_inner=t,
+            val_loss_inner=v,
+            hr_inner=h,
+            out_dir=per_epoch_dir,
+            prefix=prefix,
+        )
+        saved.append((p_loss, p_metrics))
+        print(f"[Save] outer {i:02d}: {os.path.basename(p_loss)}, "
+              f"{os.path.basename(p_metrics)}", flush=True)
+
+        # Отдельно достроим NDCG, если он есть
+        if nd is not None and len(nd) > 0:
+            fig, ax = plt.subplots(figsize=(7, 5))
+            x, y = _safe_xy(nd)
+            ax.plot(x, y, label="val_ndcg", color="tab:red")
+            ax.set_xlabel("inner epoch")
+            ax.set_ylabel("ndcg")
+            ax.set_title(f"Outer epoch {i} — val_ndcg")
+            ax.grid(alpha=0.3)
+            ax.legend()
+            fig.tight_layout()
+            p_ndcg = os.path.join(
+                per_epoch_dir, f"{prefix}_epoch{i:02d}_ndcg.png"
+            )
+            fig.savefig(p_ndcg, dpi=150)
+            plt.close(fig)
+            saved[-1] = saved[-1] + (p_ndcg,)
+
+    # сводный график: best val_hr по ВСЕМ outer-эпохам (не только выбранным)
+    if len(hr_all) > 0:
+        fig, ax = plt.subplots(figsize=(7, 5))
+        final_hr = [np.nan if len(h) == 0 else float(np.nanmax(h))
+                    for h in hr_all]
+        x, y = _safe_xy(final_hr)
+        ax.plot(x, y, marker="o", label="best val_hr per outer epoch")
+        # отметим выбранные эпохи
+        sel_x = [i for i in indices if i < len(final_hr)
+                 and np.isfinite(final_hr[i])]
+        sel_y = [final_hr[i] for i in sel_x]
+        if sel_x:
+            ax.scatter(sel_x, sel_y, color="red", zorder=5,
+                       label="sampled epochs")
+        ax.set_xlabel("outer epoch")
+        ax.set_ylabel("val_hr")
+        ax.set_title("Best val_hr across outer epochs (sampled)")
+        ax.grid(alpha=0.3)
+        ax.legend()
+        fig.tight_layout()
+        p_summary = os.path.join(out_dir, f"{prefix}_summary_val_hr.png")
+        fig.savefig(p_summary, dpi=150)
+        plt.close(fig)
+        print(f"[Save] {p_summary}", flush=True)
+
+    return per_epoch_dir
 
 # ──────────────────────────────────────────────────────────────────
 #  CLI
@@ -305,11 +418,13 @@ def main():
 
 if __name__ == "__main__":
     #main()
-    logs_folder = "recsys/GradIsomapSASRec/logs_sasrec_isomap/sasrec_amazon_beauty_17"
+    logs_folder = "recsys/GradIsomapSASRec/logs_sasrec_isomap/sasrec_amazon_beauty_24"
 
     h = _load_json(os.path.join(logs_folder, "history.json"))
     cf = _load_json(os.path.join(logs_folder, "cf_history.json"))
 
     plot_history(h, out_dir=os.path.join(logs_folder, "plots"))
     #plot_cf_history(cf, out_dir=os.path.join(logs_folder, "plots"))
+    plot_cf_history_sampled(cf, out_dir=os.path.join(logs_folder, "plots"),
+                            n_samples=10)
 
