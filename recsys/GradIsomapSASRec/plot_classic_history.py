@@ -394,7 +394,7 @@ if __name__ == "__main__":
     # Если запускаете без аргументов — правьте путь здесь.
     logs_folder = "recsys/GradIsomapSASRec/classic_sasrec"
 
-    path = "history_sasrec_03"
+    path = "history_sasrec_2_exp"
 
     h_path = os.path.join(logs_folder, f"{path}.json")
     #cf_path = os.path.join(logs_folder, "cf_history.json")

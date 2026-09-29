@@ -14,7 +14,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 # Импортируем классический SASRec (без manifold)
-from run_classic_sasrec import SASRec 
+from run_classic_sasrec2 import SASRec 
 from ablation_geometry_vs_optimization_sasrec import build_data_sasrec
 from evaluation_sasrec_manifold import evaluate_topk_sasrec_isomap
 from sasrec_manifold_sampler import SASRecManifoldTestDataset
@@ -133,7 +133,7 @@ def main():
     # Считаем матрицу расстояний между ними
     D = np.linalg.norm(item_emb[:, None, :] - item_emb[None, :, :], axis=-1)
     
-    out_path = os.path.join(HERE, "euclidean_sasrec_baseline_geometry2.npz")
+    out_path = os.path.join(HERE, "euclidean_sasrec_baseline_geometry3.npz")
     np.savez(out_path, D=D)
     print(f"[Save] Euclidean geometry saved to {out_path}")
 

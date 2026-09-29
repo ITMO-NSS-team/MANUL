@@ -24,7 +24,7 @@ sys.path.insert(0, GINCF_DIR)
 sys.path.insert(0, HERE)
 
 from Adam.Isomap import IsomapNN
-from SASRecOnManifold_best import SASRecOnManifold, pad_item_Z
+from SASRecOnManifold_best2 import SASRecOnManifold, pad_item_Z
 from sasrec_manifold_sampler import SASRecManifoldTrainSampler, SASRecManifoldTestDataset
 from evaluation_sasrec_manifold import evaluate_topk_sasrec_isomap
 from prepare_data import (
@@ -90,8 +90,8 @@ def build_data_sasrec(max_users, max_movies, min_seq_len, dataset_dir_name, devi
         "D_input_init": D_input_init, "maxlen": maxlen
     }
 
-def train_and_eval_sasrec_on_fixed_Z(item_Z, data, device, latent_dim, sasrec_config,
-                                     lr=1e-3, epochs=50, patience=5, seed=0, verbose=False):
+def train_and_eval_sasrec_on_fixed_Z_old(item_Z, data, device, latent_dim, sasrec_config,
+                                     lr=1e-3, epochs=50, patience=8, seed=0, verbose=False):
     """Учим SASRec на ЗАМОРОЖЕННОЙ геометрии Z."""
     torch.manual_seed(seed)
     item_Z = item_Z.to(device)
@@ -151,6 +151,87 @@ def train_and_eval_sasrec_on_fixed_Z(item_Z, data, device, latent_dim, sasrec_co
     hr, ndcg = evaluate_topk_sasrec_isomap(sasrec, _IdentityIsomap(item_Z), data["test_loader"], top_k=10, device=device)
     return hr, ndcg
 
+
+def train_and_eval_sasrec_on_fixed_Z(item_Z, data, device, latent_dim, sasrec_config,
+                                     lr=1e-3, epochs=50, patience=8, seed=0, verbose=False):
+    """Учим SASRec на ЗАМОРОЖЕННОЙ геометрии Z."""
+    torch.manual_seed(seed)
+    item_Z = item_Z.to(device)
+    item_Z_padded = pad_item_Z(item_Z)
+
+    sasrec = SASRecOnManifold(
+        config=sasrec_config, item_num=data["num_movies"], latent_dim=latent_dim,
+        freeze_item_projection=True, item_projection_init_data=item_Z
+    ).to(device)
+    
+    optimizer = optim.Adam(sasrec.parameters(), lr=lr, betas=(0.9, 0.98))
+    loss_fn = nn.BCEWithLogitsLoss()
+    pad_token = data["num_movies"]
+
+    best_val_hr = -float("inf")
+    best_state = None
+    no_improve = 0
+
+    for ep in range(epochs):
+        sasrec.train()
+        total_loss, n_batches = 0.0, 0
+        for seq, pos, neg in data["train_loader"]:
+            seq, pos, neg = seq.to(device), pos.to(device), neg.to(device)
+            pos_logits, neg_logits = sasrec(seq, pos, neg, item_Z_padded)
+            indices = torch.where(pos != pad_token)
+            
+            loss = loss_fn(pos_logits[indices], torch.ones_like(pos_logits[indices]))
+            loss += loss_fn(neg_logits[indices], torch.zeros_like(neg_logits[indices]))
+            
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            total_loss += loss.item()
+            n_batches += 1
+            if n_batches >= 100: break  # Ограничим batches для скорости абляции
+
+        avg_train_loss = total_loss / max(1, n_batches)          # <-- добавлено
+
+        # ---- Вычисление валидационного лосса ----                # <-- добавлено
+        sasrec.eval()
+        val_loss_total = 0.0
+        val_batches = 0
+        with torch.no_grad():
+            for v_seq, v_cands, v_labels in data["val_loader"]:
+                v_seq = v_seq.to(device)
+                v_cands = v_cands.to(device)
+                v_labels = v_labels.to(device)
+                v_logits = sasrec.predict_candidates(v_seq, v_cands, item_Z_padded)
+                loss = loss_fn(v_logits, v_labels)
+                val_loss_total += loss.item()
+                val_batches += 1
+        avg_val_loss = val_loss_total / max(1, val_batches)       # <-- добавлено
+        # -----------------------------------------
+
+        hr, ndcg = evaluate_topk_sasrec_isomap(sasrec, _IdentityIsomap(item_Z), data["val_loader"], top_k=10, device=device)
+        
+        if verbose:
+            # Обновлённый принт: train_loss, val_loss, val_hr
+            print(f"  ep {ep+1}/{epochs} train_loss={avg_train_loss:.4f} val_loss={avg_val_loss:.4f} val_hr@10={hr:.4f}", flush=True)
+
+        if hr > best_val_hr:
+            best_val_hr = hr
+            best_state = copy.deepcopy(sasrec.state_dict())
+            no_improve = 0
+        else:
+            no_improve += 1
+            
+        if no_improve >= patience:
+            if verbose: print(f"  early stop at ep {ep+1}", flush=True)
+            break
+
+    if best_state is not None:
+        sasrec.load_state_dict(best_state)
+
+    hr, ndcg = evaluate_topk_sasrec_isomap(sasrec, _IdentityIsomap(item_Z), data["test_loader"], top_k=10, device=device)
+    return hr, ndcg
+
+
 class _IdentityIsomap(nn.Module):
     def __init__(self, Z):
         super().__init__()
@@ -188,12 +269,46 @@ def main():
     Z_epoch0 = torch.tensor(np.load(epoch_files[0])["Z"], dtype=torch.float32)
     Z_epochN = torch.tensor(np.load(epoch_files[-1])["Z"], dtype=torch.float32)
 
+    #results = {}
+    #for name, Z in [("pure_init (Euclidean)", Z_pure_init), ("epoch0 (1 step)", Z_epoch0), ("epochN (converged)", Z_epochN)]:
+    #    print(f"\n--- training SASRec on {name} ---", flush=True)
+    #    hr, ndcg = train_and_eval_sasrec_on_fixed_Z(Z, data, device, args.latent_dim, sasrec_config, verbose=True)
+    #    results[name] = (hr, ndcg)
+    #    print(f"{name}: test HR@10={hr:.4f} NDCG@10={ndcg:.4f}", flush=True)
+
+
+        # --- куда сохраняем результаты абляции ---
+    save_dir = os.path.join(HERE, "ablation", "ablation_exp_1_last")
+    os.makedirs(save_dir, exist_ok=True)
+
+    def _slug(s: str) -> str:
+        # безопасное имя файла
+        return (s.lower()
+                 .replace(" ", "_")
+                 .replace("(", "")
+                 .replace(")", "")
+                 .replace("/", "_"))
+
     results = {}
-    for name, Z in [("pure_init (Euclidean)", Z_pure_init), ("epoch0 (1 step)", Z_epoch0), ("epochN (converged)", Z_epochN)]:
+    for name, Z in [
+        ("pure_init (Euclidean)", Z_pure_init),
+        ("epoch0 (1 step)", Z_epoch0),
+        ("epochN (converged)", Z_epochN),
+    ]:
         print(f"\n--- training SASRec on {name} ---", flush=True)
-        hr, ndcg = train_and_eval_sasrec_on_fixed_Z(Z, data, device, args.latent_dim, sasrec_config, verbose=True)
+        hr, ndcg = train_and_eval_sasrec_on_fixed_Z(
+            Z, data, device, args.latent_dim, sasrec_config, verbose=True
+        )
         results[name] = (hr, ndcg)
         print(f"{name}: test HR@10={hr:.4f} NDCG@10={ndcg:.4f}", flush=True)
+
+        # --- SAVE NPZ: Z + D(Z) + metrics ---
+        Z_np = Z.detach().cpu().numpy().astype(np.float32)
+        D_np = np.linalg.norm(Z_np[:, None, :] - Z_np[None, :, :], axis=-1).astype(np.float64)
+
+        out_path = os.path.join(save_dir, f"{_slug(name)}.npz")
+        np.savez(out_path, Z=Z_np, D=D_np, hr=float(hr), ndcg=float(ndcg))
+        print(f"[Save] {out_path}", flush=True)
 
     print("\n=== ABLATION SUMMARY ===")
     for name, (hr, ndcg) in results.items():

@@ -308,10 +308,10 @@ def main(history_path):
         'num_blocks': 2,
         'num_heads': 1,
         'dropout_rate': 0.2,
-        'learning_rate':1e-2,
-        'batch_size': 2048,
+        'learning_rate':1e-3,
+        'batch_size': 64,
         'epochs': 50,
-        'patience': 5
+        'patience': 8
     }
     
     torch.manual_seed(42)
@@ -436,6 +436,27 @@ def main(history_path):
     with open(history_path, "w", encoding="utf-8") as f:
         json.dump(history, f, ensure_ascii=False, indent=2)
 
+        # --- SAVE NPZ: geometry of learned item embeddings ---
+    save_dir = os.path.join(HERE, "classic_sasrec_geometry", "exp_2")
+    os.makedirs(save_dir, exist_ok=True)
+
+    # item_emb: [num_items+1, hidden_units], последний — padding -> убираем
+    item_emb = model.item_emb.weight[:-1].detach().cpu().numpy().astype(np.float32)
+
+    # евклидова матрица расстояний между айтем-эмбеддингами
+    D = np.linalg.norm(item_emb[:, None, :] - item_emb[None, :, :], axis=-1).astype(np.float64)
+
+    out_path = os.path.join(save_dir, "classic_sasrec_geometry.npz")
+    np.savez(
+        out_path,
+        Z=item_emb,          # сами эмбеддинги айтемов
+        D=D,                 # расстояния между ними
+        best_val_hr=float(best_val_hr),
+        test_hr=float(test_hr),
+        test_ndcg=float(test_ndcg),
+    )
+    print(f"[Save] {out_path}")
+
 
 if __name__ == "__main__":
-    main(history_path="recsys/GradIsomapSASRec/classic_sasrec/history_sasrec_05.json")
+    main(history_path="recsys/GradIsomapSASRec/classic_sasrec/history_sasrec_2_exp.json")
