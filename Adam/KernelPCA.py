@@ -135,6 +135,15 @@ class KernelPCA():
         """Fit's using kernel K"""
         K = self._centerer.fit(K).transform(K)
         self.eigenvalues_, self.eigenvectors_ = torch.linalg.eigh(K)
+        # Full spectrum (sorted by |eigenvalue|, descending), kept around only
+        # for diagnostics: choose_position() below immediately slices
+        # self.eigenvalues_ down to n_components, discarding everything else -
+        # without this, nothing downstream can see the gap between the last
+        # KEPT eigenvalue and the first EXCLUDED one, which is exactly the gap
+        # eigh's backward divides by and a plausible source of instability at
+        # large n_components on a smoothly-decaying spectrum (no clean cliff).
+        sort_order = torch.argsort(torch.abs(self.eigenvalues_), descending=True)
+        self.full_eigenvalues_sorted_ = self.eigenvalues_[sort_order].detach()
         self.eigenpos, c_2l = self.choose_position(mode=self.eigval_choice)
         self.eigenvalues_ = self.eigenvalues_[self.eigenpos] + c_2l / (self.n_components + 1)
         self.eigenvectors_ = self.eigenvectors_[:, self.eigenpos]

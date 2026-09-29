@@ -11,7 +11,8 @@ from utils.utils import split_data
 from data.synthetic_geometries import geometries, noisy_manifold
 
 
-def synthetic_manifold_learning_pipeline(geometry_name, working_folder):
+def synthetic_manifold_learning_pipeline(geometry_name, working_folder, noise_percent=0.01,
+                                         isomap_epochs=5000):
     """
         Process a single geometry through the manifold learning pipeline.
 
@@ -21,13 +22,18 @@ def synthetic_manifold_learning_pipeline(geometry_name, working_folder):
             Name of the geometry ('swiss_roll', 's_curve', 'torus', 'sphere')
         working_folder : str
             Path to outputs directory
+        noise_percent : float
+            Ambient-space noise level as a fraction of the point cloud's max
+            coordinate value (0.01 = 1%), passed through to noisy_manifold.
+        isomap_epochs : int
+            Max epochs for the GradientIsomap outer loop (early stopping via
+            stop_criteria_value applies regardless of this cap).
     """
 
     n_samples = 5000  # Total number of points to generate
     n_base_points = 1000  # Number of base points to select via FPS (typically 20% of n_samples)
-    noise_percent = 0.01  # Noise level as percentage (0.075 = 7.5%)
     latent_dim = 2  # Intrinsic dimension of the manifold (2 for most synthetic geometries)
-    epochs = 5000  # Number of total epochs for GradientIsomap training (early stopping exists)
+    epochs = isomap_epochs  # Number of total epochs for GradientIsomap training (early stopping exists)
     proj_method = 'random_forest'
     device = 'cuda'
 

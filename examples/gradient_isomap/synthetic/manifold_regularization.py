@@ -16,7 +16,8 @@ warnings.filterwarnings('ignore', category=FutureWarning,
 
 
 def manifold_regularization(folder_path, model, num_epochs, batch_size, learning_rate, early_stop_patience,
-                            lambda_method):
+                            lambda_method, adaptive_lambda_recompute=False, normalize_graph_loss=False,
+                            calibrate_rbf_bandwidth=False):
     print(f"\n{'=' * 60}")
     print("STAGE 2: GRAPH REGULARIZATION TRAINING")
     print(f"{'=' * 60}\n")
@@ -68,6 +69,9 @@ def manifold_regularization(folder_path, model, num_epochs, batch_size, learning
         plot_convergence=True,
         adaptive_lambda=lambda_method,
         early_stopping_patience=early_stop_patience,
+        adaptive_lambda_recompute=adaptive_lambda_recompute,
+        normalize_graph_loss=normalize_graph_loss,
+        calibrate_rbf_bandwidth=calibrate_rbf_bandwidth,
     )
 
     # Train set metrics
