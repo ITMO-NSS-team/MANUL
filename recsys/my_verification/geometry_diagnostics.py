@@ -24,6 +24,7 @@ import os
 import re
 import sys
 import time
+import zipfile
 
 import gudhi
 import networkx as nx
@@ -148,6 +149,22 @@ def ollivier_ricci_curvature(knn_adj: np.ndarray, alpha: float = 0.5) -> dict:
         "edges": edges,
     }
 
+
+def _safe_load_npz(path: str):
+    """Загружает .npz, возвращая (data, ok).
+    ok=False если файл отсутствует, пуст, не zip или zip повреждён.
+    Ошибки ввода-вывода (в т.ч. на удалённом диске через VPN) тоже ловим.
+    """
+    try:
+        if not os.path.isfile(path) or os.path.getsize(path) == 0:
+            return None, False
+        with zipfile.ZipFile(path, "r") as zf:
+            if zf.testzip() is not None:
+                return None, False
+        data = np.load(path, allow_pickle=False)
+        return data, True
+    except (zipfile.BadZipFile, OSError, EOFError, ValueError):
+        return None, False
 
 def graph_laplacian_spectral(knn_adj: np.ndarray) -> dict:
     """Algebraic connectivity (lambda_2, the Fiedler value) and spectral gap
@@ -365,7 +382,7 @@ def summarize_epoch(data: dict) -> dict:
     return out
 
 
-def analyze_run(logs_folder: str, max_epochs_to_show: int = None) -> list:
+def analyze_run(logs_folder: str, max_epochs_to_show: int = None, epoch_stride: int = 1) -> list:
     print(f"\n=== Geometry diagnostics for {logs_folder} ===")
     results = []
 
@@ -376,6 +393,11 @@ def analyze_run(logs_folder: str, max_epochs_to_show: int = None) -> list:
         return int(m.group(1)) if m else -1
 
     epoch_files = sorted(epoch_files, key=epoch_num)
+    if epoch_stride and epoch_stride > 1:
+        before = len(epoch_files)
+        epoch_files = epoch_files[::epoch_stride]
+        _progress(f"epoch_stride={epoch_stride}: kept {len(epoch_files)}/{before} epoch files")
+
     if max_epochs_to_show is not None:
         shown = sorted(set(epoch_num(p) for p in epoch_files))
         keep = set(shown[:1] + shown[-max_epochs_to_show:]) if len(shown) > max_epochs_to_show else set(shown)
@@ -384,7 +406,35 @@ def analyze_run(logs_folder: str, max_epochs_to_show: int = None) -> list:
     for file_idx, path in enumerate(epoch_files):
         k = epoch_num(path)
         _progress(f"=== epoch {k} ({file_idx + 1}/{len(epoch_files)} files) ===")
-        data = np.load(path)
+        #data = np.load(path)
+        data, ok = _safe_load_npz(path)
+        if not ok:
+            _progress(f"[warn] epoch {k}: cannot read {path} - writing NaN metrics")
+            row = {
+                "epoch": k,
+                "orc_mean": float("nan"),
+                "orc_median": float("nan"),
+                "orc_f_neg": float("nan"),
+                "orc_n_edges": float("nan"),
+                "spectral_lambda2": float("nan"),
+                "spectral_lambda_max": float("nan"),
+                "spectral_spectral_gap": float("nan"),
+                "spectral_n_components": float("nan"),
+                "kruskal_stress": float("nan"),
+                "spearman_rho": float("nan"),
+                "residual_variance": float("nan"),
+                "geo_h0_max_persistence": float("nan"),
+                "geo_h1_max_persistence": float("nan"),
+                "geo_h1_count": float("nan"),
+                "geo_h0_count": float("nan"),
+                "lat_h0_max_persistence": float("nan"),
+                "lat_h1_max_persistence": float("nan"),
+                "lat_h1_count": float("nan"),
+                "lat_h0_count": float("nan"),
+            }
+            results.append(row)
+            print(f"[epoch {k}] SKIPPED (bad npz: {os.path.basename(path)}) - metrics=NaN")
+            continue
         row = {"epoch": k}
         row.update(summarize_epoch(data))
         results.append(row)
@@ -402,14 +452,19 @@ def analyze_run(logs_folder: str, max_epochs_to_show: int = None) -> list:
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--logs_folder", required=True,
-                         help="e.g. .../logs_movielens_isomap_cf/main01")
+                         help="recsys/GradIsomapSASRec/logs_sasrec_isomap/sasrec_amazon_beauty_28")
     parser.add_argument("--max_epochs_to_show", type=int, default=None)
+    parser.add_argument("--epoch_stride", type=int, default=1,
+                         help="Брать каждую N-ю эпоху для анализа (1 = все, 5 = каждую пятую)")
     parser.add_argument("--out_csv", default=None,
-                         help="if given, write per-epoch results as CSV here")
+                         help="recsys/GradIsomapSASRec/logs_sasrec_isomap/sasrec_amazon_beauty_2/geometry_results.csv")
     args = parser.parse_args()
 
-    results = analyze_run(args.logs_folder, args.max_epochs_to_show)
+    if args.epoch_stride < 1:
+        parser.error("--epoch_stride must be >= 1")
 
+    results = analyze_run(args.logs_folder, args.max_epochs_to_show,
+                          epoch_stride=args.epoch_stride)
     if args.out_csv:
         import pandas as pd
         pd.DataFrame(results).to_csv(args.out_csv, index=False)
@@ -418,3 +473,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+#python recsys/GradIsomapSASRec/analyze_geometry.py --logs_folder "recsys/GradIsomapSASRec/logs_sasrec_isomap/sasrec_amazon_beauty_17" --out_csv "recsys/GradIsomapSASRec/logs_sasrec_isomap/sasrec_amazon_beauty_17/geometry_results.csv"

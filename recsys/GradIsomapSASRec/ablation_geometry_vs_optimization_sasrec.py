@@ -242,18 +242,21 @@ class _IdentityIsomap(nn.Module):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--logs_folder", required=True, help="Папка с логами основного запуска GradientIsomapSASRec")
-    parser.add_argument("--max_users", type=int, default=300)
-    parser.add_argument("--max_movies", type=int, default=800)
+    parser.add_argument("--max_users", type=int, default=3000)
+    parser.add_argument("--max_movies", type=int, default=2500)
     parser.add_argument("--dataset_dir_name", default="amazon_beauty")
     parser.add_argument("--dataset_type", default="amazon", choices=["movielens", "amazon"])
     parser.add_argument("--amazon_category", default="Beauty_and_Personal_Care")
     parser.add_argument("--latent_dim", type=int, default=64)
+    parser.add_argument("--best_epoch", type=int, default=300)
+    parser.add_argument("--save_dir", required=True)
     args = parser.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     sasrec_config = {'hidden_units': 64, 'maxlen': 50, 'num_blocks': 2, 'num_heads': 1, 'dropout_rate': 0.2}
 
     tmp_logs = os.path.join(HERE, "ablation_tmp_logs")
+
     data = build_data_sasrec(args.max_users, args.max_movies, 5, args.dataset_dir_name, device, tmp_logs, args.dataset_type, args.amazon_category)
 
     # 1. Загружаем геометрии из сохраненных файлов основного эксперимента
@@ -267,8 +270,12 @@ def main():
     epoch_files.sort(key=lambda p: int(re.search(r"epoch(\d+)", p).group(1)))
     
     Z_epoch0 = torch.tensor(np.load(epoch_files[0])["Z"], dtype=torch.float32)
-    Z_epochN = torch.tensor(np.load(epoch_files[-1])["Z"], dtype=torch.float32)
+    #Z_epochN = torch.tensor(np.load(epoch_files[args.best_epoch])["Z"], dtype=torch.float32)
 
+    npz_path = os.path.join(args.logs_folder, f"matrices_epoch{args.best_epoch}.npz")
+    Z_epochN = torch.tensor(np.load(npz_path)["Z"], dtype=torch.float32)
+    #Z_epochN = torch.tensor(np.load(f"matrices_epoch{args.best_epoch}.npz")["Z"], dtype=torch.float32)
+    
     #results = {}
     #for name, Z in [("pure_init (Euclidean)", Z_pure_init), ("epoch0 (1 step)", Z_epoch0), ("epochN (converged)", Z_epochN)]:
     #    print(f"\n--- training SASRec on {name} ---", flush=True)
@@ -278,7 +285,10 @@ def main():
 
 
         # --- куда сохраняем результаты абляции ---
-    save_dir = os.path.join(HERE, "ablation", "ablation_exp_1_last")
+    #save_dir = os.path.join(HERE, "ablation", "ablation_exp_2_best")
+    #save_dir = os.path.join("Z:/Borisova/MANUL/recsys/SASRec/", "ablation", "ablation_exp_3000x2500_seed0_best")
+    save_dir = args.save_dir
+
     os.makedirs(save_dir, exist_ok=True)
 
     def _slug(s: str) -> str:

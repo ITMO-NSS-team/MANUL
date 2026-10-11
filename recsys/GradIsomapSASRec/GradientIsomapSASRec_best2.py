@@ -34,7 +34,7 @@ project_root = os.path.dirname(os.path.dirname(current_dir))
 sys.path.append(project_root)
 
 from Adam.Isomap import IsomapNN
-from SASRecOnManifold_best import SASRecOnManifold, pad_item_Z
+from SASRecOnManifold_best2 import SASRecOnManifold, pad_item_Z
 from sasrec_manifold_sampler import SASRecManifoldTrainSampler
 from evaluation_sasrec_manifold import evaluate_topk_sasrec_isomap
 
@@ -758,6 +758,7 @@ class GradientIsomapSASRec:
         # ════════════════════════════════════════════════
         #  Final SASRec retrain on best Z
         # ════════════════════════════════════════════════
+        torch.manual_seed(self.ng_seed)
         final_sasrec = self._make_sasrec(
             item_Z_for_init=item_Z_final_raw if self.freeze_item_projection else None
         )
