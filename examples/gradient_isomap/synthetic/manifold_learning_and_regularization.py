@@ -15,22 +15,14 @@ if __name__ == "__main__":
     print(f"{'=' * 60}\n")
 
     # Here output directory for all runs can be specified
-    outputs_dir = 'outputs_stat_0.01noise_5k_sobol_v3'
-    n_runs = 5
+    outputs_dir = 'outputs_stat_wd0_default'
+    n_runs = 3
 
+    # Reduced to 3 representative geometries to keep runtime reasonable.
     geometries_to_process = [
         'sphere',
         'torus',
         'swiss_roll',
-        'swiss_hole',
-        'pseudosphere',
-        'hyperboloid',
-        'helicoid',
-        'multi_scale_torus',
-        'nonuniform_sphere',
-        'cone_surface',
-        'genus_2_surface',
-        's_curve'
     ]
 
     for geom in geometries_to_process:

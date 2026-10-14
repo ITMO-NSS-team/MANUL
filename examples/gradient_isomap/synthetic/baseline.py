@@ -1,3 +1,4 @@
+import copy
 import os
 import time
 from datetime import datetime
@@ -53,10 +54,15 @@ def baseline_train_test(folder_path, baseline_model, epochs, batch_size, learnin
     test_dataset = TensorDataset(X_test_tensor, y_test_tensor)
 
     # DataLoaders
+    # shuffle=False: matches GraphRegTrainer.train()'s fixed-order batches
+    # (it can't shuffle - it needs batch_indices to stay real dataset indices
+    # to look up which points are manifold landmarks), so the baseline vs
+    # regularized comparison isn't confounded by an unrelated pipeline
+    # difference in how batches are built.
     train_loader = DataLoader(
         train_dataset,
         batch_size=batch_size,
-        shuffle=True,
+        shuffle=False,
         num_workers=0,
         pin_memory=True if device.type == 'cuda' else False
     )
@@ -144,7 +150,10 @@ def baseline_train_test(folder_path, baseline_model, epochs, batch_size, learnin
         if avg_val_loss < best_val_loss:
             best_val_loss = avg_val_loss
             patience_counter = 0
-            best_model_state = baseline_model.state_dict().copy()
+            # .copy() only shallow-copies the dict - the tensors inside still
+            # alias the live model's storage, which optimizer.step() mutates
+            # in place. deepcopy is required for a real, independent snapshot.
+            best_model_state = copy.deepcopy(baseline_model.state_dict())
             best_epoch = epoch + 1
         else:
             patience_counter += 1
