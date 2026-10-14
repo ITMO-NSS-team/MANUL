@@ -14,8 +14,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 from ablation_geometry_vs_optimization_sasrec import build_data_sasrec, train_and_eval_sasrec_on_fixed_Z
+from ablation_hypersasrec import train_and_eval_hypsasrec_on_fixed_Z_nolog
 
-def fit_poincare_embeddings(D_target: torch.Tensor, dim: int, device, epochs=1000, lr=0.01, seed=0):
+def fit_poincare_embeddings(D_target: torch.Tensor, dim: int, device, epochs=500, lr=0.01, seed=0):
     """Гиперболический MDS: вписываем товары в шар Пуанкаре."""
     torch.manual_seed(seed)
     n = D_target.shape[0]
@@ -71,18 +72,33 @@ def main():
     D_dense = np.zeros((n, n), dtype=np.float64)
     D_dense[iu, ju] = d_final_flat
     D_dense[ju, iu] = d_final_flat
+
+    save_dir = os.path.join(HERE, "poincare")
+    os.makedirs(save_dir, exist_ok=True)
     
-    out_path = os.path.join(HERE, "poincare_sasrec_baseline_geometry.npz")
+    out_path = os.path.join(save_dir, "poincare_sasrec_baseline_geometry_6000x3000_base_c1.npz")
     np.savez(out_path, D=D_dense)
     print(f"[Save] Poincare geometry saved to {out_path}")
 
     # 3. Учим SASRec на ней (используем z_tangent)
     z_tangent_torch = torch.tensor(z_tangent_np, device=device)
     print("\n--- training SASRec on Poincare embeddings ---")
-    hr, ndcg = train_and_eval_sasrec_on_fixed_Z(z_tangent_torch, data, device, args.latent_dim, sasrec_config, verbose=True)
+    hr_sasrec, ndcg_sasrec = train_and_eval_sasrec_on_fixed_Z(z_tangent_torch, data, device, args.latent_dim, sasrec_config, verbose=True)
+
+    #print(f"\n--- [Hyper] training HypSASRec on Poincare embeddings ---",
+    #          flush=True)
+    #hr_h, ndcg_h = train_and_eval_hypsasrec_on_fixed_Z_nolog(
+    #        z_tangent_torch, data, device, 64, sasrec_config,
+    #        lr=1e-3, epochs=50, patience=8,
+    #        verbose=True,
+    #        c=50.0,
+    #        freeze_items=True,
+    #        freeze_scaler=True,
+    #)
     
     print(f"\n=== POINCARE BASELINE SUMMARY ===")
-    print(f"Downstream SASRec: HR@10={hr:.4f}  NDCG@10={ndcg:.4f}")
+    print(f"Downstream SASRec: HR@10={hr_sasrec:.4f}  NDCG@10={ndcg_sasrec:.4f}")
+    #print(f"[Hyper] HR@10={hr_h:.4f}  NDCG@10={ndcg_h:.4f}", flush=True)
 
 if __name__ == "__main__":
     main()

@@ -4,6 +4,7 @@ import glob
 import os
 import re
 import sys
+import json
 
 import numpy as np
 import torch
@@ -164,6 +165,37 @@ def eval_hypsasrec_topk(model, loader, device, k=10):
 
     return float(np.mean(HR)) if HR else 0.0, float(np.mean(NDCG)) if NDCG else 0.0
 
+def eval_hypsasrec_val_loss(model, loader, device, loss_fn):
+    """
+    Validation loss on sampled candidates (same contract as your val_loader):
+      batch: (seq, cands, labels)
+    labels: [B, C] float (1 for pos at index 0, 0 for negatives)
+    """
+    model.eval()
+    total = 0.0
+    n_batches = 0
+    with torch.no_grad():
+        for seq, cands, labels in loader:
+            seq = seq.to(device)            # [B, L]
+            cands = cands.to(device)        # [B, C]
+            labels = labels.to(device)      # [B, C] float32
+
+            log_feats = model.log2feats(seq)                         # [B, L, H]
+            hyp_last = model.manifold.expmap0(log_feats[:, -1, :])   # [B, H]
+
+            w = model.item_emb.weight[cands]                         # [B, C, H]
+            if hasattr(model, "scaler"):
+                r = model.scaler[cands].to(torch.float32)            # [B, C]
+            else:
+                r = torch.zeros_like(cands, dtype=torch.float32, device=device)
+
+            logits = poincare_mlr_candidates(hyp_last, w, r, model.c)  # [B, C]
+            loss = loss_fn(logits, labels)
+
+            total += float(loss.item())
+            n_batches += 1
+
+    return total / max(1, n_batches)
 
 def train_and_eval_sasrec_on_fixed_Z_old(item_Z, data, device, latent_dim, sasrec_config,
                                      lr=1e-3, epochs=50, patience=8, seed=0, verbose=False):
@@ -268,6 +300,160 @@ def train_and_eval_hypsasrec_on_fixed_Z(
     params = [p for p in model.parameters() if p.requires_grad]
     optimizer = optim.Adam(params, lr=lr, betas=(0.9, 0.98))
     loss_fn = nn.BCEWithLogitsLoss()
+    val_loss_fn = nn.BCEWithLogitsLoss()
+
+    best_val_hr = -1e9
+    best_state = None
+    no_improve = 0
+
+    history = {
+        "epoch": [],
+        "train_loss": [],
+        "val_loss": [],
+        "val_hr": [],
+        "val_ndcg": [],
+        "best_val_hr": -1e9,     # заполним в конце
+        "best_epoch": -1,
+        "c": float(c),
+        "freeze_items": bool(freeze_items),
+        "freeze_scaler": bool(freeze_scaler),
+        "lr": float(lr),
+        "epochs": int(epochs),
+        "patience": int(patience),
+        "seed": int(seed),
+        "latent_dim": int(latent_dim),
+    }
+
+    for ep in range(epochs):
+        model.train()
+        total_loss, n_batches = 0.0, 0
+
+        for seq, pos, neg in data["train_loader"]:
+            seq = seq.to(device)
+            pos = pos.to(device)
+            neg = neg.to(device)
+
+            log_feats = model.log2feats(seq)              # [B, L, H] euclid
+            hyp_feats = model.manifold.expmap0(log_feats) # [B, L, H] ball
+
+            # pos logits
+            w_pos = model.item_emb.weight[pos]            # [B, L, H]
+            z_norm = torch.clamp_min(w_pos.norm(dim=-1), 1e-12)
+            z_unit = w_pos / z_norm.unsqueeze(-1)
+            r_pos = model.scaler[pos].to(torch.float32) if hasattr(model, "scaler") else torch.zeros_like(z_norm)
+            pos_logits = poincare_mlr_pairwise(hyp_feats, z_norm, z_unit, r_pos, model.c)
+
+            # neg logits
+            w_neg = model.item_emb.weight[neg]
+            z_norm_n = torch.clamp_min(w_neg.norm(dim=-1), 1e-12)
+            z_unit_n = w_neg / z_norm_n.unsqueeze(-1)
+            r_neg = model.scaler[neg].to(torch.float32) if hasattr(model, "scaler") else torch.zeros_like(z_norm_n)
+            neg_logits = poincare_mlr_pairwise(hyp_feats, z_norm_n, z_unit_n, r_neg, model.c)
+
+            idx = torch.where(pos != pad_token)
+            loss = loss_fn(pos_logits[idx], torch.ones_like(pos_logits[idx]))
+            loss = loss + loss_fn(neg_logits[idx], torch.zeros_like(neg_logits[idx]))
+
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+            total_loss += float(loss.item())
+            n_batches += 1
+            if n_batches >= 100:
+                break
+
+        #train_loss = total_loss / max(1, n_batches)
+#
+        ## val
+        #val_hr, val_ndcg = eval_hypsasrec_topk(model, data["val_loader"], device, k=10)
+#
+        #if verbose:
+        #    print(f"  ep {ep+1}/{epochs} train_loss={train_loss:.4f} val_hr@10={val_hr:.4f} val_ndcg@10={val_ndcg:.4f}", flush=True)
+#
+        train_loss = total_loss / max(1, n_batches)
+
+        # --- Validation: loss + HR/NDCG ---
+        avg_val_loss = eval_hypsasrec_val_loss(model, data["val_loader"], device, val_loss_fn)
+        val_hr, val_ndcg = eval_hypsasrec_topk(model, data["val_loader"], device, k=10)
+
+        history["epoch"].append(int(ep))
+        history["train_loss"].append(float(train_loss))
+        history["val_loss"].append(float(avg_val_loss))
+        history["val_hr"].append(float(val_hr))
+        history["val_ndcg"].append(float(val_ndcg))
+        # -------------------
+
+        if verbose:
+            print(
+                f"  ep {ep+1}/{epochs} "
+                f"train_loss={train_loss:.4f} val_loss={avg_val_loss:.4f} "
+                f"val_hr@10={val_hr:.4f} val_ndcg@10={val_ndcg:.4f}",
+                flush=True
+            )
+
+        if val_hr > best_val_hr:
+            best_val_hr = val_hr
+            history["best_val_hr"] = float(val_hr)
+            history["best_epoch"] = int(ep)
+            best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
+            no_improve = 0
+        else:
+            no_improve += 1
+            if no_improve >= patience:
+                if verbose:
+                    print(f"  early stop at ep {ep+1}", flush=True)
+                break
+
+    if best_state is not None:
+        model.load_state_dict(best_state)
+
+    test_hr, test_ndcg = eval_hypsasrec_topk(model, data["test_loader"], device, k=10)
+    return test_hr, test_ndcg, history
+
+
+def train_and_eval_hypsasrec_on_fixed_Z_nolog(
+    item_Z, data, device, latent_dim, sasrec_config,
+    lr=1e-3, epochs=50, patience=8, seed=0,
+    c=1.0, freeze_items=True, freeze_scaler=True,
+    verbose=False
+):
+    """
+    item_Z: [n_items, latent_dim] float tensor
+    """
+    torch.manual_seed(seed)
+    n_items = data["num_movies"]
+    pad_token = n_items
+
+    # --- Build HypSASRec ---
+    # Важно: hidden_units должно совпадать с dim Z (или надо добавлять проекцию)
+    config = dict(sasrec_config)
+    config["hidden_units"] = latent_dim
+    config["geom"] = "ball"
+    config["c"] = float(c)
+    config["bias"] = True  # scaler exists; можно True, но мы его заморозим при желании
+
+    model = HypSASRec(config, item_num=n_items).to(device)
+
+    # ВАЖНО: перенести c на device (у тебя в классе это не buffer)
+    model.c = torch.tensor(float(c), device=device)
+
+    # --- Init item_emb from Z (+ pad row) ---
+    item_Z = item_Z.to(device).to(torch.float32)
+    with torch.no_grad():
+        model.item_emb.weight[:n_items].copy_(item_Z)
+        model.item_emb.weight[pad_token].zero_()
+
+    if freeze_items:
+        model.item_emb.weight.requires_grad_(False)
+    if freeze_scaler and hasattr(model, "scaler"):
+        model.scaler.requires_grad_(False)
+
+    # optimizer only for trainable params
+    params = [p for p in model.parameters() if p.requires_grad]
+    optimizer = optim.Adam(params, lr=lr, betas=(0.9, 0.98))
+    loss_fn = nn.BCEWithLogitsLoss()
+    val_loss_fn = nn.BCEWithLogitsLoss()
 
     best_val_hr = -1e9
     best_state = None
@@ -312,13 +498,27 @@ def train_and_eval_hypsasrec_on_fixed_Z(
             if n_batches >= 100:
                 break
 
+        #train_loss = total_loss / max(1, n_batches)
+#
+        ## val
+        #val_hr, val_ndcg = eval_hypsasrec_topk(model, data["val_loader"], device, k=10)
+#
+        #if verbose:
+        #    print(f"  ep {ep+1}/{epochs} train_loss={train_loss:.4f} val_hr@10={val_hr:.4f} val_ndcg@10={val_ndcg:.4f}", flush=True)
+#
         train_loss = total_loss / max(1, n_batches)
 
-        # val
+        # --- Validation: loss + HR/NDCG ---
+        avg_val_loss = eval_hypsasrec_val_loss(model, data["val_loader"], device, val_loss_fn)
         val_hr, val_ndcg = eval_hypsasrec_topk(model, data["val_loader"], device, k=10)
 
         if verbose:
-            print(f"  ep {ep+1}/{epochs} train_loss={train_loss:.4f} val_hr@10={val_hr:.4f} val_ndcg@10={val_ndcg:.4f}", flush=True)
+            print(
+                f"  ep {ep+1}/{epochs} "
+                f"train_loss={train_loss:.4f} val_loss={avg_val_loss:.4f} "
+                f"val_hr@10={val_hr:.4f} val_ndcg@10={val_ndcg:.4f}",
+                flush=True
+            )
 
         if val_hr > best_val_hr:
             best_val_hr = val_hr
@@ -356,6 +556,7 @@ def main():
     parser.add_argument("--latent_dim", type=int, default=64)
     parser.add_argument("--best_epoch", type=int, default=300)
     parser.add_argument("--save_dir", required=True)
+    parser.add_argument("--geom_c", default=1.0)
     args = parser.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -412,13 +613,13 @@ def main():
         ("epochN (converged)", Z_epochN),
     ]:
         print(f"\n--- training HypSASRec on {name} ---", flush=True)
-        hr, ndcg = train_and_eval_hypsasrec_on_fixed_Z(
+        hr, ndcg, hist = train_and_eval_hypsasrec_on_fixed_Z(
             Z, data, device, args.latent_dim, sasrec_config,
             lr=args.lr if hasattr(args, "lr") else 1e-3,
             epochs=args.epochs if hasattr(args, "epochs") else 50,
             patience=args.patience if hasattr(args, "patience") else 8,
             verbose=True,
-            c=50.0,
+            c=args.geom_c,
             freeze_items=True,
             freeze_scaler=True,
         )
@@ -432,6 +633,14 @@ def main():
         out_path = os.path.join(save_dir, f"{_slug(name)}.npz")
         np.savez(out_path, Z=Z_np, D=D_np, hr=float(hr), ndcg=float(ndcg))
         print(f"[Save] {out_path}", flush=True)
+
+        hist["name"] = name
+        hist["c"] = 5.0
+        hist["save_npz"] = os.path.basename(out_path)
+        hist_path = os.path.join(save_dir, f"{_slug(name)}_history.json")
+        with open(hist_path, "w", encoding="utf-8") as f:
+            json.dump(hist, f, indent=2, ensure_ascii=False)
+        print(f"[Save] {hist_path}", flush=True)
 
     print("\n=== ABLATION SUMMARY ===")
     for name, (hr, ndcg) in results.items():

@@ -31,21 +31,23 @@ def calc_delta_rel(D):
 def main():
     # --- ПУТИ К ФАЙЛАМ ---
     # 1. Euclidean
-    euclidean_path = "C:/NSS_lab_recsys/2_sem/nss_manul_mnist_reg_example/MANUL/recsys/GradIsomapSASRec/euclidean_sasrec_geometry.npz"
+    euclidean_path = ""#"C:/NSS_lab_recsys/2_sem/nss_manul_mnist_reg_example/MANUL/recsys/GradIsomapSASRec/euclidean_sasrec_geometry.npz"
     
     # 2. Poincare
-    poincare_path = "C:/NSS_lab_recsys/2_sem/nss_manul_mnist_reg_example/MANUL/recsys/GradIsomapSASRec/poincare_sasrec_baseline_geometry.npz"
+    poincare_path = ""#"C:/NSS_lab_recsys/2_sem/nss_manul_mnist_reg_example/MANUL/recsys/GradIsomapSASRec/poincare_sasrec_baseline_geometry.npz"
     
     # 3. GINCF (SASRecIsomap) - берем последнюю эпоху из основной папки обучения
     # Замени 'sasrec_amazon_beauty_24' на твою папку и номер эпохи
-    gincf_folder = "C:/NSS_lab_recsys/2_sem/nss_manul_mnist_reg_example/MANUL/recsys/GradIsomapSASRec/logs_sasrec_isomap/sasrec_amazon_beauty_24" 
+    gincf_folder = "Z:/Borisova/MANUL/recsys/SASRec/logs_sasrec_isomap/sasrec_amazon_beauty_32" 
     # Найдем последний файл матриц
     import glob
     epoch_files = glob.glob(os.path.join(gincf_folder, "matrices_epoch*.npz"))
     # Сортируем по номеру эпохи
     epoch_files.sort(key=lambda x: int(x.split("epoch")[-1].split(".")[0]))
     #gincf_path = epoch_files[-1] if epoch_files else None
-    gincf_path = epoch_files[81] if epoch_files else None
+    #gincf_path = epoch_files[238] if epoch_files else None
+    gincf_path = os.path.join(gincf_folder, "matrices_epoch296.npz")
+    poincare_path = "c:/NSS_lab_recsys/2_sem/nss_manul_mnist_reg_example/MANUL/recsys/GradIsomapSASRec/poincare/poincare_sasrec_baseline_geometry_3000x2500_base_c1.npz"
     
     print("="*60)
     print("Анализ гиперболичности геометрий (delta_rel)")
