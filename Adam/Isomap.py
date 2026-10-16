@@ -1,6 +1,6 @@
 import torch
 from torch import nn
-from Adam.KernelPCA import KernelPCA
+from MANUL.Adam.KernelPCA import KernelPCA
 
 
 device = 'cuda'
@@ -320,7 +320,15 @@ class IsomapNN(nn.Module):
         graph = self._construct_graph(distance_matrix)
         geodesic_distances = self._compute_shortest_paths(graph)
 
-        geodesic_distances = torch.nan_to_num(geodesic_distances, nan=0.0, posinf=0.0, neginf=0.0)
+        finite_mask = torch.isfinite(geodesic_distances)
+        with torch.no_grad():
+            D_max_finite = geodesic_distances[finite_mask].max() if finite_mask.any() else geodesic_distances.max()
+        geodesic_distances = torch.nan_to_num(
+            geodesic_distances,
+            nan=0.0,
+            posinf=float(2.0 * D_max_finite),
+            neginf=0.0,
+        )
 
         # Add small epsilon to avoid completely zero distances
         geodesic_distances = geodesic_distances + 1e-8

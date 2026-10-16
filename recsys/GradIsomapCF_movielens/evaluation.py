@@ -2,6 +2,8 @@ import torch
 
 import numpy as np
 
+from fast_common import as_eval_tensors, evaluate_topk_vec
+
 
 def hit_metric(gt_item, pred_items):
     return 1 if gt_item in pred_items else 0
@@ -36,6 +38,13 @@ def mrr_metric(gt_item, pred_items):
 
 
 def evaluate_topk_pure(model, test_loader, top_k, device, return_mrr=False):
+    tensors = as_eval_tensors(test_loader, device)
+    if tensors is not None:
+        model.eval()
+        hr, ndcg, mrr = evaluate_topk_vec(
+            lambda u, i: model(u, i), *tensors, top_k, device, return_mrr=True)
+        return (hr, ndcg, mrr) if return_mrr else (hr, ndcg)
+
     HR, NDCG, MRR = [], [], []
     model.eval()
     with torch.no_grad():
@@ -64,6 +73,14 @@ def evaluate_topk_isomap(ncf_model, isomap_model, test_loader, top_k, device, re
 
     ncf_model.eval()
     isomap_model.eval()
+
+    tensors = as_eval_tensors(test_loader, device)
+    if tensors is not None:
+        with torch.no_grad():
+            item_Z = isomap_model().to(torch.float32)
+        hr, ndcg, mrr = evaluate_topk_vec(
+            lambda u, i: ncf_model(u, i, item_Z), *tensors, top_k, device, return_mrr=True)
+        return (hr, ndcg, mrr) if return_mrr else (hr, ndcg)
 
     HR, NDCG, MRR = [], [], []
 
