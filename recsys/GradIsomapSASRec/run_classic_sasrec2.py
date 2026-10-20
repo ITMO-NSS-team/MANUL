@@ -13,6 +13,7 @@ from collections import defaultdict
 # 0. ПУТИ И ИМПОРТЫ (Используем функции подготовки данных руководителя)
 # ==========================================================
 HERE = os.path.dirname(os.path.abspath(__file__))
+#HERE = "Z:/Borisova/MANUL/recsys/SASRec"
 # Путь к папке GradIsomapCF_movielens (рядом с GradIsomapSASRec)
 GINCF_DIR = os.path.join(os.path.dirname(HERE), "GradIsomapCF_movielens")
 sys.path.insert(0, GINCF_DIR)
@@ -309,9 +310,9 @@ def main(history_path):
         'num_heads': 1,
         'dropout_rate': 0.2,
         'learning_rate':1e-3,
-        'batch_size': 64,
+        'batch_size': 128,
         'epochs': 50,
-        'patience': 8
+        'patience': 5
     }
     
     torch.manual_seed(42)
@@ -319,7 +320,7 @@ def main(history_path):
 
     # --- ДАННЫЕ ---
     train_seqs, val_targets, test_targets, num_users, num_items, user_pos_set = load_amazon_data(
-        max_users=300, max_movies=800, min_seq_len=5
+        max_users=6000, max_movies=3000, min_seq_len=5
     )
     
     train_dataset = TrainDataset(train_seqs, num_items, CONFIG['maxlen'])
@@ -437,7 +438,9 @@ def main(history_path):
         json.dump(history, f, ensure_ascii=False, indent=2)
 
         # --- SAVE NPZ: geometry of learned item embeddings ---
-    save_dir = os.path.join(HERE, "classic_sasrec_geometry", "exp_2")
+    #save_dir = os.path.join("Z:/Borisova/MANUL/recsys/SASRec", "classic_sasrec_geometry", "exp_4")
+    save_dir = os.path.join("C:/NSS_lab_recsys/2_sem/nss_manul_mnist_reg_example/MANUL/recsys/GradIsomapSASRec/classic_sasrec/6000x3000/", "exp_1")
+        
     os.makedirs(save_dir, exist_ok=True)
 
     # item_emb: [num_items+1, hidden_units], последний — padding -> убираем
@@ -459,4 +462,6 @@ def main(history_path):
 
 
 if __name__ == "__main__":
-    main(history_path="recsys/GradIsomapSASRec/classic_sasrec/history_sasrec_2_exp.json")
+    #main(history_path="Z:/Borisova/MANUL/recsys/SASRec/classic_sasrec/history_sasrec_4_exp.json")
+    main(history_path="C:/NSS_lab_recsys/2_sem/nss_manul_mnist_reg_example/MANUL/recsys/GradIsomapSASRec/classic_sasrec/6000x3000/history_sasrec_6000x3000.json")
+    

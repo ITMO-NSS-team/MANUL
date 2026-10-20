@@ -7,11 +7,14 @@ import os
 # 1. НАСТРОЙКИ
 # ==========================================
 GEOMETRY_FOLDER = "C:/NSS_lab_recsys/2_sem/nss_manul_mnist_reg_example/MANUL/recsys/GradIsomapSASRec/logs_sasrec_isomap/"  # <-- Ваш путь к папке с CSV
+GEOMETRY_FOLDER = "C:/NSS_lab_recsys/2_sem/nss_manul_mnist_reg_example/MANUL/recsys/GradIsomapSASRec/logs_gincf_movielens/"
 SIZES = ["300x800", "1000x1200", "3000x2500", "6000x3000"]
+SIZES = ["300x800", "1000x1200", "3000x2500"]
 SEEDS = [0, 1, 2]
 
 # 5 равномерных этапов по 300 эпохам
 TARGET_EPOCHS = [0, 60, 120, 180, 240, 290] 
+TARGET_EPOCHS = [0, 2, 4, 8, 10] 
 
 # Список мер, для которых нужно построить графики
 METRICS_LIST = [
@@ -81,7 +84,8 @@ for metric in METRICS_LIST:
         
         # Вычисляем позицию столбца внутри группы
         # Центрируем группу: сдвигаем влево на половину общей ширины группы
-        offset = (n_bars / 2 - i - 0.5) * bar_width
+        #offset = (n_bars / 2 - i - 0.5) * bar_width
+        offset = (i - n_bars / 2 + 0.5) * bar_width
         positions = x + offset
         
         ax.bar(positions, means, bar_width, 
@@ -112,6 +116,7 @@ for metric in METRICS_LIST:
     
     # Сохранение
     out_name = f"C:/NSS_lab_recsys/2_sem/nss_manul_mnist_reg_example/MANUL/recsys/GradIsomapSASRec/plots/grouped_sasrec_amazon/bar_chart_{metric}.png"
+    out_name = f"C:/NSS_lab_recsys/2_sem/nss_manul_mnist_reg_example/MANUL/recsys/GradIsomapSASRec/logs_gincf_movielens/plots/grouped_dynamic/bar_chart_{metric}.png"
     plt.tight_layout()
     plt.savefig(out_name, dpi=300, bbox_inches='tight')
     #plt.savefig(out_name.replace('.png', '.pdf'), bbox_inches='tight') # Для статьи

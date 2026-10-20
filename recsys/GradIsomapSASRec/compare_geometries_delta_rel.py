@@ -46,8 +46,9 @@ def main():
     epoch_files.sort(key=lambda x: int(x.split("epoch")[-1].split(".")[0]))
     #gincf_path = epoch_files[-1] if epoch_files else None
     #gincf_path = epoch_files[238] if epoch_files else None
-    gincf_path = os.path.join(gincf_folder, "matrices_epoch296.npz")
-    poincare_path = "c:/NSS_lab_recsys/2_sem/nss_manul_mnist_reg_example/MANUL/recsys/GradIsomapSASRec/poincare/poincare_sasrec_baseline_geometry_3000x2500_base_c1.npz"
+    gincf_path = ""#os.path.join(gincf_folder, "matrices_epoch296.npz")
+    #poincare_path = "c:/NSS_lab_recsys/2_sem/nss_manul_mnist_reg_example/MANUL/recsys/GradIsomapSASRec/poincare/poincare_sasrec_baseline_geometry_3000x2500_base_c1.npz"
+    euclidean_path = "Z:/Borisova/MANUL/recsys/SASRec/hyp_sasrec/c01_hyp_sasrec_geometry_3000x2500_seed0.npz"
     
     print("="*60)
     print("Анализ гиперболичности геометрий (delta_rel)")

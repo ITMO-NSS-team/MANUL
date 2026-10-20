@@ -5,7 +5,9 @@ import seaborn as sns
 from matplotlib.lines import Line2D
 
 # Загрузка данных
-df = pd.read_csv('C:/NSS_lab_recsys/2_sem/nss_manul_mnist_reg_example/MANUL/recsys/GradIsomapSASRec/full_hyperbolicity_table.csv')
+#df = pd.read_csv('C:/NSS_lab_recsys/2_sem/nss_manul_mnist_reg_example/MANUL/recsys/GradIsomapSASRec/full_hyperbolicity_table.csv')
+#df = pd.read_csv('C:/NSS_lab_recsys/2_sem/nss_manul_mnist_reg_example/MANUL/recsys/GradIsomapSASRec/full_hyperbolicity_table_ncf_ml1m.csv')
+df = pd.read_csv('C:/NSS_lab_recsys/2_sem/nss_manul_mnist_reg_example/MANUL/recsys/GradIsomapSASRec/full_hyperbolicity_table_hypsasrec_amazon.csv')
 
 # --- Диагностика ---
 print("geometry values:", df['geometry'].unique())
@@ -22,7 +24,8 @@ df_agg = df_agg.rename(columns={
 
 # --- Порядок и палитры ---
 sizes_order = ['300x800', '1000x1200', '3000x2500', '6000x3000']
-geometries  = ['GISASRec', 'Poincare', 'Euclidean']   # ← подставьте реальные имена из CSV
+geometries  = ['GISASRec', 'HypSASRec', 'Poincare', 'Euclidean']   
+#geometries  = ['GINCF', 'Poincare', 'Euclidean']
 
 size_colors = {
     '300x800':   '#4daf4a',
@@ -32,6 +35,8 @@ size_colors = {
 }
 geometry_markers = {
     'GISASRec':  'o',
+    'HypSASRec':  'D',
+    #'GINCF':  'o',
     'Poincare':  '^',
     'Euclidean': 's',
 }
@@ -202,7 +207,7 @@ fig.suptitle('Amazon Beauty: GISASRec vs Poincare vs Euclidean baseline, across 
              fontsize=13, fontweight='bold', y=1.02)
 
 plt.tight_layout()
-plt.savefig('C:/NSS_lab_recsys/2_sem/nss_manul_mnist_reg_example/MANUL/recsys/GradIsomapSASRec/hyperbolicity_vs_quality_4sizes_v3.png', dpi=300, bbox_inches='tight')
+plt.savefig('C:/NSS_lab_recsys/2_sem/nss_manul_mnist_reg_example/MANUL/recsys/GradIsomapSASRec/hyperbolicity_vs_quality_hypsasrec_amazon.png', dpi=300, bbox_inches='tight')
 #plt.savefig('hyperbolicity_vs_quality_4sizes.pdf', bbox_inches='tight')
 plt.show()
 

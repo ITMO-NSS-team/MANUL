@@ -16,11 +16,14 @@ sys.path.insert(0, HERE)
 from ablation_geometry_vs_optimization_sasrec import build_data_sasrec, train_and_eval_sasrec_on_fixed_Z
 from ablation_hypersasrec import train_and_eval_hypsasrec_on_fixed_Z_nolog
 
-def fit_poincare_embeddings(D_target: torch.Tensor, dim: int, device, epochs=500, lr=0.01, seed=0):
+def fit_poincare_embeddings(D_target: torch.Tensor, dim: int, device, epochs=1000, lr=0.01, seed=0):
     """Гиперболический MDS: вписываем товары в шар Пуанкаре."""
     torch.manual_seed(seed)
     n = D_target.shape[0]
-    manifold = geoopt.PoincareBall(c=1.0)
+
+    c = 0.1
+
+    manifold = geoopt.PoincareBall(c)
 
     init = torch.randn(n, dim, device=device) * 1e-3
     z = geoopt.ManifoldParameter(init, manifold=manifold)
@@ -28,7 +31,8 @@ def fit_poincare_embeddings(D_target: torch.Tensor, dim: int, device, epochs=500
 
     iu, ju = torch.triu_indices(n, n, offset=1)
     target = D_target[iu, ju].to(device)
-    target = target / target.max() * 3.0
+    #target = target / target.max() * 3.0
+    target = target / target.max() * (3.0 / (c ** 0.5))
 
     print(f"Fitting Poincare MDS: {n} points, dim={dim}...")
     for ep in range(epochs):
@@ -76,7 +80,7 @@ def main():
     save_dir = os.path.join(HERE, "poincare")
     os.makedirs(save_dir, exist_ok=True)
     
-    out_path = os.path.join(save_dir, "poincare_sasrec_baseline_geometry_6000x3000_base_c1.npz")
+    out_path = os.path.join(save_dir, "poincare_sasrec_baseline_geometry_300x800_exp_c01.npz")
     np.savez(out_path, D=D_dense)
     print(f"[Save] Poincare geometry saved to {out_path}")
 
